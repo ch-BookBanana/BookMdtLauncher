@@ -1,0 +1,10 @@
+[2026-06-07 23:03:04,679] [Main/INFO]: 
+------------Book MDT Launcher------------
+-time: 2026-06-07 23:03:04.679
+-version: 26-T0605
+-BuildVersion: 10000.0
+-----------------------------------------
+[2026-06-07 23:03:04,680] [Main/WARNING]: settings file not found, using default settings
+[2026-06-07 23:03:04,681] [Main/INFO]: using system display language:zh-CN
+[2026-06-07 23:03:04,683] [Main/INFO]: 语言文件加载成功,当前为"中文(大陆)"
+[2026-06-07 23:03:04,687] [Main/INFO]: 设置已保存

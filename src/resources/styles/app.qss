@@ -1,0 +1,71 @@
+/* -------亮色模式------- */
+
+QWidget {
+    background-color: rgb(245, 245, 245);
+}
+QWidget[wid="line"] {
+    background-color: rgb(189, 189, 189)
+}
+QLabel {
+    background: transparent;
+    border: none;
+}
+QLabel[wid="title"] {
+    background: transparent;
+    border: none;
+    color: rgb(59, 59, 59);
+}
+QLabel[wid="lbtn"] {
+    background-color: transparent;
+    border: none;
+    color: rgb(59, 59, 59);
+}
+QPushButton[wid="lbtn"] {
+    background-color: transparent;
+    border: none;
+}
+QPushButton[wid="lbtn"]:hover {
+    background-color: rgba(124, 124, 124, 0.5);
+    border: none;
+}
+QPushButton[wid="lbtn"]:checked {
+    background-color: rgba(124, 124, 124, 0.2);
+    border: none;
+}
+
+
+
+/* -------暗色模式------- */
+
+QWidget[theme="dark"] {
+    background-color: rgb(43, 43, 43);
+}
+QWidget[theme="dark"][wid="line"] {
+    background-color: rgb(134, 134, 134)
+}
+QLabel[theme="dark"] {
+    background: transparent;
+    border: none;
+}
+QLabel[wid="title"][theme="dark"] {
+    background: transparent;
+    border: none;
+    color: rgb(175, 175, 175);
+}
+QLabel[wid="lbtn"][theme="dark"] {
+    background-color: transparent;
+    border: none;
+    color: rgb(175, 175, 175);
+}
+QPushButton[wid="lbtn"][theme="dark"] {
+    background-color: transparent;
+    border: none;
+}
+QPushButton[wid="lbtn"][theme="dark"]:hover {
+    background-color: rgba(124, 124, 124, 0.5);
+    border: none;
+}
+QPushButton[wid="lbtn"][theme="dark"]:checked {
+    background-color: rgba(124, 124, 124, 0.2);
+    border: none;
+}
