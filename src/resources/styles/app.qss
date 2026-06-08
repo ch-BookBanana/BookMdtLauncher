@@ -32,7 +32,18 @@ QPushButton[wid="lbtn"]:checked {
     background-color: rgba(124, 124, 124, 0.2);
     border: none;
 }
-
+QPushButton[wid="tbtn"] {
+    background-color: transparent;
+    border: none;
+}
+QPushButton[wid="tbtn"]:hover {
+    background-color: rgba(124, 124, 124, 0.5);
+    border: none;
+}
+QPushButton[wid="tbtn"]:checked {
+    background-color: rgba(124, 124, 124, 0.2);
+    border: none;
+}
 
 
 /* -------暗色模式------- */
@@ -66,6 +77,18 @@ QPushButton[wid="lbtn"][theme="dark"]:hover {
     border: none;
 }
 QPushButton[wid="lbtn"][theme="dark"]:checked {
+    background-color: rgba(124, 124, 124, 0.2);
+    border: none;
+}
+QPushButton[wid="tbtn"][theme="dark"] {
+    background-color: transparent;
+    border: none;
+}
+QPushButton[wid="tbtn"][theme="dark"]:hover {
+    background-color: rgba(124, 124, 124, 0.5);
+    border: none;
+}
+QPushButton[wid="tbtn"][theme="dark"]:checked {
     background-color: rgba(124, 124, 124, 0.2);
     border: none;
 }

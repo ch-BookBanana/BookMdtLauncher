@@ -15,8 +15,7 @@
 
     "log.warning.trayIconPath": "托盘图标路径不存在: $1",
 
-    "log.error.savesettings": "保存设置失败",
+    "log.error.savesettings": "保存设置失败"
 
 
-    "test": "测试"
   }

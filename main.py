@@ -213,32 +213,44 @@ class Main():
                 
                 #
                 if msg.message == 0x0084:
-                    # 获取鼠标在屏幕上的坐标
-                    pos = self.mapFromGlobal(QCursor.pos())
-                    x, y = pos.x(), pos.y()
-                    w, h = self.width(), self.height()
-                    
-                    border_width = 5
-                    result = 1 
-                    
-                    if x < border_width:
-                        if y < border_width: result = 13
-                        elif y > h - border_width: result = 16
-                        else: result = 10
-                    elif x > w - border_width:
-                        if y < border_width: result = 14
-                        elif y > h - border_width: result = 17
-                        else: result = 11
-                    elif y < border_width:
-                        result = 12
-                    elif y > h - border_width:
-                        result = 15
-                    
-                    return True, result
+                    if not self.isMaximized():
+                        # 获取鼠标在屏幕上的坐标
+                        pos = self.mapFromGlobal(QCursor.pos())
+                        x, y = pos.x(), pos.y()
+                        w, h = self.width(), self.height()
+                        
+                        border_width = 5
+                        result = 1 
+                        
+                        if x < border_width:
+                            if y < border_width: result = 13
+                            elif y > h - border_width: result = 16
+                            else: result = 10
+                        elif x > w - border_width:
+                            if y < border_width: result = 14
+                            elif y > h - border_width: result = 17
+                            else: result = 11
+                        elif y < border_width:
+                            result = 12
+                        elif y > h - border_width:
+                            result = 15
+                        
+                        return True, result
 
                 # 托盘主题切换
                 elif msg.message in (0x001A, 0x0320):
                     QTimer.singleShot(100, self.root.tray.setIcon_)
+                
+                #最大化检测
+                elif msg.message == 0x0005:
+                    if msg.wParam == 2:
+                        self.root.logger.debug("window maximized")
+                        self.main.top.tbt_max.setLogo(1)
+                    elif msg.wParam == 0:
+                        self.root.logger.debug("window unmaximized")
+                        self.main.top.tbt_max.setLogo(0)
+                    
+
             
             # 3. 其他消息交给默认处理
             return super().nativeEvent(eventType, message)
@@ -338,6 +350,7 @@ class Main():
 
                 def mouseMoveEvent(self, event):
                     if self.move_pressed:
+                        self.root.window.showNormal()
                         self.move_mousepos = event.globalPos()
                         self.move_moving = True
                         screensize = QScreen.availableGeometry(QApplication.primaryScreen())
@@ -430,8 +443,8 @@ class Main():
 
                     self.btsGroup.buttonClicked.connect(self.someone_clicked)
 
-                    a = self.add_btn("test","src/assets/buttons/home.png")
-                    b = self.add_btn("test","src/assets/buttons/home.png")
+                    a = self.add_btn("test","src/assets/home.png")
+                    b = self.add_btn("test2","src/assets/home.png")
 
 
                 def someone_clicked(self,btn):
@@ -475,6 +488,7 @@ class Main():
                         self.text = QLabel(self)
                         self.text.setAttribute(Qt.WA_StyledBackground, False)
                         self.text.setFixedSize(120,30)
+                        self.text.setProperty("wid", "lbtn")
                         self.langing()
                         self.layout.addWidget(self.text)
 
@@ -495,8 +509,6 @@ class Main():
 
                     def langing(self):
                         self.text.setText(self.root.langer.get(self.text_))
-
-
 
         class LLine(QWidget):
             def __init__(self,parent=None,root=None):
@@ -554,7 +566,60 @@ class Main():
                     self.setFixedHeight(30)
 
                 def init_wid(self):
-                    pass
+                    self.root.logger.debug("init QW.windowL.mainL.topL")
+                    self.layout = QHBoxLayout(self)
+                    self.layout.setContentsMargins(0, 0, 0, 0)
+                    self.layout.setSpacing(0)
+                    self.layout.setAlignment(Qt.AlignRight)
+
+                    self.root.logger.debug("init QW.windowL.mainL.topL.tbt_mini")
+                    self.tbt_mini = self.TriBtn(["src/assets/tribtns/minimize.png"],self, self.root)
+                    self.tbt_mini.clicked.connect(lambda: self.root.window.showMinimized())
+                    self.layout.addWidget(self.tbt_mini)
+
+                    self.root.logger.debug("init QW.windowL.mainL.topL.tbt_max")
+                    self.tbt_max = self.TriBtn(
+                        [
+                            "src/assets/tribtns/maximize.png",
+                            "src/assets/tribtns/maximize2.png"
+                        ],
+                        self, self.root)
+                    self.tbt_max.clicked.connect(self.maxmize)
+                    self.layout.addWidget(self.tbt_max)
+
+                def maxmize(self):
+                    if self.root.window.isMaximized():
+                        self.root.window.showNormal()
+                    else:
+                        self.root.window.showMaximized()
+                
+                class TriBtn(QPushButton):
+                    def __init__(self,logo:list,parent=None,root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+                        self.logo_ = logo
+                        self.setLogo_ = 0
+                        self.init_ui()
+
+                    def init_ui(self):
+                        self.setFixedSize(30, 30)
+                        self.setAttribute(Qt.WA_StyledBackground, False)
+                        self.setProperty("wid", "tbtn")
+
+                    def setLogo(self,l):
+                        self.setLogo_ = l
+                        self.lighting(self.root.settings["theme"])
+
+                    def lighting(self,light:bool):
+                        color = QColor(75,75,75) if light else QColor(200,200,200)
+                        logo = change_color(self.logo_[self.setLogo_],color)
+                        pixmap = QIcon(logo.pixmap(40, 40))
+
+                        self.setIcon(pixmap)
+                        
+                        
+
 
             class TLine(QWidget):
                 def __init__(self,parent=None,root=None):
@@ -719,29 +784,106 @@ class Main():
         def __init__(self, parent=None, root=None):
             self.parent = parent
             self.root = root
-            if self.root.settings["language"] not in self.get_langs():
-                if self.root.settings["language"] is not None:
-                    self.root.logger.warning(f"Language '{self.root.settings['language']}' not found, using system display language:"+ self.root.winreg.display_language())
+            
+            # 确定最终使用的语言
+            final_lang = self.root.settings["language"]
+            
+            # 1. 检查配置的语言是否可用
+            if final_lang not in self.get_langs():
+                if final_lang is not None:
+                    self.root.logger.warning(f"Language '{final_lang}' not found, using system display language: " + str(self.root.winreg.display_language()))
+                
+                # 2. 尝试使用系统语言
+                sys_lang = self.root.winreg.display_language()
+                if sys_lang and sys_lang in self.get_langs():
+                    final_lang = sys_lang
                 else:
-                    self.root.logger.info("using system display language:"+ self.root.winreg.display_language())
-                if self.root.winreg.display_language() in self.get_langs():
-                    self.root.settings["language"] = self.root.winreg.display_language()
-                else:
-                    self.root.logger.warning("system display language not found, using: en-US")
-                    self.root.settings["language"] = "en-US"
-            self.load(self.root.settings["language"])
+                    # 3.  fallback 到 en-US
+                    if sys_lang:
+                        self.root.logger.warning(f"System display language '{sys_lang}' not found, using: en-US")
+                    else:
+                        self.root.logger.warning("System display language detection failed, using: en-US")
+                    final_lang = "en-US"
+                
+                # 更新设置中的语言为最终确定的语言
+                self.root.settings["language"] = final_lang
+                self.root.saveSettings()
+
+            self.current_lang = final_lang
+            self.default_lang = "en-US" # 定义默认回退语言
+            
+            self.load(self.current_lang)
             self.root.logger.info(self.get("init.load"))
 
-        def load(self,lang):
-            with open(f"src/lang/{lang}.json", "r", encoding="utf-8") as f:
-                self.langs = json.load(f)
+        def load(self, lang):
+            """加载语言文件并自动刷新所有支持多语言的控件"""
+            lang_path = f"src/lang/{lang}.json"
+            default_lang_path = f"src/lang/{self.default_lang}.json"
+            
+            try:
+                with open(lang_path, "r", encoding="utf-8") as f:
+                    self.langs = json.load(f)
+            except Exception as e:
+                self.root.logger.error(f"Failed to load language file {lang_path}: {e}")
+                self.langs = {}
+            
+            # 预加载默认语言以便快速回退，避免每次get都读取文件
+            try:
+                if lang != self.default_lang:
+                    with open(default_lang_path, "r", encoding="utf-8") as f:
+                        self.default_langs = json.load(f)
+                else:
+                    self.default_langs = self.langs
+            except Exception as e:
+                self.root.logger.warning(f"Failed to load default language file {default_lang_path}: {e}")
+                self.default_langs = {}
+
+            # 自动加载每个控件里的 langing 模块
+            self._refresh_all_widgets()
+
+        def _refresh_all_widgets(self):
+            """递归查找所有控件并调用 langing 方法"""
+            def notify_langing(widget):
+                # 检查是否有 langing 方法且可调用
+                if hasattr(widget, 'langing') and callable(widget.langing):
+                    try:
+                        widget.langing()
+                    except Exception as e:
+                        # 避免因为某个控件翻译失败导致整个程序崩溃
+                        self.root.logger.debug(f"Error calling langing on {widget}: {e}")
+                
+                # 递归处理子控件
+                for child in widget.children():
+                    notify_langing(child)
+            
+            # 从主窗口开始遍历
+            if hasattr(self.root, 'window') and self.root.window:
+                notify_langing(self.root.window)
 
         def get(self, key):
-            return self.langs[key]
+            """
+            获取翻译文本，支持三级回退：
+            1. 当前语言 (zh-CN)
+            2. 默认语言 (en-US)
+            3. 原键名
+            """
+            # 1. 尝试当前语言
+            if key in self.langs:
+                return self.langs[key]
+            
+            # 2. 尝试默认语言
+            if key in self.default_langs:
+                return self.default_langs[key]
+            
+            # 3. 返回原键名
+            return key
 
         def get_langs(self):
             langs = []
-            for file in os.listdir("src/lang"):
+            lang_dir = "src/lang"
+            if not os.path.exists(lang_dir):
+                return langs
+            for file in os.listdir(lang_dir):
                 if file.endswith(".json"):
                     langs.append(file.replace(".json", ""))
             return langs

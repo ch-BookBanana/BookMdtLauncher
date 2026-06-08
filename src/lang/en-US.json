@@ -1,0 +1,21 @@
+{
+    "init": "English (US)",
+    "init.en": "english(us)",
+    "init.load": "Language file loaded successfully, current language is \"English (US)\"",
+
+
+    "log.info.savesettings": "Settings saved",
+
+    
+    "log.info.changetheme": "Window theme changed to: $1",
+    "log.info.windowLoad": "Launcher window loaded",
+
+    "log.info.trayLoad": "System tray loaded",
+    "log.info.trayTheme": "System tray theme changed to: $1",
+
+    "log.warning.trayIconPath": "Tray icon path does not exist: $1",
+
+    "log.error.savesettings": "Failed to save settings"
+
+
+}
