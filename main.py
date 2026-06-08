@@ -582,6 +582,10 @@ class Main():
                 self.tline = self.TLine(self, self.root)
                 self.layout.addWidget(self.tline)
 
+                self.root.logger.debug("init QW.windowL.mainL.main")
+                self.main = self.Main(self, self.root)
+                self.layout.addWidget(self.main,1)
+
 
             class Top(QWidget):
                 def __init__(self,parent=None,root=None):
@@ -674,9 +678,67 @@ class Main():
                     self.setFixedHeight(1)
                     self.setAttribute(Qt.WA_StyledBackground, True)
                     
-
                 def init_wid(self):
                     pass
+
+
+
+
+            class Main(QStackedWidget):
+                def __init__(self,parent=None,root=None):
+                    super().__init__()
+                    self.parent = parent
+                    self.root = root
+                    self.pages = []
+                    self.btns = []
+                    self.init_ui()
+                    self.init_wid()
+                def init_ui(self):
+                    pass
+
+                def init_wid(self):
+                    self.start = self.Start(self,self.root)
+                    self.addPage(self.start, "wid.pages.start", "src/assets/buttons/start.png")
+
+                    self.download = self.Download(self,self.root)
+                    self.addPage(self.download, "wid.pages.download", "src/assets/buttons/download.png")
+
+                    self.games = self.Games(self,self.root)
+                    self.addPage(self.games, "wid.pages.games", "src/assets/buttons/games.png")
+
+                    self.settings = self.Settings(self,self.root)
+                    self.addPage(self.settings, "wid.pages.settings", "src/assets/buttons/settings.png")
+
+                def addPage(self, wid, Btext, Bicon):
+                    self.pages.append(wid)
+                    btn = self.root.window.left.pagebtns.add_btn(Btext, Bicon)
+                    self.btns.append(btn)
+                    btn.clicked.connect(lambda: self.setCurrentWidget(wid))
+
+                class Start(QWidget):
+                    def __init__(self,parent=None,root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+                        
+
+                class Download(QWidget):
+                    def __init__(self,parent=None,root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+
+                class Games(QWidget):
+                    def __init__(self,parent=None,root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+
+                class Settings(QWidget):
+                    def __init__(self,parent=None,root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
     
     class Tray(QSystemTrayIcon):
         def __init__(self, parent=None, root=None):

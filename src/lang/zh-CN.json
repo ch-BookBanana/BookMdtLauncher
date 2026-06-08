@@ -24,8 +24,11 @@
     "wid.top.maxmize": "最大化",
     "wid.top.restore": "还原",
 
+    "wid.pages.start": "启动",
+    "wid.pages.download": "下载",
+    "wid.pages.games": "游戏",
+    "wid.pages.settings": "设置",
 
-    
     "tray.menu.close": "关闭"
 
 
