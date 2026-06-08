@@ -44,6 +44,13 @@ QPushButton[wid="tbtn"]:checked {
     background-color: rgba(124, 124, 124, 0.2);
     border: none;
 }
+QMenu {
+    background-color: #f0f0f0;
+}
+QMenu::item:selected {
+    background-color: #c0c0c0;
+}
+
 
 
 /* -------暗色模式------- */
@@ -92,3 +99,13 @@ QPushButton[wid="tbtn"][theme="dark"]:checked {
     background-color: rgba(124, 124, 124, 0.2);
     border: none;
 }
+QMenu[theme="dark"] {
+    background-color: rgb(45, 45, 45);
+}
+QMenu[theme="dark"]::item {
+    color: rgb(247, 247, 247);
+}
+QMenu[theme="dark"]::item:selected {
+    background-color: rgba(255, 255, 255, 0.275);
+}
+

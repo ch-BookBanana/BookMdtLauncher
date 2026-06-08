@@ -64,7 +64,8 @@ class Main():
             "language": None,
             "checkTime": 2000,
             "theme": 0,
-            "maxLogNum": 50
+            "maxLogNum": 50,
+            "closeByTray": True
         }
         self.settings = copy.deepcopy(self.defsettings)
 
@@ -110,7 +111,10 @@ class Main():
                 json.dump(self.settings, f, separators=(',', ':'), ensure_ascii=False)
             self.logger.info(self.langer.get("log.info.savesettings"))
         except Exception as e:
-            self.logger.error(self.langer.get("log.error.savesettings") + "\n--Exception: " + str(e), exc_info=True)
+            try:
+                self.logger.error(self.langer.get("log.error.savesettings") + "\n--Exception: " + str(e), exc_info=True)
+            except:
+                self.logger.error("Failed to save settings\n--Exception: " + str(e), exc_info=True)
 
     def apply_theme(self):
         is_light = bool(self.settings["theme"])
@@ -143,9 +147,14 @@ class Main():
                 notify_lighting(child, state)
 
         notify_lighting(self.window, is_light)
-        
         self.logger.info(t(self.langer.get("log.info.changetheme"), theme_str))
-            
+        self_=self
+        if hasattr(self, 'tray') and hasattr(self.tray, 'menu'):
+            self.tray.menu.setProperty('theme', theme_str)
+            self.tray.menu.style().unpolish(self.tray.menu)
+            self.tray.menu.style().polish(self.tray.menu)
+        
+        
     class Window(QWidget):
         def __init__(self,parent=None,root=None):
             super().__init__()
@@ -156,6 +165,8 @@ class Main():
             self.setMinimumSize(QSize(500, 370))
 
             self.installEventFilter(self)
+
+            self._last_window_state = Qt.WindowNoState 
 
             self.init_ui()
             self.init_wid()
@@ -168,6 +179,25 @@ class Main():
             self.setWindowTitle("Book MDT Launcher")
             self.setWindowFlags(Qt.FramelessWindowHint)
             self.setGeometry(50, 50, 700, 500)
+
+        def changeEvent(self, event):
+            if event.type() == QEvent.WindowStateChange:
+                if not self.isMinimized():
+                    self._last_window_state = self.windowState()
+            super().changeEvent(event)
+
+        def restore_from_tray(self):
+            self.show()
+            if self.isMinimized():
+                # 最小化
+                if self._last_window_state == Qt.WindowMaximized:
+                    self.showMaximized()
+                else:
+                    self.showNormal()
+            else:
+                # 提层
+                self.raise_()
+            self.activateWindow()
 
         def init_wid(self):
             self.root.logger.debug("init QW.window.left")
@@ -350,7 +380,8 @@ class Main():
 
                 def mouseMoveEvent(self, event):
                     if self.move_pressed:
-                        self.root.window.showNormal()
+                        if self.root.window.isMaximized():
+                            self.root.window.showNormal()
                         self.move_mousepos = event.globalPos()
                         self.move_moving = True
                         screensize = QScreen.availableGeometry(QApplication.primaryScreen())
@@ -443,12 +474,9 @@ class Main():
 
                     self.btsGroup.buttonClicked.connect(self.someone_clicked)
 
-                    a = self.add_btn("test","src/assets/home.png")
-                    b = self.add_btn("test2","src/assets/home.png")
-
-
                 def someone_clicked(self,btn):
                     self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
+                    self.root.logger.debug(t("Page changed to: ",btn.toolTip()))
                     
                 def add_btn(self,Stext,Slogo):
                     btn = self.Btns(Slogo,Stext,self,self.root)
@@ -509,6 +537,7 @@ class Main():
 
                     def langing(self):
                         self.text.setText(self.root.langer.get(self.text_))
+                        self.setToolTip(self.root.langer.get(self.text_))
 
         class LLine(QWidget):
             def __init__(self,parent=None,root=None):
@@ -587,11 +616,22 @@ class Main():
                     self.tbt_max.clicked.connect(self.maxmize)
                     self.layout.addWidget(self.tbt_max)
 
+                    self.root.logger.debug("init QW.windowL.mainL.topL.tbt_close")
+                    self.tbt_mini = self.TriBtn(["src/assets/tribtns/close.png"],self, self.root)
+                    self.tbt_mini.clicked.connect(lambda: self.close_())
+                    self.layout.addWidget(self.tbt_mini)
+
                 def maxmize(self):
                     if self.root.window.isMaximized():
                         self.root.window.showNormal()
                     else:
                         self.root.window.showMaximized()
+
+                def close_(self):
+                    if self.root.settings["closeByTray"]:
+                        self.root.window.hide()
+                    else:
+                        self.root.window.close()
                 
                 class TriBtn(QPushButton):
                     def __init__(self,logo:list,parent=None,root=None):
@@ -646,14 +686,37 @@ class Main():
             self.theme = None
             self.init_ui()
             self.init_wid()
+            self.activated.connect(self.on_tray_activated)
             self.root.logger.info(self.root.langer.get("log.info.trayLoad"))
+            
+        def on_tray_activated(self, reason):
+            if reason == QSystemTrayIcon.Trigger:
+                self.root.logger.debug("Tray clicked by L-mouse button") 
+                self.root.window.restore_from_tray()
+
 
         def init_ui(self):
             self.setToolTip("Book Mdt Launcher")
             self.setIcon_()
             self.show()
         def init_wid(self):
-            pass
+            self.menu = QMenu()
+
+            self.menu_title = QAction("Book Mdt Launcher",self)
+            self.menu_title.triggered.connect(lambda:QTimer.singleShot(0,self.root.window.restore_from_tray))
+            self.menu.addAction(self.menu_title)
+
+            self.menu.addSeparator()  # 添加分隔线
+
+            self.menu_close = QAction("",self)
+            self.menu_close.triggered.connect(QApplication.quit)
+            self.menu.addAction(self.menu_close)
+
+            self.langing()
+            self.setContextMenu(self.menu)
+
+        def langing(self):
+            self.menu_close.setText(self.root.langer.get("tray.menu.close"))
 
         def setIcon_(self):
             """根据系统主题设置托盘图标"""
@@ -839,7 +902,11 @@ class Main():
                 self.default_langs = {}
 
             # 自动加载每个控件里的 langing 模块
-            self._refresh_all_widgets()
+            try:
+                self._refresh_all_widgets()
+                self.root.tray.langing()
+            except:
+                pass
 
         def _refresh_all_widgets(self):
             """递归查找所有控件并调用 langing 方法"""
@@ -896,7 +963,7 @@ class Main():
         def display_language(self):
             try:
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                    r"Control Panel\Desktop")
+                    r"Control Panel\Desktop")
                 value, _ = winreg.QueryValueEx(key, "PreferredUILanguages")
                 return value[0]
             except Exception as e:
