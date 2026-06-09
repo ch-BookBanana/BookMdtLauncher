@@ -130,6 +130,11 @@ class Main():
         if app:
             app.style().unpolish(app)
             app.style().polish(app)
+
+        font = QFont()
+        font.setFamily("Microsoft Yahei")
+        font.setPointSize(8)
+        app.setFont(font)
         
         # 递归查找并调用所有子控件的 lighting 函数
         def notify_lighting(widget, state):
@@ -476,7 +481,7 @@ class Main():
 
                 def someone_clicked(self,btn):
                     self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
-                    self.root.logger.debug(t("Page changed to: ",btn.toolTip()))
+                    self.root.logger.debug(t("Page changed to: ",self.root.langer.get(btn.text_)))
                     
                 def add_btn(self,Stext,Slogo):
                     btn = self.Btns(Slogo,Stext,self,self.root)
@@ -708,6 +713,8 @@ class Main():
 
                     self.settings = self.Settings(self,self.root)
                     self.addPage(self.settings, "wid.pages.settings", "src/assets/buttons/settings.png")
+
+                    self.btns[0].click()
 
                 def addPage(self, wid, Btext, Bicon):
                     self.pages.append(wid)
