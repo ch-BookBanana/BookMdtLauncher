@@ -15,18 +15,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os
-import re
-import asyncio
-import string
-import time
-import logging
-import random
-import threading
+import os, re, asyncio, string, time, random, threading
 from typing import List, Optional, Set
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("javaScanner")
+
 
 class javaScanner:
     """Windows 全异步 Java 嗅探器（智能优先扫描 + 毫秒级超时终止）"""
@@ -338,7 +330,7 @@ class javaScanner:
                 timeout=cls._DISK_SCAN_TOTAL_TIMEOUT
             )
         except asyncio.TimeoutError:
-            logger.warning(f"全盘扫描超时 ({cls._DISK_SCAN_TOTAL_TIMEOUT}s)，强制终止")
+            pass
         finally:
             stop_event.set()
             for t in worker_tasks:
@@ -350,7 +342,6 @@ class javaScanner:
     # ==================== 主异步流程 ====================
     @classmethod
     async def _async_get_javas(cls) -> List[List[str]]:
-        logger.info("开始多源 Java 扫描...")
         start = time.time()
 
         results = await asyncio.gather(
@@ -366,11 +357,8 @@ class javaScanner:
         for r in results:
             if isinstance(r, set):
                 candidates.update(r)
-            else:
-                logger.warning(f"某个扫描源异常: {r}")
 
         scan_time = time.time() - start
-        logger.info(f"扫描完成，发现 {len(candidates)} 个 java.exe，耗时 {scan_time:.2f}s，开始获取版本...")
 
         semaphore = asyncio.Semaphore(cls._VERSION_CONCURRENCY)
         async def version_task(p: str) -> Optional[tuple]:
@@ -387,7 +375,6 @@ class javaScanner:
                 final.append([item[0], item[1]])
         final.sort(key=lambda x: x[0].lower())
 
-        logger.info(f"版本获取完毕，有效结果 {len(final)} 项")
         return final
 
     # ==================== 公共接口 ====================
@@ -409,15 +396,3 @@ class javaScanner:
     def getJavaVersion(cls, java_path: str) -> Optional[str]:
         """同步获取单个 Java 可执行文件的版本号"""
         return asyncio.run(cls._get_java_version_async(java_path))
-
-
-# ==================== 简单测试 ====================
-if __name__ == "__main__":
-    print("正在扫描系统中的 Java 安装...")
-    javas = javaScanner.getJavas()
-    if not javas:
-        print("未找到任何 Java 安装。")
-    else:
-        print(f"找到 {len(javas)} 个 Java 安装：")
-        for path, ver in javas:
-            print(f"  {ver:10s}  {path}")
