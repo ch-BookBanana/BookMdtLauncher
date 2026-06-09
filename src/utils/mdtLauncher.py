@@ -99,8 +99,8 @@ class mdtLauncher(QProcess):
             return False
 
         # 2. 构建基本路径（使用绝对路径）
-        game_dir = os.path.join(mdtScanner.base_dir, game_name)
-        jar_path = os.path.abspath(os.path.join(game_dir, "mdt.jar"))
+        game_dir = os.path.abspath(os.path.join(mdtScanner.base_dir, game_name))
+        jar_path = os.path.join(game_dir, "mdt.jar")
         json_path = os.path.join(game_dir, "BML.json")
 
         if not os.path.isfile(jar_path):
@@ -149,10 +149,8 @@ class mdtLauncher(QProcess):
                 return False
         else:
             # 用户未指定，使用默认的游戏副本目录
-            data_dir = game_dir
-            if not os.path.isdir(data_dir):
-                self.process_error.emit({'type': 'process_error', 'content': f'Default data directory does not exist: {data_dir}'})
-                return False
+            data_dir = os.path.join(game_dir,"data")
+            os.makedirs(data_dir, exist_ok=True)
 
         # 5. 记录运行时设置
         self._current_game = game_name
