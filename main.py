@@ -53,6 +53,11 @@ def t(text, *args):
 
 class Main():
     def __init__(self):
+        for i in [
+            "BML",
+            "BML/logs",
+            "BML/.Mindustrys"
+        ]:os.makedirs(i,exist_ok=True)
         self.winreg = self.Winreg(self, self)
         self.logger = self.Logger(self, self)
         self.logger.info("\n------------Book MDT Launcher------------"
