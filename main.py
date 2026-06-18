@@ -30,7 +30,18 @@ init = {
 from PyQt5.Qt import *
 import sys, os, json, copy, winreg, logging
 from datetime import datetime
-import ctypes, ctypes.wintypes
+import ctypes
+import ctypes.wintypes
+from PyQt5.Qt import *
+
+
+def getPath(relative_path):
+    """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包后的环境"""
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
 
 
 def change_color(path, color: QColor):
@@ -46,10 +57,12 @@ def change_color(path, color: QColor):
     painter.end()
     return QIcon(colored)
 
+
 def t(text, *args):
     for i, arg in enumerate(args, start=1):
         text = text.replace(f"${i}", str(arg))
     return text
+
 
 class Main():
     def __init__(self):
@@ -57,14 +70,15 @@ class Main():
             "BML",
             "BML/logs",
             "BML/.Mindustrys"
-        ]:os.makedirs(i,exist_ok=True)
+        ]:
+            os.makedirs(i, exist_ok=True)
         self.winreg = self.Winreg(self, self)
         self.logger = self.Logger(self, self)
         self.logger.info("\n------------Book MDT Launcher------------"
-        f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
-        f"\n-version: {init['version']}"
-        f"\n-BuildVersion: {init['BuildCode']}"
-        "\n-----------------------------------------")
+                         f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
+                         f"\n-version: {init['version']}"
+                         f"\n-BuildVersion: {init['BuildCode']}"
+                         "\n-----------------------------------------")
         self.defsettings = {
             "language": None,
             "checkTime": 2000,
@@ -85,13 +99,13 @@ class Main():
             if not os.path.exists("BML/settings.json"):
                 self.logger.warning("settings file not found, using default settings")
             else:
-                with open("BML/settings.json", "r") as f:
+                with open("BML/settings.json", "r", encoding="utf-8") as f:
                     self.logger.info("loading settings...")
                     file_settings = json.load(f)
                     deep_merge_settings(self.settings, file_settings)
         except Exception as e:
             self.logger.error("ERR:Fail to load settings, using default setting"
-            "\n--Exception: " + str(e), exc_info=True)
+                              "\n--Exception: " + str(e), exc_info=True)
             self.settings = copy.deepcopy(self.defsettings)
 
         self.langer = self.Langer(self, self)
@@ -99,20 +113,20 @@ class Main():
 
         self.saveSettings()
 
-        with open("src/resources/styles/app.qss", "r", encoding="utf-8") as f:
+        with open(getPath("src/resources/styles/app.qss"), "r", encoding="utf-8") as f:
             self.qss = f.read()
         QApplication.instance().setStyleSheet(self.qss)
         self.logger.debug("load QtStyleSheet: \n" + self.qss)
 
         self.tray = self.Tray(self, self)
-        self.window = self.Window(self,self)
-  
+        self.window = self.Window(self, self)
+
     def getQSS(self):
         return self.qss
-    
+
     def saveSettings(self):
         try:
-            with open("BML/settings.json", "w") as f:
+            with open("BML/settings.json", "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, separators=(',', ':'), ensure_ascii=False)
             self.logger.info(self.langer.get("log.info.savesettings"))
         except Exception as e:
@@ -124,12 +138,12 @@ class Main():
     def apply_theme(self):
         is_light = bool(self.settings["theme"])
         theme_str = "light" if is_light else "dark"
-        
+
         # 设置主窗口主题属性并刷新样式
         self.window.setProperty("theme", theme_str)
         self.window.style().unpolish(self.window)
         self.window.style().polish(self.window)
-        
+
         # 刷新整个应用样式
         app = QApplication.instance()
         if app:
@@ -140,13 +154,12 @@ class Main():
         font.setFamily("Microsoft Yahei")
         font.setPointSize(8)
         app.setFont(font)
-        
+
         # 递归查找并调用所有子控件的 lighting 函数
         def notify_lighting(widget, state):
             if hasattr(widget, 'lighting') and callable(widget.lighting):
                 try:
                     widget.lighting(state)
-                    
                 except Exception as e:
                     self.logger.error(f"Error calling lighting on {widget}: {e}")
             try:
@@ -158,15 +171,14 @@ class Main():
 
         notify_lighting(self.window, is_light)
         self.logger.info(t(self.langer.get("log.info.changetheme"), theme_str))
-        self_=self
+        self_ = self
         if hasattr(self, 'tray') and hasattr(self.tray, 'menu'):
             self.tray.menu.setProperty('theme', theme_str)
             self.tray.menu.style().unpolish(self.tray.menu)
             self.tray.menu.style().polish(self.tray.menu)
-        
-        
+
     class Window(QWidget):
-        def __init__(self,parent=None,root=None):
+        def __init__(self, parent=None, root=None):
             super().__init__()
             self.parent = parent
             self.root = root
@@ -176,7 +188,7 @@ class Main():
 
             self.installEventFilter(self)
 
-            self._last_window_state = Qt.WindowNoState 
+            self._last_window_state = Qt.WindowNoState
 
             self.init_ui()
             self.init_wid()
@@ -224,7 +236,7 @@ class Main():
             self.root.logger.debug("init QW.windowL.stren")
             self.stren = QWidget()
             self.stren.setFixedWidth(31)
-            self.layout.addWidget(self.stren,0)
+            self.layout.addWidget(self.stren, 0)
 
             self.root.logger.debug("init QW.windowL.main")
             self.main = self.Main(self, self.root)
@@ -235,22 +247,22 @@ class Main():
 
         def eventFilter(self, obj, event):
             if obj is self and event.type() == QEvent.Resize:
-                new_width = self.left.width() # 假设宽度固定，或者从配置读取
+                new_width = self.left.width()  # 假设宽度固定，或者从配置读取
                 self.left.setGeometry(0, 0, new_width, self.height())
                 self.lline.setGeometry(new_width, 0, 1, self.height())
-                
+
                 self.root.logger.debug(f"Window resized via filter: {self.width()}x{self.height()}")
-            
+
             return super().eventFilter(obj, event)
 
         def nativeEvent(self, eventType, message):
             """
             拦截 Windows 原生消息
             """
-            #判断是否是 Windows 消息
+            # 判断是否是 Windows 消息
             if eventType == "windows_generic_MSG":
                 msg = ctypes.wintypes.MSG.from_address(message.__int__())
-                
+
                 #
                 if msg.message == 0x0084:
                     if not self.isMaximized():
@@ -258,30 +270,36 @@ class Main():
                         pos = self.mapFromGlobal(QCursor.pos())
                         x, y = pos.x(), pos.y()
                         w, h = self.width(), self.height()
-                        
+
                         border_width = 5
-                        result = 1 
-                        
+                        result = 1
+
                         if x < border_width:
-                            if y < border_width: result = 13
-                            elif y > h - border_width: result = 16
-                            else: result = 10
+                            if y < border_width:
+                                result = 13
+                            elif y > h - border_width:
+                                result = 16
+                            else:
+                                result = 10
                         elif x > w - border_width:
-                            if y < border_width: result = 14
-                            elif y > h - border_width: result = 17
-                            else: result = 11
+                            if y < border_width:
+                                result = 14
+                            elif y > h - border_width:
+                                result = 17
+                            else:
+                                result = 11
                         elif y < border_width:
                             result = 12
                         elif y > h - border_width:
                             result = 15
-                        
+
                         return True, result
 
                 # 托盘主题切换
                 elif msg.message in (0x001A, 0x0320):
                     QTimer.singleShot(100, self.root.tray.setIcon_)
-                
-                #最大化检测
+
+                # 最大化检测
                 elif msg.message == 0x0005:
                     if msg.wParam == 2:
                         self.root.logger.debug("window maximized")
@@ -289,15 +307,12 @@ class Main():
                     elif msg.wParam == 0:
                         self.root.logger.debug("window unmaximized")
                         self.main.top.tbt_max.setLogo(0)
-                    
 
-            
             # 3. 其他消息交给默认处理
             return super().nativeEvent(eventType, message)
-            
 
         class Left(QWidget):
-            def __init__(self,parent=None,root=None):
+            def __init__(self, parent=None, root=None):
                 super().__init__(parent)
                 self.parent = parent
                 self.root = root
@@ -312,30 +327,29 @@ class Main():
             def init_wid(self):
                 self.root.logger.debug("init QW.window.leftL")
                 self.layout = QVBoxLayout(self)
-                self.layout.setContentsMargins(0,0,0,0)
+                self.layout.setContentsMargins(0, 0, 0, 0)
                 self.layout.setSpacing(0)
                 self.layout.setAlignment(Qt.AlignTop)
-                
+
                 self.root.logger.debug("init QW.window.leftL.tline")
-                self.tline = self.TLine(self,self.root)
+                self.tline = self.TLine(self, self.root)
                 self.root.logger.debug("init QW.window.leftL.logo")
-                self.logo = self.Logo(self,self.root)
-                self.layout.addWidget(self.logo,0)
-                self.layout.addWidget(self.tline,0)
+                self.logo = self.Logo(self, self.root)
+                self.layout.addWidget(self.logo, 0)
+                self.layout.addWidget(self.tline, 0)
 
                 self.root.logger.debug("init QW.window.leftL.pages")
-                self.pagebtns = self.PageBtns(self,self.root)
-                self.layout.addWidget(self.pagebtns,1)
+                self.pagebtns = self.PageBtns(self, self.root)
+                self.layout.addWidget(self.pagebtns, 1)
 
-            def fold(self,text=None):
-                if text is None:text = not self.isfold
+            def fold(self, text=None):
+                if text is None:
+                    text = not self.isfold
                 width = 30 if text else 150
                 self.setGeometry(0, 0, width, self.height())
                 self.root.window.lline.init_ui()
                 self.root.logger.debug(f"Window left fold: {self.isfold}")
                 self.isfold = text
-
-            
 
             class Logo(QWidget):
                 def __init__(self, parent=None, root=None):
@@ -352,7 +366,7 @@ class Main():
                     self.init_wid()
 
                 def init_ui(self):
-                    self.setFixedSize(150,30)
+                    self.setFixedSize(150, 30)
                     self.setAttribute(Qt.WA_StyledBackground, True)
 
                 def init_wid(self):
@@ -363,7 +377,7 @@ class Main():
                     self.layout.setAlignment(Qt.AlignLeft)
 
                     self.logo = QLabel(self)
-                    
+
                     self.logo.setFixedSize(30, 30)
                     self.logo.setScaledContents(True)
                     self.layout.addWidget(self.logo, 0)
@@ -374,9 +388,8 @@ class Main():
                     self.label.setProperty('wid', 'title')
                     self.layout.addWidget(self.label, 1)
 
-
-                def lighting(self,light:bool):
-                    logo = "src/assets/icons/" + ("dark.png" if light else "light.png")
+                def lighting(self, light: bool):
+                    logo = getPath("src/assets/icons/" + ("dark.png" if light else "light.png"))
                     pix = QPixmap(logo)
                     if pix.isNull():
                         self.root.logger.error(f"Logo image not found: {logo}")
@@ -409,7 +422,7 @@ class Main():
 
                 def mouseReleaseEvent(self, event):
                     if self.move_pressed and self.move_moving:
-                        self.root.logger.debug(t("Window moved via filter: ($1,$2)",self.root.window.pos().x(),self.root.window.pos().y()))
+                        self.root.logger.debug(t("Window moved via filter: ($1,$2)", self.root.window.pos().x(), self.root.window.pos().y()))
                     else:
                         self.parent.fold()
                     self.move_pressed = False
@@ -417,7 +430,7 @@ class Main():
                     super().mouseReleaseEvent(event)
 
             class TLine(QWidget):
-                def __init__(self,parent=None,root=None):
+                def __init__(self, parent=None, root=None):
                     super().__init__()
                     self.root = root
                     self.parent = parent
@@ -432,7 +445,7 @@ class Main():
                 def init_wid(self):
                     self.line = QWidget(self)
                     self.line.setAttribute(Qt.WA_StyledBackground, True)
-                    self.line.setProperty("wid","line")
+                    self.line.setProperty("wid", "line")
 
                 def resizeEvent(self, event):
                     """
@@ -440,10 +453,10 @@ class Main():
                     重新计算内部 line 的位置和宽度
                     """
                     super().resizeEvent(event)
-                    
+
                     # 获取当前 TLine 的实际宽度
                     current_width = self.width()
-                    
+
                     # 确保宽度足够减去两边的 5px
                     if current_width > 10:
                         new_width = current_width - 10
@@ -451,12 +464,12 @@ class Main():
                     else:
                         new_width = current_width
                         new_x = 0
-                    
+
                     # 更新内部 line 的几何形状
                     self.line.setGeometry(new_x, 0, new_width, 1)
 
             class PageBtns(QWidget):
-                def __init__(self,parent=None,root=None):
+                def __init__(self, parent=None, root=None):
                     super().__init__(parent)
                     self.parent = parent
                     self.root = root
@@ -480,23 +493,23 @@ class Main():
                     self.chooser.setAttribute(Qt.WA_StyledBackground, True)
                     self.chooser.setStyleSheet("background: #6e4197;")
                     self.chooser.setFixedSize(3, 30)
-                    self.chooser.move(-10,0)
+                    self.chooser.move(-10, 0)
 
                     self.btsGroup.buttonClicked.connect(self.someone_clicked)
 
-                def someone_clicked(self,btn):
+                def someone_clicked(self, btn):
                     self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
-                    self.root.logger.debug(t("Page changed to: ",self.root.langer.get(btn.text_)))
-                    
-                def add_btn(self,Stext,Slogo):
-                    btn = self.Btns(Slogo,Stext,self,self.root)
+                    self.root.logger.debug(t("Page changed to: ", self.root.langer.get(btn.text_)))
+
+                def add_btn(self, Stext, Slogo):
+                    btn = self.Btns(Slogo, Stext, self, self.root)
                     self.btns_.append(btn)
                     self.layout.addWidget(btn)
                     self.btsGroup.addButton(btn)
                     return btn
 
                 class Btns(QPushButton):
-                    def __init__(self,logo,text,parent=None,root=None):
+                    def __init__(self, logo, text, parent=None, root=None):
                         super().__init__(parent)
                         self.parent = parent
                         self.root = root
@@ -517,7 +530,7 @@ class Main():
                         self.layout.setSpacing(3)
 
                         self.logo = QLabel(self)
-                        self.logo.setFixedSize(24,30)
+                        self.logo.setFixedSize(24, 30)
                         self.logo.setAttribute(Qt.WA_StyledBackground, False)
                         self.logo.setProperty("wid", "lbtn")
                         self.logo.setScaledContents(False)
@@ -525,20 +538,20 @@ class Main():
 
                         self.text = QLabel(self)
                         self.text.setAttribute(Qt.WA_StyledBackground, False)
-                        self.text.setFixedSize(120,30)
+                        self.text.setFixedSize(120, 30)
                         self.text.setProperty("wid", "lbtn")
                         self.langing()
                         self.layout.addWidget(self.text)
 
-                    def lighting(self,light:bool):
-                        color = QColor(75,75,75) if light else QColor(200,200,200)
-                        logo = change_color(self.logo_,color)
-                        pixmap = logo.pixmap(40, 40) 
-                        
+                    def lighting(self, light: bool):
+                        color = QColor(75, 75, 75) if light else QColor(200, 200, 200)
+                        logo = change_color(self.logo_, color)
+                        pixmap = logo.pixmap(40, 40)
+
                         if not pixmap.isNull():
                             smooth_pixmap = pixmap.scaled(
-                                24,24, 
-                                Qt.KeepAspectRatio, 
+                                24, 24,
+                                Qt.KeepAspectRatio,
                                 Qt.FastTransformation
                             )
                             self.logo.setPixmap(smooth_pixmap)
@@ -550,7 +563,7 @@ class Main():
                         self.setToolTip(self.root.langer.get(self.text_))
 
         class LLine(QWidget):
-            def __init__(self,parent=None,root=None):
+            def __init__(self, parent=None, root=None):
                 super().__init__(parent)
                 self.parent = parent
                 self.root = root
@@ -561,13 +574,13 @@ class Main():
                 self.setProperty("wid", "line")
                 self.setFixedWidth(1)
                 self.setAttribute(Qt.WA_StyledBackground, True)
-                self.setGeometry(self.parent.left.width()+1, 0, 1, self.parent.height())
+                self.setGeometry(self.parent.left.width() + 1, 0, 1, self.parent.height())
 
             def init_wid(self):
                 pass
-        
+
         class Main(QWidget):
-            def __init__(self,parent=None,root=None):
+            def __init__(self, parent=None, root=None):
                 super().__init__()
                 self.parent = parent
                 self.root = root
@@ -586,7 +599,7 @@ class Main():
 
                 self.root.logger.debug("init QW.windowL.mainL.top")
                 self.top = self.Top(self, self.root)
-                self.layout.addWidget(self.top,0)
+                self.layout.addWidget(self.top, 0)
 
                 self.root.logger.debug("init QW.windowL.mainL.tline")
                 self.tline = self.TLine(self, self.root)
@@ -594,11 +607,10 @@ class Main():
 
                 self.root.logger.debug("init QW.windowL.mainL.main")
                 self.main = self.Main(self, self.root)
-                self.layout.addWidget(self.main,1)
-
+                self.layout.addWidget(self.main, 1)
 
             class Top(QWidget):
-                def __init__(self,parent=None,root=None):
+                def __init__(self, parent=None, root=None):
                     super().__init__()
                     self.parent = parent
                     self.root = root
@@ -616,24 +628,24 @@ class Main():
                     self.layout.setAlignment(Qt.AlignRight)
 
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_mini")
-                    self.tbt_mini = self.TriBtn(["src/assets/tribtns/minimize.png"],self, self.root)
+                    self.tbt_mini = self.TriBtn([getPath("src/assets/tribtns/minimize.png")], self, self.root)
                     self.tbt_mini.clicked.connect(lambda: self.root.window.showMinimized())
                     self.layout.addWidget(self.tbt_mini)
 
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_max")
                     self.tbt_max = self.TriBtn(
                         [
-                            "src/assets/tribtns/maximize.png",
-                            "src/assets/tribtns/maximize2.png"
+                            getPath("src/assets/tribtns/maximize.png"),
+                            getPath("src/assets/tribtns/maximize2.png")
                         ],
                         self, self.root)
                     self.tbt_max.clicked.connect(self.maxmize)
                     self.layout.addWidget(self.tbt_max)
 
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_close")
-                    self.tbt_mini = self.TriBtn(["src/assets/tribtns/close.png"],self, self.root)
-                    self.tbt_mini.clicked.connect(lambda: self.close_())
-                    self.layout.addWidget(self.tbt_mini)
+                    self.tbt_close = self.TriBtn([getPath("src/assets/tribtns/close.png")], self, self.root)
+                    self.tbt_close.clicked.connect(lambda: self.close_())
+                    self.layout.addWidget(self.tbt_close)
 
                 def maxmize(self):
                     if self.root.window.isMaximized():
@@ -646,9 +658,9 @@ class Main():
                         self.root.window.hide()
                     else:
                         self.root.window.close()
-                
+
                 class TriBtn(QPushButton):
-                    def __init__(self,logo:list,parent=None,root=None):
+                    def __init__(self, logo: list, parent=None, root=None):
                         super().__init__()
                         self.parent = parent
                         self.root = root
@@ -661,22 +673,19 @@ class Main():
                         self.setAttribute(Qt.WA_StyledBackground, False)
                         self.setProperty("wid", "tbtn")
 
-                    def setLogo(self,l):
+                    def setLogo(self, l):
                         self.setLogo_ = l
                         self.lighting(self.root.settings["theme"])
 
-                    def lighting(self,light:bool):
-                        color = QColor(75,75,75) if light else QColor(200,200,200)
-                        logo = change_color(self.logo_[self.setLogo_],color)
+                    def lighting(self, light: bool):
+                        color = QColor(75, 75, 75) if light else QColor(200, 200, 200)
+                        logo = change_color(self.logo_[self.setLogo_], color)
                         pixmap = QIcon(logo.pixmap(40, 40))
 
                         self.setIcon(pixmap)
-                        
-                        
-
 
             class TLine(QWidget):
-                def __init__(self,parent=None,root=None):
+                def __init__(self, parent=None, root=None):
                     super().__init__()
                     self.parent = parent
                     self.root = root
@@ -687,15 +696,12 @@ class Main():
                     self.setProperty("wid", "line")
                     self.setFixedHeight(1)
                     self.setAttribute(Qt.WA_StyledBackground, True)
-                    
+
                 def init_wid(self):
                     pass
 
-
-
-
-            class Main(QStackedWidget):
-                def __init__(self,parent=None,root=None):
+            class Main(QWidget):
+                def __init__(self, parent=None, root=None):
                     super().__init__()
                     self.parent = parent
                     self.root = root
@@ -703,55 +709,67 @@ class Main():
                     self.btns = []
                     self.init_ui()
                     self.init_wid()
+
                 def init_ui(self):
                     pass
 
                 def init_wid(self):
-                    self.start = self.Start(self,self.root)
-                    self.addPage(self.start, "wid.pages.start", "src/assets/buttons/start.png")
+                    self.layout = QVBoxLayout(self)
+                    self.layout.setContentsMargins(0, 0, 0, 0)
+                    self.layout.setSpacing(0)
+                    self.setAlignment(Qt.AlignTopLeft)
 
-                    self.download = self.Download(self,self.root)
-                    self.addPage(self.download, "wid.pages.download", "src/assets/buttons/download.png")
-
-                    self.games = self.Games(self,self.root)
-                    self.addPage(self.games, "wid.pages.games", "src/assets/buttons/games.png")
-
-                    self.settings = self.Settings(self,self.root)
-                    self.addPage(self.settings, "wid.pages.settings", "src/assets/buttons/settings.png")
-
-                    self.btns[0].click()
-
-                def addPage(self, wid, Btext, Bicon):
-                    self.pages.append(wid)
-                    btn = self.root.window.left.pagebtns.add_btn(Btext, Bicon)
-                    self.btns.append(btn)
-                    btn.clicked.connect(lambda: self.setCurrentWidget(wid))
-
-                class Start(QWidget):
-                    def __init__(self,parent=None,root=None):
+                class Pages():
+                    def __init__(self, parent=None, root=None):
                         super().__init__()
                         self.parent = parent
                         self.root = root
-                        
+                        self.init_ui()
+                        self.init_wid()
+                        self.left = Left(self, self.root)
+                        self.middle = Middle(self, self.root)
+                        self.right = Right(self, self.root)
 
-                class Download(QWidget):
-                    def __init__(self,parent=None,root=None):
-                        super().__init__()
-                        self.parent = parent
-                        self.root = root
+                    def init_ui(self):
+                        pass
 
-                class Games(QWidget):
-                    def __init__(self,parent=None,root=None):
-                        super().__init__()
-                        self.parent = parent
-                        self.root = root
+                    def init_wid(self):
+                        self.left = Left(self, self.root)
+                        self.middle = Middle(self, self.root)
+                        self.right = Right(self, self.root)
 
-                class Settings(QWidget):
-                    def __init__(self,parent=None,root=None):
-                        super().__init__()
-                        self.parent = parent
-                        self.root = root
-    
+                    class Left(QWidget):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__()
+                            self.parent = parent
+                            self.root = root
+
+                        def resizeEvent(self, event):
+                            self.parent.parent.leftStack.setFixedWidth(self.width())
+                            super().resizeEvent(event)
+
+                        def resize(self,width):
+                            self.setFixedWidth(width)
+                            
+                    class Middle(QWidget):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__()
+                            self.parent = parent
+                            self.root = root
+
+                    class Right(QWidget):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__()
+                            self.parent = parent
+                            self.root = root
+
+                        def resizeEvent(self, event):
+                            self.parent.parent.rightStack.setFixedWidth(self.width())
+                            super().resizeEvent(event)
+
+                        def resize(self,width):
+                            self.setFixedWidth(width)
+
     class Tray(QSystemTrayIcon):
         def __init__(self, parent=None, root=None):
             super().__init__()
@@ -762,27 +780,27 @@ class Main():
             self.init_wid()
             self.activated.connect(self.on_tray_activated)
             self.root.logger.info(self.root.langer.get("log.info.trayLoad"))
-            
+
         def on_tray_activated(self, reason):
             if reason == QSystemTrayIcon.Trigger:
-                self.root.logger.debug("Tray clicked by L-mouse button") 
+                self.root.logger.debug("Tray clicked by L-mouse button")
                 self.root.window.restore_from_tray()
-
 
         def init_ui(self):
             self.setToolTip("Book Mdt Launcher")
             self.setIcon_()
             self.show()
+
         def init_wid(self):
             self.menu = QMenu()
 
-            self.menu_title = QAction("Book Mdt Launcher",self)
-            self.menu_title.triggered.connect(lambda:QTimer.singleShot(0,self.root.window.restore_from_tray))
+            self.menu_title = QAction("Book Mdt Launcher", self)
+            self.menu_title.triggered.connect(lambda: QTimer.singleShot(0, self.root.window.restore_from_tray))
             self.menu.addAction(self.menu_title)
 
             self.menu.addSeparator()  # 添加分隔线
 
-            self.menu_close = QAction("",self)
+            self.menu_close = QAction("", self)
             self.menu_close.triggered.connect(QApplication.quit)
             self.menu.addAction(self.menu_close)
 
@@ -797,15 +815,15 @@ class Main():
             theme = "light" if self.root.winreg.taskbar_theme() == "dark" else "dark"
             if self.theme != theme:
                 self.theme = theme
-                icon_path = f"src/assets/icons/{theme}.png"
-                
+                icon_path = getPath(f"src/assets/icons/{theme}.png")
+
                 # 检查文件是否存在，防止路径错误导致无图标
                 if not os.path.exists(icon_path):
-                    self.root.logger.warning(t(self.root.langer.get("log.warning.trayIconPath"),icon_path))
-                
+                    self.root.logger.warning(t(self.root.langer.get("log.warning.trayIconPath"), icon_path))
+
                 icon = QIcon(icon_path)
                 self.setIcon(icon)
-                self.root.logger.info(t(self.root.langer.get("log.info.trayTheme"),"light" if theme == "light" else "dark"))
+                self.root.logger.info(t(self.root.langer.get("log.info.trayTheme"), "light" if theme == "light" else "dark"))
 
     class Logger():
         def __init__(self, parent=None, root=None):
@@ -823,11 +841,11 @@ class Main():
             """
             loglevel = logging.DEBUG
             self.base_logger_name = "Main"
-            
+
             # 获取或创建主 logger
             main_logger = logging.getLogger(self.base_logger_name)
             main_logger.setLevel(loglevel)
-            
+
             # 防止重复添加 handler
             if main_logger.handlers:
                 self._loggers[self.base_logger_name] = main_logger
@@ -862,7 +880,7 @@ class Main():
             main_logger.addHandler(console)
             main_logger.addHandler(file_handler_timestamp)
             main_logger.addHandler(file_handler_latest)
-            
+
             self._loggers[self.base_logger_name] = main_logger
 
         def _get_logger(self, name=None):
@@ -876,14 +894,14 @@ class Main():
             else:
                 # 使用层级命名，例如 "Main.Cmd"，这样它们会共享 Main 的 Handler
                 target_name = f"{self.base_logger_name}.{name}"
-            
+
             if target_name not in self._loggers:
                 logger = logging.getLogger(target_name)
                 # 子 logger 默认继承父 logger 的级别和 handler，无需额外配置
                 # 但如果需要单独控制级别，可以在此设置：
-                # logger.setLevel(logging.DEBUG) 
+                # logger.setLevel(logging.DEBUG)
                 self._loggers[target_name] = logger
-            
+
             return self._loggers[target_name]
 
         def _cleanup_old_logs(self):
@@ -900,7 +918,7 @@ class Main():
                     self._loggers[self.base_logger_name].info(t(self.root.langer.get("log.info.cleanoldlogs"), oldest))
                 except Exception as e:
                     pass
-                
+
         # 修改日志方法，增加 name 参数，默认为 None (即 Main)
         def debug(self, msg, name=None):
             self._get_logger(name).debug(msg)
@@ -921,15 +939,15 @@ class Main():
         def __init__(self, parent=None, root=None):
             self.parent = parent
             self.root = root
-            
+
             # 确定最终使用的语言
             final_lang = self.root.settings["language"]
-            
+
             # 1. 检查配置的语言是否可用
             if final_lang not in self.get_langs():
                 if final_lang is not None:
                     self.root.logger.warning(f"Language '{final_lang}' not found, using system display language: " + str(self.root.winreg.display_language()))
-                
+
                 # 2. 尝试使用系统语言
                 sys_lang = self.root.winreg.display_language()
                 if sys_lang and sys_lang in self.get_langs():
@@ -941,29 +959,29 @@ class Main():
                     else:
                         self.root.logger.warning("System display language detection failed, using: en-US")
                     final_lang = "en-US"
-                
+
                 # 更新设置中的语言为最终确定的语言
                 self.root.settings["language"] = final_lang
                 self.root.saveSettings()
 
             self.current_lang = final_lang
-            self.default_lang = "en-US" # 定义默认回退语言
-            
+            self.default_lang = "en-US"  # 定义默认回退语言
+
             self.load(self.current_lang)
             self.root.logger.info(self.get("init.load"))
 
         def load(self, lang):
             """加载语言文件并自动刷新所有支持多语言的控件"""
-            lang_path = f"src/lang/{lang}.json"
-            default_lang_path = f"src/lang/{self.default_lang}.json"
-            
+            lang_path = getPath(f"src/lang/{lang}.json")
+            default_lang_path = getPath(f"src/lang/{self.default_lang}.json")
+
             try:
                 with open(lang_path, "r", encoding="utf-8") as f:
                     self.langs = json.load(f)
             except Exception as e:
                 self.root.logger.error(f"Failed to load language file {lang_path}: {e}")
                 self.langs = {}
-            
+
             # 预加载默认语言以便快速回退，避免每次get都读取文件
             try:
                 if lang != self.default_lang:
@@ -992,11 +1010,11 @@ class Main():
                     except Exception as e:
                         # 避免因为某个控件翻译失败导致整个程序崩溃
                         self.root.logger.debug(f"Error calling langing on {widget}: {e}")
-                
+
                 # 递归处理子控件
                 for child in widget.children():
                     notify_langing(child)
-            
+
             # 从主窗口开始遍历
             if hasattr(self.root, 'window') and self.root.window:
                 notify_langing(self.root.window)
@@ -1008,25 +1026,26 @@ class Main():
             2. 默认语言 (en-US)
             3. 原键名
             """
-            # 1. 尝试当前语言
             if key in self.langs:
                 return self.langs[key]
-            
-            # 2. 尝试默认语言
             if key in self.default_langs:
                 return self.default_langs[key]
-            
-            # 3. 返回原键名
             return key
 
         def get_langs(self):
             langs = []
             lang_dir = "src/lang"
-            if not os.path.exists(lang_dir):
-                return langs
-            for file in os.listdir(lang_dir):
-                if file.endswith(".json"):
-                    langs.append(file.replace(".json", ""))
+            # 注意：这里不能使用 getPath，因为 get_langs 在 load 之前调用，且路径是相对于项目根目录的
+            # 但为了打包后也能列出语言文件，需要改为使用 getPath
+            try:
+                lang_dir_abs = getPath(lang_dir)
+                if not os.path.exists(lang_dir_abs):
+                    return langs
+                for file in os.listdir(lang_dir_abs):
+                    if file.endswith(".json"):
+                        langs.append(file.replace(".json", ""))
+            except Exception as e:
+                self.root.logger.error(f"Failed to list language files: {e}")
             return langs
 
     class Winreg():
@@ -1037,12 +1056,13 @@ class Main():
         def display_language(self):
             try:
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                    r"Control Panel\Desktop")
+                                     r"Control Panel\Desktop")
                 value, _ = winreg.QueryValueEx(key, "PreferredUILanguages")
                 return value[0]
             except Exception as e:
                 print("Failed to get display language:", e)
                 return None
+
         def taskbar_theme(self):
             """
             获取 Windows 系统外壳主题颜色 (light/dark)
@@ -1051,12 +1071,12 @@ class Main():
             """
             try:
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                    r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                                     r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
                 value, _ = winreg.QueryValueEx(key, "SystemUsesLightTheme")
                 return "light" if value == 1 else "dark"
             except Exception as e:
                 self.root.logger.warning(f"Failed to get system theme: {e}")
-                return "light" 
+                return "light"
 
 
 if __name__ == "__main__":
