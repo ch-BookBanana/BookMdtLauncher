@@ -81,14 +81,14 @@ class Leftw(QWidget):
             
 class Mainw(QWidget):
     def __init__(self, parent=None, root=None):
-        super().__init__(None)
+        super().__init__()
         self.parent = parent
         self.root = root
         self.parent.parent.main.addWidget(self)
 
 class Rightw(QWidget):
     def __init__(self, parent=None, root=None):
-        super().__init__(None)
+        super().__init__()
         self.parent = parent
         self.root = root
         self.resize_(0)
@@ -510,6 +510,7 @@ class Main():
                     super().__init__(parent)
                     self.parent = parent
                     self.root = root
+                    self._btn = None
                     self.init_ui()
                     self.init_wid()
 
@@ -535,8 +536,10 @@ class Main():
                     self.btsGroup.buttonClicked.connect(self.someone_clicked)
 
                 def someone_clicked(self, btn):
-                    self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
-                    self.root.logger.debug(t("Page changed to: ", self.root.langer.get(btn.text_)))
+                    if self._btn is not btn:
+                        self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
+                        self.root.logger.debug(t("Page changed to: $1", self.root.langer.get(btn.text_)))
+                        self._btn = btn
 
                 def add_btn(self, text=None, logo=None):
                     btn = self.Btns(logo, text, self, self.root)
@@ -837,7 +840,7 @@ class Main():
                     def __init__(self, parent=None, root=None, text=None, logo=None):
                         super().__init__(parent, root, text, logo)
 
-                    class Right(Leftw):
+                    class Main(Mainw):
                         def __init__(self, parent=None, root=None):
                             super().__init__(parent=parent, root=root)
                             self.setAttribute(Qt.WA_StyledBackground, True)
