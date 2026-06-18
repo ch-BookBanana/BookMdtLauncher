@@ -63,6 +63,43 @@ def t(text, *args):
         text = text.replace(f"${i}", str(arg))
     return text
 
+class Leftw(QWidget):
+    def __init__(self, parent=None, root=None):
+        super().__init__(None)
+        self.parent = parent
+        self.root = root
+        self.resize_(0)
+        self.parent.parent.left.addWidget(self)
+
+    def resizeEvent(self, event):
+        self.parent.parent.left.setFixedWidth(self.width())
+        super().resizeEvent(event)
+
+    def resize_(self,width):
+        self.setFixedWidth(width)
+
+            
+class Mainw(QWidget):
+    def __init__(self, parent=None, root=None):
+        super().__init__(None)
+        self.parent = parent
+        self.root = root
+        self.parent.parent.main.addWidget(self)
+
+class Rightw(QWidget):
+    def __init__(self, parent=None, root=None):
+        super().__init__(None)
+        self.parent = parent
+        self.root = root
+        self.resize_(0)
+        self.parent.parent.right.addWidget(self)
+
+    def resizeEvent(self, event):
+        self.parent.parent.right.setFixedWidth(self.width())
+        super().resizeEvent(event)
+
+    def resize_(self,width):
+        self.setFixedWidth(width)
 
 class Main():
     def __init__(self):
@@ -501,15 +538,15 @@ class Main():
                     self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
                     self.root.logger.debug(t("Page changed to: ", self.root.langer.get(btn.text_)))
 
-                def add_btn(self, Stext, Slogo):
-                    btn = self.Btns(Slogo, Stext, self, self.root)
+                def add_btn(self, text=None, logo=None):
+                    btn = self.Btns(logo, text, self, self.root)
                     self.btns_.append(btn)
                     self.layout.addWidget(btn)
                     self.btsGroup.addButton(btn)
                     return btn
 
                 class Btns(QPushButton):
-                    def __init__(self, logo, text, parent=None, root=None):
+                    def __init__(self, logo=None, text=None, parent=None, root=None):
                         super().__init__(parent)
                         self.parent = parent
                         self.root = root
@@ -544,23 +581,35 @@ class Main():
                         self.layout.addWidget(self.text)
 
                     def lighting(self, light: bool):
-                        color = QColor(75, 75, 75) if light else QColor(200, 200, 200)
-                        logo = change_color(self.logo_, color)
-                        pixmap = logo.pixmap(40, 40)
+                        if self.logo_ is not None:
+                            color = QColor(75, 75, 75) if light else QColor(200, 200, 200)
+                            logo = change_color(self.logo_, color)
+                            pixmap = logo.pixmap(40, 40)
 
-                        if not pixmap.isNull():
-                            smooth_pixmap = pixmap.scaled(
-                                24, 24,
-                                Qt.KeepAspectRatio,
-                                Qt.FastTransformation
-                            )
-                            self.logo.setPixmap(smooth_pixmap)
-                        else:
-                            self.root.logger.warning(f"Failed to load pixmap for {self.logo_}")
+                            if not pixmap.isNull():
+                                smooth_pixmap = pixmap.scaled(
+                                    24, 24,
+                                    Qt.KeepAspectRatio,
+                                    Qt.FastTransformation
+                                )
+                                self.logo.setPixmap(smooth_pixmap)
+                            else:
+                                self.root.logger.warning(f"Failed to load pixmap for {self.logo_}")
 
                     def langing(self):
-                        self.text.setText(self.root.langer.get(self.text_))
-                        self.setToolTip(self.root.langer.get(self.text_))
+                        if self.text_ is not None:
+                            self.text.setText(self.root.langer.get(self.text_))
+                            self.setToolTip(self.root.langer.get(self.text_))
+
+                    def setText(self, _text):
+                        self.text_ = _text
+                        self.langing()
+
+                    def setLogo(self, _logo):
+                        self.logo_ = _logo
+                        self.lighting()
+
+                    
 
         class LLine(QWidget):
             def __init__(self, parent=None, root=None):
@@ -707,68 +756,90 @@ class Main():
                     self.root = root
                     self.pages = []
                     self.btns = []
-                    self.init_ui()
                     self.init_wid()
-
-                def init_ui(self):
-                    pass
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
                     self.layout.setContentsMargins(0, 0, 0, 0)
                     self.layout.setSpacing(0)
-                    self.setAlignment(Qt.AlignTopLeft)
+                    self.layout.setAlignment(Qt.AlignTop)
 
-                class Pages():
+                    self.left = self.Left_(self,self.root)
+                    self.layout.addWidget(self.left,0)
+                    self.main = self.Main_(self,self.root)
+                    self.layout.addWidget(self.main,1)
+                    self.right = self.Right_(self,self.root)
+                    self.layout.addWidget(self.right,0)
+
+                    self.start = self.Start(self,self.root)
+
+                class Left_(QStackedWidget):
                     def __init__(self, parent=None, root=None):
                         super().__init__()
                         self.parent = parent
                         self.root = root
-                        self.init_ui()
-                        self.init_wid()
-                        self.left = Left(self, self.root)
-                        self.middle = Middle(self, self.root)
-                        self.right = Right(self, self.root)
 
-                    def init_ui(self):
-                        pass
+
+                class Main_(QStackedWidget):
+                    def __init__(self, parent=None, root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+
+                class Right_(QStackedWidget):
+                    def __init__(self,parent=None, root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+
+            
+                class Page():
+                    def __init__(self, parent=None, root=None, text=None, logo=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+                        self.text = text
+                        self.logo = logo
+                        self.init_wid()
+                        self.id = len(self.parent.pages)
+                        self.parent.pages.append(self)
+                        self.btn = self.root.window.left.pagebtns.add_btn(self.text,self.logo)
+                        self.parent.btns.append(self)
+                        self.btn.clicked.connect(self.onclick)
+
+                    def onclick(self):
+                        self.parent.left.setCurrentWidget(self.left)
+                        self.parent.main.setCurrentWidget(self.main)
+                        self.parent.right.setCurrentWidget(self.right)
+
 
                     def init_wid(self):
-                        self.left = Left(self, self.root)
-                        self.middle = Middle(self, self.root)
-                        self.right = Right(self, self.root)
+                        cls_left = self.Left if hasattr(self, 'Left') else Leftw
+                        self.left = cls_left(self, self.root)
 
-                    class Left(QWidget):
+                        cls_main = self.Main if hasattr(self, 'Main') else Mainw
+                        self.main = cls_main(self, self.root)
+
+                        cls_right = self.Right if hasattr(self, 'Right') else Rightw
+                        self.right = cls_right(self, self.root)
+
+                        self.parent.pages.append(self)
+
+
+
+                class Start(Page):
+                    def __init__(self, parent=None, root=None, text=None, logo=None):
+                        super().__init__(parent,root,text,logo)
+
+                    class Left(Leftw):
                         def __init__(self, parent=None, root=None):
-                            super().__init__()
-                            self.parent = parent
-                            self.root = root
-
-                        def resizeEvent(self, event):
-                            self.parent.parent.leftStack.setFixedWidth(self.width())
-                            super().resizeEvent(event)
-
-                        def resize(self,width):
-                            self.setFixedWidth(width)
-                            
-                    class Middle(QWidget):
-                        def __init__(self, parent=None, root=None):
-                            super().__init__()
-                            self.parent = parent
-                            self.root = root
-
-                    class Right(QWidget):
-                        def __init__(self, parent=None, root=None):
-                            super().__init__()
-                            self.parent = parent
-                            self.root = root
-
-                        def resizeEvent(self, event):
-                            self.parent.parent.rightStack.setFixedWidth(self.width())
-                            super().resizeEvent(event)
-
-                        def resize(self,width):
-                            self.setFixedWidth(width)
+                            super().__init__(parent=parent,root=root)
+                            self.setStyleSheet("""
+                            Background-color: rgb(255, 255, 255);
+                            """)
+                            self.setAttribute(Qt.WA_StyledBackground, True)
+                            self.resize_(50)
+                            print(self.size().width(), self.size().height())
 
     class Tray(QSystemTrayIcon):
         def __init__(self, parent=None, root=None):

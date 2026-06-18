@@ -46,9 +46,10 @@ QPushButton[wid="tbtn"]:checked {
 }
 QMenu {
     background-color: #f0f0f0;
+    color: #383838
 }
 QMenu::item:selected {
-    background-color: #c0c0c0;
+    background-color: #d3d3d3;
 }
 
 
