@@ -757,9 +757,10 @@ class Main():
                     self.pages = []
                     self.btns = []
                     self.init_wid()
+                    self.pages[0].click()
 
                 def init_wid(self):
-                    self.layout = QVBoxLayout(self)
+                    self.layout = QHBoxLayout(self)
                     self.layout.setContentsMargins(0, 0, 0, 0)
                     self.layout.setSpacing(0)
                     self.layout.setAlignment(Qt.AlignTop)
@@ -771,24 +772,27 @@ class Main():
                     self.right = self.Right_(self,self.root)
                     self.layout.addWidget(self.right,0)
 
-                    self.start = self.Start(self,self.root)
+                    self.start = self.Start(self,self.root,self.root.langer.get("wid.pages.start"),getPath("src/assets/buttons/start.png"))
+                    self.download = self.Download(self,self.root,self.root.langer.get("wid.pages.download"),getPath("src/assets/buttons/download.png"))
+                    self.game = self.Game(self,self.root,self.root.langer.get("wid.pages.game"),getPath("src/assets/buttons/game.png"))
+                    self.setting = self.Setting(self,self.root,self.root.langer.get("wid.pages.setting"),getPath("src/assets/buttons/setting.png"))
 
                 class Left_(QStackedWidget):
                     def __init__(self, parent=None, root=None):
-                        super().__init__()
+                        super().__init__(parent)
                         self.parent = parent
                         self.root = root
 
 
                 class Main_(QStackedWidget):
                     def __init__(self, parent=None, root=None):
-                        super().__init__()
+                        super().__init__(parent)
                         self.parent = parent
                         self.root = root
 
                 class Right_(QStackedWidget):
                     def __init__(self,parent=None, root=None):
-                        super().__init__()
+                        super().__init__(parent)
                         self.parent = parent
                         self.root = root
 
@@ -805,13 +809,15 @@ class Main():
                         self.parent.pages.append(self)
                         self.btn = self.root.window.left.pagebtns.add_btn(self.text,self.logo)
                         self.parent.btns.append(self)
-                        self.btn.clicked.connect(self.onclick)
+                        self.btn.clicked.connect(self.changePage)
 
-                    def onclick(self):
+                    def changePage(self):
                         self.parent.left.setCurrentWidget(self.left)
                         self.parent.main.setCurrentWidget(self.main)
                         self.parent.right.setCurrentWidget(self.right)
-
+                    
+                    def click(self):
+                        self.btn.click()
 
                     def init_wid(self):
                         cls_left = self.Left if hasattr(self, 'Left') else Leftw
@@ -829,17 +835,28 @@ class Main():
 
                 class Start(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
-                        super().__init__(parent,root,text,logo)
+                        super().__init__(parent, root, text, logo)
 
-                    class Left(Leftw):
+                    class Right(Leftw):
                         def __init__(self, parent=None, root=None):
-                            super().__init__(parent=parent,root=root)
-                            self.setStyleSheet("""
-                            Background-color: rgb(255, 255, 255);
-                            """)
+                            super().__init__(parent=parent, root=root)
                             self.setAttribute(Qt.WA_StyledBackground, True)
-                            self.resize_(50)
-                            print(self.size().width(), self.size().height())
+
+                class Download(Page):
+                    def __init__(self, parent=None, root=None, text=None, logo=None):
+                        super().__init__(parent, root, text, logo)
+
+                class Game(Page):
+                    def __init__(self, parent=None, root=None, text=None, logo=None):
+                        super().__init__(parent, root, text, logo)
+
+                class Setting(Page):
+                    def __init__(self, parent=None, root=None, text=None, logo=None):
+                        super().__init__(parent, root, text, logo)
+
+
+
+
 
     class Tray(QSystemTrayIcon):
         def __init__(self, parent=None, root=None):

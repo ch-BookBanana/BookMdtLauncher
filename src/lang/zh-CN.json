@@ -26,8 +26,8 @@
 
     "wid.pages.start": "启动",
     "wid.pages.download": "下载",
-    "wid.pages.games": "游戏",
-    "wid.pages.settings": "设置",
+    "wid.pages.game": "游戏",
+    "wid.pages.setting": "设置",
 
     "tray.menu.close": "关闭"
 
