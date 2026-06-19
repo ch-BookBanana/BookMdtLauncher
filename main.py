@@ -121,7 +121,9 @@ class Main():
             "checkTime": 2000,
             "theme": 0,
             "maxLogNum": 50,
-            "closeByTray": True
+            "closeByTray": True,
+            "defaultGame": None,
+            "githubToken": None
         }
         self.settings = copy.deepcopy(self.defsettings)
 
