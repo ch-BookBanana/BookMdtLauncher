@@ -28,11 +28,12 @@ init = {
 
 
 from PyQt5.Qt import *
-import sys, os, json, copy, winreg, logging
+import sys, os, json, copy, winreg, logging, glob
 from datetime import datetime
 import ctypes
 import ctypes.wintypes
 from PyQt5.Qt import *
+from src.utils.mdtScanner import mdtScanner
 
 
 def getPath(relative_path):
@@ -96,6 +97,7 @@ class Rightw(QWidget):
 
     def resizeEvent(self, event):
         self.parent.parent.right.setFixedWidth(self.width())
+        print(self.width())
         super().resizeEvent(event)
 
     def resize_(self,width):
@@ -223,7 +225,7 @@ class Main():
             self.root = root
             self.root.logger.debug("init QW.window")
             self.root.window = self
-            self.setMinimumSize(QSize(500, 370))
+            self.setMinimumSize(QSize(600, 450))
 
             self.installEventFilter(self)
 
@@ -274,7 +276,7 @@ class Main():
 
             self.root.logger.debug("init QW.windowL.stren")
             self.stren = QWidget()
-            self.stren.setFixedWidth(31)
+            self.stren.setFixedWidth(41)
             self.layout.addWidget(self.stren, 0)
 
             self.root.logger.debug("init QW.windowL.main")
@@ -288,7 +290,7 @@ class Main():
             if obj is self and event.type() == QEvent.Resize:
                 new_width = self.left.width()  # 假设宽度固定，或者从配置读取
                 self.left.setGeometry(0, 0, new_width, self.height())
-                self.lline.setGeometry(new_width, 0, 1, self.height())
+                self.lline.setGeometry(new_width - 1, 0, 1, self.height())
 
                 self.root.logger.debug(f"Window resized via filter: {self.width()}x{self.height()}")
 
@@ -360,7 +362,7 @@ class Main():
                 self.init_wid()
 
             def init_ui(self):
-                self.setGeometry(0, 0, 30, self.parent.height())
+                self.setGeometry(0, 0, 40, self.parent.height())
                 self.setAttribute(Qt.WA_StyledBackground, True)
 
             def init_wid(self):
@@ -384,7 +386,7 @@ class Main():
             def fold(self, text=None):
                 if text is None:
                     text = not self.isfold
-                width = 30 if text else 150
+                width = 40 if text else 180
                 self.setGeometry(0, 0, width, self.height())
                 self.root.window.lline.init_ui()
                 self.root.logger.debug(f"Window left fold: {self.isfold}")
@@ -405,7 +407,7 @@ class Main():
                     self.init_wid()
 
                 def init_ui(self):
-                    self.setFixedSize(150, 30)
+                    self.setFixedSize(180, 40)
                     self.setAttribute(Qt.WA_StyledBackground, True)
 
                 def init_wid(self):
@@ -417,13 +419,13 @@ class Main():
 
                     self.logo = QLabel(self)
 
-                    self.logo.setFixedSize(30, 30)
+                    self.logo.setFixedSize(40, 40)
                     self.logo.setScaledContents(True)
                     self.layout.addWidget(self.logo, 0)
 
                     self.label = QLabel(self)
                     self.label.setText('Book MDT Launcher')
-                    self.label.setFixedWidth(120)
+                    self.label.setFixedWidth(140)
                     self.label.setProperty('wid', 'title')
                     self.layout.addWidget(self.label, 1)
 
@@ -450,12 +452,12 @@ class Main():
                         movpos = self.move_winpos_ + self.move_mousepos - self.move_mousepos_
                         if movpos.x() < 0:
                             movpos.setX(0)
-                        elif movpos.x() > screensize.width() - 30:
-                            movpos.setX(screensize.width() - 30)
+                        elif movpos.x() > screensize.width() - 40:
+                            movpos.setX(screensize.width() - 40)
                         if movpos.y() < 0:
                             movpos.setY(0)
-                        elif movpos.y() > screensize.height() - 30:
-                            movpos.setY(screensize.height() - 30)
+                        elif movpos.y() > screensize.height() - 40:
+                            movpos.setY(screensize.height() - 40)
                         self.root.window.move(movpos)
                     super().mouseMoveEvent(event)
 
@@ -518,7 +520,7 @@ class Main():
 
                 def init_ui(self):
                     self.setAttribute(Qt.WA_StyledBackground, False)
-                    self.setFixedWidth(150)
+                    self.setFixedWidth(180)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -532,14 +534,14 @@ class Main():
                     self.chooser = QWidget(self)
                     self.chooser.setAttribute(Qt.WA_StyledBackground, True)
                     self.chooser.setStyleSheet("background: #6e4197;")
-                    self.chooser.setFixedSize(3, 30)
+                    self.chooser.setFixedSize(3, 40)
                     self.chooser.move(-10, 0)
 
                     self.btsGroup.buttonClicked.connect(self.someone_clicked)
 
                 def someone_clicked(self, btn):
                     if self._btn is not btn:
-                        self.chooser.setGeometry(btn.x(), btn.y(), 3, 30)
+                        self.chooser.setGeometry(btn.x(), btn.y(), 3, 40)
                         self.root.logger.debug(t("Page changed to: $1", self.root.langer.get(btn.text_)))
                         self._btn = btn
 
@@ -561,7 +563,7 @@ class Main():
                         self.init_wid()
 
                     def init_ui(self):
-                        self.setFixedSize(150, 30)
+                        self.setFixedSize(180, 40)
                         self.setAttribute(Qt.WA_StyledBackground, False)
                         self.setProperty("wid", "lbtn")
                         self.setCheckable(True)
@@ -569,10 +571,10 @@ class Main():
                     def init_wid(self):
                         self.layout = QHBoxLayout(self)
                         self.layout.setContentsMargins(3, 0, 0, 0)
-                        self.layout.setSpacing(3)
+                        self.layout.setSpacing(5)
 
                         self.logo = QLabel(self)
-                        self.logo.setFixedSize(24, 30)
+                        self.logo.setFixedSize(40, 40)
                         self.logo.setAttribute(Qt.WA_StyledBackground, False)
                         self.logo.setProperty("wid", "lbtn")
                         self.logo.setScaledContents(False)
@@ -580,20 +582,20 @@ class Main():
 
                         self.text = QLabel(self)
                         self.text.setAttribute(Qt.WA_StyledBackground, False)
-                        self.text.setFixedSize(120, 30)
+                        self.text.setFixedSize(140, 40)
                         self.text.setProperty("wid", "lbtn")
                         self.langing()
                         self.layout.addWidget(self.text)
 
                     def lighting(self, light: bool):
                         if self.logo_ is not None:
-                            color = QColor(75, 75, 75) if light else QColor(200, 200, 200)
+                            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
                             logo = change_color(self.logo_, color)
-                            pixmap = logo.pixmap(40, 40)
+                            pixmap = logo.pixmap(56,56)
 
                             if not pixmap.isNull():
                                 smooth_pixmap = pixmap.scaled(
-                                    24, 24,
+                                    30, 30,
                                     Qt.KeepAspectRatio,
                                     Qt.FastTransformation
                                 )
@@ -628,7 +630,7 @@ class Main():
                 self.setProperty("wid", "line")
                 self.setFixedWidth(1)
                 self.setAttribute(Qt.WA_StyledBackground, True)
-                self.setGeometry(self.parent.left.width() + 1, 0, 1, self.parent.height())
+                self.setGeometry(self.parent.left.width(), 0, 1, self.parent.height())
 
             def init_wid(self):
                 pass
@@ -672,7 +674,7 @@ class Main():
                     self.init_wid()
 
                 def init_ui(self):
-                    self.setFixedHeight(30)
+                    self.setFixedHeight(34)
 
                 def init_wid(self):
                     self.root.logger.debug("init QW.windowL.mainL.topL")
@@ -732,7 +734,7 @@ class Main():
                         self.lighting(self.root.settings["theme"])
 
                     def lighting(self, light: bool):
-                        color = QColor(75, 75, 75) if light else QColor(200, 200, 200)
+                        color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
                         logo = change_color(self.logo_[self.setLogo_], color)
                         pixmap = QIcon(logo.pixmap(40, 40))
 
@@ -845,7 +847,204 @@ class Main():
                     class Main(Mainw):
                         def __init__(self, parent=None, root=None):
                             super().__init__(parent=parent, root=root)
+                            self.init_ui()
+                            self.init_wid()
+
+                        def init_ui(self):
                             self.setAttribute(Qt.WA_StyledBackground, True)
+
+                        def init_wid(self):
+                            self.layout = QHBoxLayout(self)
+                            self.layout.setSpacing(0)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setAlignment(Qt.AlignLeft)
+
+                            self.game = self.Game(self,self.root)
+                            self.layout.addWidget(self.game,0)
+
+                            self.right = self.Right(self,self.root)
+                            self.layout.addWidget(self.right,1)
+
+                        class Game(QWidget):
+                            def __init__(self, parent=None, root=None):
+                                super().__init__()
+                                self.parent = parent
+                                self.root = root
+                                self.game_ = None
+                                self._notFound = False
+                                self.init_ui()
+                                self.init_wid()
+
+                            def init_ui(self):
+                                self.setFixedWidth(200)
+                                self.setAttribute(Qt.WA_StyledBackground, True)
+
+                            def init_wid(self):
+                                self.layout = QVBoxLayout(self)
+                                self.layout.setSpacing(0)
+                                self.layout.setContentsMargins(0, 0, 0, 0)
+                                self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+                                self.layout.addSpacing(50)
+
+                                self.picture = QLabel()
+                                self.picture.setProperty("wid","png")
+                                self.picture.setAttribute(Qt.WA_StyledBackground, True)
+                                self.picture.setFixedSize(100,100)
+                                self.picture.setScaledContents(True)
+                                self.layout.addWidget(self.picture,0,Qt.AlignHCenter)
+
+                                self.layout.addSpacing(10)
+
+                                self.name = QLabel()
+                                self.name.setProperty("wid","title")
+                                self.name.setStyleSheet("font-size: 16px;")
+                                self.layout.addWidget(self.name,0,Qt.AlignHCenter)
+
+                                self.layout.addSpacing(5)
+
+                                self.vers = QLabel()
+                                self.vers.setProperty("wid","title")
+                                self.vers.setStyleSheet("font-size: 12px;")
+                                self.layout.addWidget(self.vers,0,Qt.AlignHCenter)
+
+                                self.layout.addSpacing(30)
+
+                                self.down = self.Down(self,self.root)
+                                self.layout.addWidget(self.down,1)
+
+                                self.timer = QTimer(self)
+                                self.timer.timeout.connect(self.timerEvent)
+                                self.timer.start(1000)
+
+                            def setGame(self,game):
+                                if game in mdtScanner.getMdts():
+                                    png = next((f"BML/.Mindustrys/{game}/icon{i}" for i in [".png",".jpg",".jpeg"] if os.path.exists(f"BML/.Mindustrys/{game}/icon{i}")),getPath("src/assets/icons/mdt/mdt.png"))
+                                    self.picture.setPixmap(QPixmap(png))
+                                    self.name.setText(game)
+                                    mdtmsg = mdtScanner.getMdtMsg(game)
+                                    self.vers.setText(f"V{mdtmsg["number"]}|{mdtmsg["build"]}-{mdtmsg["modifier"]}")
+
+                            def langing(self):
+                                if self._notFound:
+                                    self.name.setText(self.root.langer.get("wid.pages.start.gameNotfound"))
+                                    self.vers.setText(self.root.langer.get("wid.pages.start.gameNotfound2"))
+                                
+                            def timerEvent(self):
+                                if not mdtScanner.getMdts():
+                                    self.picture.setPixmap(QPixmap())
+                                    self._notFound = True
+                                    self.name.setText(self.root.langer.get("wid.pages.start.gameNotfound"))
+                                    self.vers.setText(self.root.langer.get("wid.pages.start.gameNotfound2"))
+                                    self.root.settings["defaultGame"] = None
+                                    self.game_ = None
+                                elif mdtScanner.getMdts() and (self.root.settings["defaultGame"] not in mdtScanner.getMdts() or self.game_ is not self.root.settings["defaultGame"]):
+                                    self._notFound = False
+                                    self.root.settings["defaultGame"] = mdtScanner.getMdts()[0]
+                                    self.setGame(self.root.settings["defaultGame"])
+                                    self.game_ = self.root.settings["defaultGame"]
+                                    self.root.saveSettings()
+
+                            class Down(QStackedWidget):
+                                def __init__(self,parent=None,root=None):
+                                    super().__init__(parent)
+                                    self.parent = parent
+                                    self.root = root
+
+                        class Right(QLabel):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__()
+                                self.parent = parent 
+                                self.root = root
+                                self.init_wid()
+
+
+                            def init_wid(self):
+                                self.layout = QHBoxLayout(self)
+                                self.layout.setSpacing(0)
+                                self.layout.setContentsMargins(50,50,50,50)
+
+                                self.layout.addWidget(QWidget(),1)
+                                
+                                self.lay2 = QWidget()
+                                self.lay2.setFixedWidth(185)
+                                self.lay2_ = QVBoxLayout(self.lay2)
+                                self.layout.addWidget(self.lay2,0)
+
+                                self.lay2_.setSpacing(5)
+                                self.lay2_.setContentsMargins(0,0,0,0)
+
+                                self.lay2_.addStretch(1)
+
+                                self.startbtn = self.btn(self,self.root,"#f7c334","wid.pages.start.startbtn")
+                                self.startbtn.setFixedSize(185,40)
+                                self.lay2_.addWidget(self.startbtn,0)
+
+                                self.lay3 = QWidget()
+                                self.lay3.setFixedHeight(40)
+                                self.lay3_ = QHBoxLayout(self.lay3)
+                                self.lay3_.setContentsMargins(0,0,0,0)
+                                self.lay3_.setSpacing(5)
+                                self.lay2_.addWidget(self.lay3)
+
+                                self.modbtn = self.btn(self,self.root,"#5587c9", "wid.pages.start.modbtn")
+                                self.modbtn.setFixedSize(140,40)
+                                self.lay3_.addWidget(self.modbtn,0)
+
+                                self.setbtn = self.btn(self,self.root,"#5587c9", "")
+                                self.setbtn.setFixedSize(40,40)
+                                self.setbtn.setIcon(QIcon(getPath("src/assets/buttons/setting.png")))
+                                self.setbtn.setIconSize(QSize(40,40))
+                                self.lay3_.addWidget(self.setbtn,0)
+
+
+                            class btn(QPushButton):
+                                def __init__(self, parent=None, root=None, color=None, text=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.init_ui()
+                                    if color is not None:
+                                        self.setColor(color)
+                                    if text is not None:
+                                        self.langing(text)
+
+                                def init_ui(self):
+                                    self.setAttribute(Qt.WA_StyledBackground, True)
+                                    self.setStyleSheet("""
+                                        QPushButton{
+                                            background-color: #00000000;
+                                            color: white;
+                                            border-radius: 10px;
+                                            font-size: 12px;
+                                        }
+                                    """)
+
+                                def setColor(self,color_):
+                                    self.setStyleSheet(f"""
+                                        QPushButton{{
+                                            background-color: {color_};
+                                            color: white;
+                                            border-radius: 10px;
+                                            font-size: 18px
+                                        }}
+                                        QPushButton:hover{{
+                                            border: 2px solid #88888844;
+                                        }}
+                                        QPushButton:pressed{{
+                                            border: 3px solid #88888888;
+                                        }}
+                                    """)
+
+                                def langing(self,txt):
+                                    self.setText(self.root.langer.get(txt))
+
+                                    
+
+                    class Right(Rightw):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent=parent, root=root)
+                            self.resize_(0)
 
                 class Download(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):

@@ -73,9 +73,7 @@ _original_getaddrinfo = socket.getaddrinfo
 
 def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     # 将 GitHub Assets 域名强制解析到真实 IP（基于 nslookup 结果）
-    if host in ("release-assets.githubusercontent.com", 
-                "github.com", 
-                "raw.githubusercontent.com"):
+    if host in ("release-assets.githubusercontent.com"):
         # 轮询三个可用 IP，避免单点故障
         import random
         fake_host = random.choice(["185.199.108.133", "185.199.109.133", "185.199.110.133"])
