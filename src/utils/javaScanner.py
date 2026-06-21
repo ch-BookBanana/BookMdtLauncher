@@ -126,7 +126,7 @@ class javaScanner:
         except Exception:
             return {}
 
-    # ---------- 扫描源：常见安装目录（限深4层） ----------
+    # ---------- 扫描源：常见安装目录（限深3层） ----------
     @classmethod
     async def _scan_common_dirs_async(cls) -> Set[str]:
         async def scan_one(root_dir: str) -> Set[str]:
@@ -197,3 +197,30 @@ class javaScanner:
         若失败则返回 None。
         """
         return cls._get_version_from_release(java_path)
+
+    @classmethod
+    def isJava(cls, java_path: str) -> bool:
+        """
+        检测输入路径的 java.exe 是否为有效 Java（不执行 java.exe）。
+        判断标准：
+        1. 文件存在且名为 java.exe
+        2. 所在目录为 bin
+        3. 能通过注册表或 release 文件获取到版本号
+        """
+        if not java_path or not os.path.isfile(java_path):
+            return False
+        
+        # 检查文件名是否为 java.exe (忽略大小写)
+        if os.path.basename(java_path).lower() != 'java.exe':
+            return False
+            
+        # 检查父目录是否为 bin
+        parent_dir = os.path.dirname(java_path)
+        if os.path.basename(parent_dir).lower() != 'bin':
+            return False
+
+        # 尝试获取版本，如果能获取到版本，则认为是有效的 Java 环境
+        version = cls.getJavaVersion(java_path)
+        return version is not None
+
+    

@@ -55,6 +55,9 @@ QMenu {
 QMenu::item:selected {
     background-color: #d3d3d3;
 }
+QStackedWidget[wid="widget"] {
+    background-color: rgb(245, 245, 245);
+}
 
 
 
@@ -116,4 +119,7 @@ QMenu[theme="dark"]::item {
 }
 QMenu[theme="dark"]::item:selected {
     background-color: rgba(255, 255, 255, 0.275);
+}
+QStackedWidget[wid="widget"][theme="dark"] {
+    background-color: rgb(43, 43, 43);
 }

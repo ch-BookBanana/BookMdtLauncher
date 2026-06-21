@@ -42,7 +42,7 @@ def _parse_simple_config_typed(content: str) -> dict:
 class mdtScanner:
     # 根目录：.Mindustrys，相对于当前工作目录（或可通过 __file__ 改为绝对）
     # 假设 .Mindustrys 位于启动器脚本同级目录
-    base_dir = "BML/.Mindustrys"   # 可以改成绝对路径
+    base_dir = "BML/.Mindustrys"
 
     @classmethod
     def _get_mdt_jar_path(cls, subdir_name):
