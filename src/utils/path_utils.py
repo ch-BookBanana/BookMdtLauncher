@@ -15,6 +15,17 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-from .path_utils import getPath
+import os
+import sys
 
-__all__ = ["getPath"]
+
+def getPath(relative_path):
+    """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包后的环境"""
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        if getattr(sys, 'frozen', False):
+            base_path = os.path.dirname(sys.executable)
+        else:
+            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_path, relative_path)

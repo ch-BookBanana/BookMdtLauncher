@@ -16,6 +16,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import os, zipfile
+from .path_utils import getPath
 
 def _parse_simple_config_typed(content: str) -> dict:
     """解析 version.properties 内容为字典"""
@@ -40,9 +41,9 @@ def _parse_simple_config_typed(content: str) -> dict:
     return config
 
 class mdtScanner:
-    # 根目录：.Mindustrys，相对于当前工作目录（或可通过 __file__ 改为绝对）
+    # 根目录：.Mindustrys，相对于启动器脚本同级目录
     # 假设 .Mindustrys 位于启动器脚本同级目录
-    base_dir = "BML/.Mindustrys"
+    base_dir = getPath("BML/.Mindustrys")
 
     @classmethod
     def _get_mdt_jar_path(cls, subdir_name):

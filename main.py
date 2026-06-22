@@ -33,17 +33,9 @@ from datetime import datetime
 import ctypes
 import ctypes.wintypes
 from PyQt5.Qt import *
+from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher
-
-
-def getPath(relative_path):
-    """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包后的环境"""
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
 
 
 def change_color(path, color: QColor):
@@ -140,7 +132,7 @@ class Main():
             "BML/logs",
             "BML/.Mindustrys"
         ]:
-            os.makedirs(i, exist_ok=True)
+            os.makedirs(getPath(i), exist_ok=True)
         self.winreg = self.Winreg(self, self)
         self.logger = self.Logger(self, self)
         self.logger.info("\n------------Book MDT Launcher------------"
@@ -167,10 +159,11 @@ class Main():
                     default[key] = value
 
         try:
-            if not os.path.exists("BML/settings.json"):
+            settings_path = getPath("BML/settings.json")
+            if not os.path.exists(settings_path):
                 self.logger.warning("settings file not found, using default settings")
             else:
-                with open("BML/settings.json", "r", encoding="utf-8") as f:
+                with open(settings_path, "r", encoding="utf-8") as f:
                     self.logger.info("loading settings...")
                     file_settings = json.load(f)
                     deep_merge_settings(self.settings, file_settings)
@@ -197,7 +190,8 @@ class Main():
 
     def saveSettings(self):
         try:
-            with open("BML/settings.json", "w", encoding="utf-8") as f:
+            settings_path = getPath("BML/settings.json")
+            with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, separators=(',', ':'), ensure_ascii=False)
             self.logger.info(self.langer.get("log.info.savesettings"))
         except Exception as e:
@@ -996,7 +990,7 @@ class Main():
                                 target = default if default in mdts else mdts[0]
 
                                 icon_path = None
-                                base = f"BML/.Mindustrys/{target}/icon"
+                                base = getPath(f"BML/.Mindustrys/{target}/icon")
                                 for ext in (".png", ".jpg", ".jpeg"):
                                     path = base + ext
                                     if os.path.exists(path):
@@ -1228,7 +1222,7 @@ class Main():
                                         index = 3
                                     if index == 0:
                                         self.hide()
-                                    else 1<=index<=3:
+                                    elif 1<=index<=3:
                                         self.show()
                                         self.setCurrentIndex(index + 1)
 
@@ -1264,6 +1258,38 @@ class Main():
 
                                     def init_ui(self):
                                         self.setAttribute(Qt.WA_StyledBackground,True)
+
+                                    def init_wid(self):
+                                        self.layout = QHBoxLayout(self)
+                                        self.layout.setContentMargins(0,0,0,0)
+                                        self.layout.setSpacing(0)
+
+                                        self.txt = self.TXT(self,self.root)
+                                        self.layout.addWidget(self.txt,1)
+
+                                    class TXT(QPlainTextEdit):
+                                        def __init__(self,parent=None,root=None):
+                                            super().__init__()
+                                            self.parent = parent
+                                            self.root= root
+                                            self.setReadOnly(True)
+                                            self.setProperty("wid", "log")
+                                            self.logs = []
+                                            self.setMaximnmBlockCount(1000)
+                                            self.parent.parent.parent.parent.launcher.game_log.connect(self.appendLog)
+
+                                        def appendLog(self,log):
+                                            if log["type"] == "info":
+                                                col = QColor("white") if self.root.settings["theme"] == "dark" else QColor("black")
+                                            else :
+                                                col = QColor("red")
+                                            self.logs.append([log["type"],log["text"]])
+                                            self.setTextColor(col)
+                                            self.appendPlainText(log["text"])
+                                            if len(self.logs) > 1000:
+                                                self.logs.pop(0)
+                                            
+
 
 
                             class btn(QPushButton):
@@ -1417,7 +1443,7 @@ class Main():
             console.setLevel(loglevel)
 
             # 文件 handler 配置
-            self.log_dir = "BML/logs"
+            self.log_dir = getPath("BML/logs")
             os.makedirs(self.log_dir, exist_ok=True)
 
             now = datetime.now()
@@ -1595,12 +1621,9 @@ class Main():
 
         def get_langs(self):
             langs = []
-            lang_dir = "src/lang"
-            # 注意：这里不能使用 getPath，因为 get_langs 在 load 之前调用，且路径是相对于项目根目录的
-            # 但为了打包后也能列出语言文件，需要改为使用 getPath
+            lang_dir = getPath("src/lang")
             try:
-                lang_dir_abs = getPath(lang_dir)
-                if not os.path.exists(lang_dir_abs):
+                if not os.path.exists(lang_dir):
                     return langs
                 for file in os.listdir(lang_dir_abs):
                     if file.endswith(".json"):

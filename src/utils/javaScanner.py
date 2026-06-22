@@ -13,6 +13,7 @@ import asyncio
 import time
 import winreg
 from typing import List, Optional, Set, Dict
+from .path_utils import getPath
 
 class javaScanner:
     """轻量级 Windows Java 嗅探器（无缓存，不扫用户目录）"""
@@ -33,7 +34,7 @@ class javaScanner:
         os.path.expandvars(r'%USERPROFILE%\AppData\Local\Programs\Eclipse Foundation'),
         os.path.expandvars(r'%USERPROFILE%\AppData\Local\Programs\Amazon Corretto'),
         os.path.expandvars(r'%USERPROFILE%\AppData\Local\Programs\Azul'),
-        os.path.abspath(r'BML\.Java'),
+           getPath('BML/.Java'),
     ]
 
     # ---------- 版本获取：从 release 文件 ----------
