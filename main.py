@@ -28,7 +28,7 @@ init = {
 
 
 from PyQt5.Qt import *
-import sys, os, json, copy, winreg, logging, glob, locale
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib
 from datetime import datetime
 import ctypes
 import ctypes.wintypes
@@ -36,6 +36,7 @@ from PyQt5.Qt import *
 from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher
+from src.utils.qthtimer import QThTimer
 
 
 def change_color(path, color: QColor):
@@ -56,35 +57,6 @@ def t(text, *args):
     for i, arg in enumerate(args, start=1):
         text = text.replace(f"${i}", str(arg))
     return text
-
-
-class _Runnable(QRunnable):
-    def __init__(self, task, callback):
-        super().__init__()
-        self.task = task
-        self.callback = callback
-        self.signal = _Signal()
-
-    def run(self):
-        try:
-            result = self.task()
-            self.signal.done.emit(result, self.callback)
-        except:
-            pass
-
-class _Signal(QObject):
-    done = pyqtSignal(object, object)
-
-pool = QThreadPool()
-_signal_bridge = _Signal()
-_signal_bridge.done.connect(lambda result, callback: callback(result))
-
-def runAsync(task, callback):
-    runnable = _Runnable(task, callback)
-    runnable.signal.done.connect(
-        lambda res, cb, s=runnable: (cb(res), pool.releaseThread())
-    )
-    pool.start(runnable)
 
 
 class Leftw(QWidget):
@@ -918,6 +890,12 @@ class Main():
                                 self._cached_pixmap = None
                                 self._cached_img_bytes = None
                                 self._pending_update = False
+                                self._display_state = {
+                                    "name": None,
+                                    "version": None,
+                                    "img_sha128": None,
+                                    "selected_game": None
+                                }
                                 self.init_ui()
                                 self.init_wid()
 
@@ -972,13 +950,19 @@ class Main():
                                 self._notFound = True
                                 self._cached_pixmap = None
                                 self._cached_img_bytes = None
+                                self._display_state = {
+                                    "name": None,
+                                    "version": None,
+                                    "img_sha128": None,
+                                    "selected_game": None
+                                }
                                 self.name.setText(self.root.langer.get("wid.pages.start.gameNotfound"))
                                 self.vers.setText(self.root.langer.get("wid.pages.start.gameNotfound2"))
 
                             def timerEvent(self):
                                 default = self.root.settings["defaultGame"]
-                                runAsync(
-                                    lambda: self._prepare_display_data(default),
+                                QThTimer.task(
+                                    lambda event, default=default: self._prepare_display_data(default),
                                     lambda data: self._apply_display_data(data)
                                 )
 
@@ -988,6 +972,7 @@ class Main():
                                     return {"type": "notfound"}
 
                                 target = default if default in mdts else mdts[0]
+                                selected_game = target
 
                                 icon_path = None
                                 base = getPath(f"BML/.Mindustrys/{target}/icon")
@@ -1001,6 +986,7 @@ class Main():
 
                                 with open(icon_path, "rb") as f:
                                     img_bytes = f.read()
+                                img_sha128 = hashlib.sha256(img_bytes).hexdigest()[:32]
 
                                 mdtmsg = mdtScanner.getMdtMsg(target)
                                 version_str = f"V{mdtmsg['number']}|{mdtmsg['build']}-{mdtmsg['modifier']}"
@@ -1008,7 +994,9 @@ class Main():
                                 return {
                                     "type": "game",
                                     "name": target,
+                                    "selected_game": selected_game,
                                     "img_bytes": img_bytes,
+                                    "img_sha128": img_sha128,
                                     "version": version_str
                                 }
 
@@ -1021,38 +1009,50 @@ class Main():
                                         self.root.saveSettings()
                                         self._current_display = None
                                     return
+                                same_name = self._display_state["name"] == data["name"]
+                                same_version = self._display_state["version"] == data["version"]
+                                same_image = self._display_state["img_sha128"] == data["img_sha128"]
+                                same_game = self._display_state["selected_game"] == data["selected_game"]
 
-                                if (self._current_display == data["name"] 
-                                        and not self._notFound
-                                        and self._cached_img_bytes == data["img_bytes"]):
+                                if same_name and same_version and same_image and same_game and not self._notFound:
                                     return
 
-                                self._pending_data = data
-                                if not self._pending_update:
-                                    self._pending_update = True
-                                    QTimer.singleShot(0, self._delayed_update)
-
-                            def _delayed_update(self):
-                                self._pending_update = False
-                                data = self._pending_data
-
                                 self._notFound = False
-                                self._current_display = data["name"]
 
-                                if self._cached_img_bytes != data["img_bytes"]:
-                                    pix = QPixmap()
-                                    pix.loadFromData(data["img_bytes"])
-                                    self._cached_pixmap = pix
-                                    self._cached_img_bytes = data["img_bytes"]
+                                if not same_image:
+                                    self.setIcon_(data["img_bytes"], data["img_sha128"])
 
-                                self.picture.setPixmap(self._cached_pixmap)
-                                self.name.setText(data["name"])
-                                self.vers.setText(data["version"])
+                                if not same_name or not same_version:
+                                    self.setLabel_(data["name"], data["version"])
 
-                                if self.root.settings["defaultGame"] != data["name"]:
+                                if self.root.settings.get("defaultGame") != data["name"]:
                                     self.root.settings["defaultGame"] = data["name"]
-                                    self.game_ = data["name"]
                                     self.root.saveSettings()
+
+                                self._display_state["name"] = data["name"]
+                                self._display_state["version"] = data["version"]
+                                self._display_state["img_sha128"] = data["img_sha128"]
+                                self._display_state["selected_game"] = data["selected_game"]
+
+                            def setIcon_(self, img_bytes, img_sha128):
+                                if img_sha128 is None or self._display_state.get("img_sha128") == img_sha128:
+                                    return
+
+                                pix = QPixmap()
+                                if pix.loadFromData(img_bytes):
+                                    self._cached_pixmap = pix
+                                    self._cached_img_bytes = img_bytes
+                                    self.picture.setPixmap(pix)
+                                    self._display_state["img_sha128"] = img_sha128
+
+                            def setLabel_(self, name, version):
+                                if self._display_state.get("name") != name:
+                                    self.name.setText(name)
+                                    self._display_state["name"] = name
+
+                                if self._display_state.get("version") != version:
+                                    self.vers.setText(version)
+                                    self._display_state["version"] = version
 
                             class Down(QStackedWidget):
                                 def __init__(self,parent=None,root=None):
@@ -1604,7 +1604,7 @@ class Main():
 
             # 从主窗口开始遍历
             if hasattr(self.root, 'window') and self.root.window:
-                QTimer.singleShot(0, lambda: (notify_langing(self.root.window),self.root.logger.debug)("Langing..."))
+                QTimer.singleShot(0, lambda: (notify_langing(self.root.window), self.root.logger.debug("Langing...")))
 
         def get(self, key):
             """
@@ -1625,7 +1625,7 @@ class Main():
             try:
                 if not os.path.exists(lang_dir):
                     return langs
-                for file in os.listdir(lang_dir_abs):
+                for file in os.listdir(lang_dir):
                     if file.endswith(".json"):
                         langs.append(file.replace(".json", ""))
             except Exception as e:
@@ -1639,7 +1639,7 @@ class Main():
 
         def display_language(self):
             try:
-                dll = ctypes.windll.kerne32
+                dll = ctypes.windll.kernel32
                 langId = dll.GetUserDefaultUILanguage()
                 langStr = locale.windows_locale.get(langId)
                 if langStr:

@@ -12,6 +12,7 @@
 
     "log.info.trayLoad": "系统托盘加载完成",
     "log.info.trayTheme": "系统托盘切换主题为: $1",
+    "log.info.cleanoldlogs": "已清理旧日志: $1",
 
     "log.warning.trayIconPath": "托盘图标路径不存在: $1",
 
