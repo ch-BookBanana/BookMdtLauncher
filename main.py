@@ -36,7 +36,7 @@ from PyQt5.Qt import *
 from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher
-from src.utils.qthtimer import QThTimer
+from src.utils.QThTimer import QThTimer
 
 
 def change_color(path, color: QColor):
@@ -54,8 +54,11 @@ def change_color(path, color: QColor):
 
 
 def t(text, *args):
-    for i, arg in enumerate(args, start=1):
-        text = text.replace(f"${i}", str(arg))
+    try:
+        for i, arg in enumerate(reversed(args), start=1):
+            text = text.replace(f"${i}", str(arg))
+    except Exception:
+        pass
     return text
 
 
@@ -153,6 +156,8 @@ class Main():
             self.qss = f.read()
         QApplication.instance().setStyleSheet(self.qss)
         self.logger.debug("load QtStyleSheet: \n" + self.qss)
+
+        self.launcher = mdtLauncher()
 
         self.tray = self.Tray(self, self)
         self.window = self.Window(self, self)
@@ -670,7 +675,7 @@ class Main():
                     self.init_wid()
 
                 def init_ui(self):
-                    self.setFixedHeight(34)
+                    self.setFixedHeight(40)
 
                 def init_wid(self):
                     self.root.logger.debug("init QW.windowL.mainL.topL")
@@ -679,10 +684,13 @@ class Main():
                     self.layout.setSpacing(0)
                     self.layout.setAlignment(Qt.AlignRight)
 
+                    self.layout.addStretch(1)
+
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_mini")
                     self.tbt_mini = self.TriBtn([getPath("src/assets/tribtns/minimize.png")], self, self.root)
                     self.tbt_mini.clicked.connect(lambda: self.root.window.showMinimized())
                     self.layout.addWidget(self.tbt_mini)
+                    self.layout.addSpacing(5)
 
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_max")
                     self.tbt_max = self.TriBtn(
@@ -693,11 +701,14 @@ class Main():
                         self, self.root)
                     self.tbt_max.clicked.connect(self.maxmize)
                     self.layout.addWidget(self.tbt_max)
+                    self.layout.addSpacing(5)
 
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_close")
                     self.tbt_close = self.TriBtn([getPath("src/assets/tribtns/close.png")], self, self.root)
                     self.tbt_close.clicked.connect(lambda: self.close_())
+                    self.tbt_close.setStyleSheet("QPushButton:hover{background: red;}")
                     self.layout.addWidget(self.tbt_close)
+                    self.layout.addSpacing(5)
 
                 def maxmize(self):
                     if self.root.window.isMaximized():
@@ -721,7 +732,7 @@ class Main():
                         self.init_ui()
 
                     def init_ui(self):
-                        self.setFixedSize(30, 30)
+                        self.setFixedSize(30,30)
                         self.setAttribute(Qt.WA_StyledBackground, False)
                         self.setProperty("wid", "tbtn")
 
@@ -732,7 +743,7 @@ class Main():
                     def lighting(self, light: bool):
                         color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
                         logo = change_color(self.logo_[self.setLogo_], color)
-                        pixmap = QIcon(logo.pixmap(40, 40))
+                        pixmap = QIcon(logo.pixmap(48,48))
 
                         self.setIcon(pixmap)
 
@@ -834,512 +845,105 @@ class Main():
 
                         self.parent.pages.append(self)
 
-
-
                 class Start(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
-                        self.launcher = mdtLauncher()
                         super().__init__(parent, root, text, logo)
-                        self.launcher.game_launched.connect(self.on_launch)
-                        self.launcher.game_started.connect(self.on_start)
-                        self.launcher.game_finished.connect(self.on_finish)
-                    def on_launch(self):
-                        self.main.game.down.setCurrentIndex(2)
-                        self.main.right.right.changeTo(2)
 
-                    def on_start(self):
-                        self.main.game.down.setCurrentIndex(3)
-                        self.main.right.right.changeTo(3)
-
-                    def on_finish(self, exitCode):
-                        self.main.game.down.setCurrentIndex(0)
-                        self.main.right.right.changeTo(0)
-                        self.root.logger.info(f"Game finished with code {exitCode}")
-                    
-                        
-
-                    class Main(Mainw):
+                    class Left(Leftw):
                         def __init__(self, parent=None, root=None):
-                            super().__init__(parent=parent, root=root)
-                            self.init_ui()
+                            super().__init__(parent, root)
+                            self.resize_(200)
                             self.init_wid()
 
-                        def init_ui(self):
-                            self.setAttribute(Qt.WA_StyledBackground, True)
+                        def init_wid(self):
+                            self.layout = QVBoxLayout(self)
+                            self.layout.setContentsMargins(0,0,0,0)
+                            self.layout.setSpacing(0)
+                            self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+                            self.layout.addSpacing(40)
+                            self.icon = QLabel(self)
+                            self.icon.setFixedSize(120,120)
+                            self.icon.setScaledContents(True)
+                            self.icon.setProperty("wid", "png")
+                            self.layout.addWidget(self.icon, 0, Qt.AlignHCenter)
+                            self.layout.addSpacing(20)
+
+                            self.gameTxt = QLabel()
+                            self.gameTxt.setProperty("wid","title")
+                            self.gameTxt.setStyleSheet("font-size:20px")
+                            self.layout.addWidget(self.gameTxt, 0, Qt.AlignHCenter)
+                            self.gameTxt.setText("游戏名")
+
+                            self.versTxt = QLabel()
+                            self.versTxt.setProperty("wid","title")
+                            self.versTxt.setStyleSheet("font-size:12px")
+                            self.layout.addWidget(self.versTxt, 0, Qt.AlignHCenter)
+                            self.versTxt.setText("版本")
+
+                            self.layout.addSpacing(30)
+                            self.main = QStackedWidget()
+                            self.layout.addWidget(self.main,1)
+
+                    class Main(Mainw):
+                        def __init__(self,parent=None,root=None):
+                            super().__init__(parent,root)
+                            self.init_wid()
 
                         def init_wid(self):
                             self.layout = QHBoxLayout(self)
+                            self.layout.setContentsMargins(0,0,0,0)
                             self.layout.setSpacing(0)
-                            self.layout.setContentsMargins(0, 0, 0, 0)
-                            self.layout.setAlignment(Qt.AlignLeft)
+                            self.backg = self.Backg(self,self)
+                            self.layout.addWidget(self.backg)
 
-                            self.game = self.Game(self,self.root)
-                            self.layout.addWidget(self.game,0)
 
-                            self.right = self.Right(self,self.root)
-                            self.layout.addWidget(self.right,1)
-
-                        class Game(QWidget):
-                            def __init__(self, parent=None, root=None):
+                        class Backg(QWidget):
+                            def __init__(self,parent=None,root=None):
                                 super().__init__()
                                 self.parent = parent
                                 self.root = root
-                                self.game_ = None
-                                self._notFound = False
-                                self._current_display = None
-                                self._cached_pixmap = None
-                                self._cached_img_bytes = None
-                                self._pending_update = False
-                                self._display_state = {
-                                    "name": None,
-                                    "version": None,
-                                    "img_sha128": None,
-                                    "selected_game": None
-                                }
-                                self.init_ui()
-                                self.init_wid()
-
-                            def init_ui(self):
-                                self.setFixedWidth(200)
                                 self.setAttribute(Qt.WA_StyledBackground, True)
-
-                            def init_wid(self):
-                                self.layout = QVBoxLayout(self)
-                                self.layout.setSpacing(0)
-                                self.layout.setContentsMargins(0, 0, 0, 0)
-                                self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-
-                                self.layout.addSpacing(50)
-
-                                self.picture = QLabel()
-                                self.picture.setProperty("wid","png")
-                                self.picture.setAttribute(Qt.WA_StyledBackground, True)
-                                self.picture.setFixedSize(100,100)
-                                self.picture.setScaledContents(True)
-                                self.layout.addWidget(self.picture,0,Qt.AlignHCenter)
-
-                                self.layout.addSpacing(10)
-
-                                self.name = QLabel()
-                                self.name.setProperty("wid","title")
-                                self.name.setStyleSheet("font-size: 16px;")
-                                self.layout.addWidget(self.name,0,Qt.AlignHCenter)
-
-                                self.layout.addSpacing(5)
-
-                                self.vers = QLabel()
-                                self.vers.setProperty("wid","title")
-                                self.vers.setStyleSheet("font-size: 12px;")
-                                self.layout.addWidget(self.vers,0,Qt.AlignHCenter)
-
-                                self.layout.addSpacing(30)
-
-                                self.down = self.Down(self,self.root)
-                                self.layout.addWidget(self.down,1)
-
-                                self.timer = QTimer(self)
-                                self.timer.timeout.connect(self.timerEvent)
-                                self.timer.start(5000)
-
-                            def langing(self):
-                                if self._notFound:
-                                    self._show_not_found()
-
-                            def _show_not_found(self):
-                                self.picture.setPixmap(QPixmap())
-                                self._notFound = True
-                                self._cached_pixmap = None
-                                self._cached_img_bytes = None
-                                self._display_state = {
-                                    "name": None,
-                                    "version": None,
-                                    "img_sha128": None,
-                                    "selected_game": None
-                                }
-                                self.name.setText(self.root.langer.get("wid.pages.start.gameNotfound"))
-                                self.vers.setText(self.root.langer.get("wid.pages.start.gameNotfound2"))
-
-                            def timerEvent(self):
-                                default = self.root.settings["defaultGame"]
-                                QThTimer.task(
-                                    lambda event, default=default: self._prepare_display_data(default),
-                                    lambda data: self._apply_display_data(data)
-                                )
-
-                            def _prepare_display_data(self, default):
-                                mdts = mdtScanner.getMdts()
-                                if not mdts:
-                                    return {"type": "notfound"}
-
-                                target = default if default in mdts else mdts[0]
-                                selected_game = target
-
-                                icon_path = None
-                                base = getPath(f"BML/.Mindustrys/{target}/icon")
-                                for ext in (".png", ".jpg", ".jpeg"):
-                                    path = base + ext
-                                    if os.path.exists(path):
-                                        icon_path = path
-                                        break
-                                if not icon_path:
-                                    icon_path = getPath("src/assets/icons/mdt/mdt.png")
-
-                                with open(icon_path, "rb") as f:
-                                    img_bytes = f.read()
-                                img_sha128 = hashlib.sha256(img_bytes).hexdigest()[:32]
-
-                                mdtmsg = mdtScanner.getMdtMsg(target)
-                                version_str = f"V{mdtmsg['number']}|{mdtmsg['build']}-{mdtmsg['modifier']}"
-
-                                return {
-                                    "type": "game",
-                                    "name": target,
-                                    "selected_game": selected_game,
-                                    "img_bytes": img_bytes,
-                                    "img_sha128": img_sha128,
-                                    "version": version_str
-                                }
-
-                            def _apply_display_data(self, data):
-                                if data["type"] == "notfound":
-                                    if not self._notFound:
-                                        self._show_not_found()
-                                        self.root.settings["defaultGame"] = None
-                                        self.game_ = None
-                                        self.root.saveSettings()
-                                        self._current_display = None
-                                    return
-                                same_name = self._display_state["name"] == data["name"]
-                                same_version = self._display_state["version"] == data["version"]
-                                same_image = self._display_state["img_sha128"] == data["img_sha128"]
-                                same_game = self._display_state["selected_game"] == data["selected_game"]
-
-                                if same_name and same_version and same_image and same_game and not self._notFound:
-                                    return
-
-                                self._notFound = False
-
-                                if not same_image:
-                                    self.setIcon_(data["img_bytes"], data["img_sha128"])
-
-                                if not same_name or not same_version:
-                                    self.setLabel_(data["name"], data["version"])
-
-                                if self.root.settings.get("defaultGame") != data["name"]:
-                                    self.root.settings["defaultGame"] = data["name"]
-                                    self.root.saveSettings()
-
-                                self._display_state["name"] = data["name"]
-                                self._display_state["version"] = data["version"]
-                                self._display_state["img_sha128"] = data["img_sha128"]
-                                self._display_state["selected_game"] = data["selected_game"]
-
-                            def setIcon_(self, img_bytes, img_sha128):
-                                if img_sha128 is None or self._display_state.get("img_sha128") == img_sha128:
-                                    return
-
-                                pix = QPixmap()
-                                if pix.loadFromData(img_bytes):
-                                    self._cached_pixmap = pix
-                                    self._cached_img_bytes = img_bytes
-                                    self.picture.setPixmap(pix)
-                                    self._display_state["img_sha128"] = img_sha128
-
-                            def setLabel_(self, name, version):
-                                if self._display_state.get("name") != name:
-                                    self.name.setText(name)
-                                    self._display_state["name"] = name
-
-                                if self._display_state.get("version") != version:
-                                    self.vers.setText(version)
-                                    self._display_state["version"] = version
-
-                            class Down(QStackedWidget):
-                                def __init__(self,parent=None,root=None):
-                                    super().__init__(parent)
-                                    self.parent = parent
-                                    self.root = root
-
-                                    self.m = self.M(self,self.root)#0-选择游戏
-                                    self.addWidget(self.m)
-
-                                    self.mod = self.Mod(self,self.root)#1-模组返回
-                                    self.addWidget(self.mod)
-
-                                    self.start = self.Start(self,self.root)#2-游戏数据
-                                    self.addWidget(self.start)
-
-                                    self.start2 = self.Start2(self,self.root)#3-取消游戏
-                                    self.addWidget(self.start2)
-
-                                    self.setCurrentIndex(0)
-
-                                class M(QWidget):
-                                    def __init__(self,parent=None,root=None):
-                                        super().__init__()
-                                        self.parent = parent
-                                        self.root = root
-                                        self.init_wid()
-
-                                    def init_wid(self):
-                                        self.layout = QVBoxLayout(self)
-                                        self.layout.setSpacing(10)
-                                        self.layout.setContentsMargins(20,20,20,20)
-                                        self.layout.setAlignment(Qt.AlignBottom)
-
-                                        self.game = self.btn(self,self.root,"wid.pages.start.gamebtn")
-                                        self.game.setFixedHeight(50)
-                                        self.layout.addWidget(self.game)
-                                        
-
-                                    class btn(QPushButton):
-                                        def __init__(self, parent=None, root=None, text=None):
-                                            super().__init__(parent)
-                                            self.parent = parent
-                                            self.root = root
-                                            self.text = text
-                                            self.init_ui()
-                                            self.langing()
-
-                                        def init_ui(self):
-                                            self.setStyleSheet("""
-                                                QPushButton{
-                                                    background-color: transparent;
-                                                    color: rgb(200, 200, 200);
-                                                    border: 2px solid rgb(200, 200, 200);
-                                                    border-radius: 10px;
-                                                }
-                                                QPushButton[theme="dark"]{
-                                                    background-color: transparent;
-                                                    color: rgb(20, 20, 20);
-                                                    border: 2px solid rgb(20, 20, 20);
-                                                    border-radius: 10px;
-                                                }
-                                            """)
-
-                                        def langing(self):
-                                            self.setText(self.root.langer.get(self.text))
-
-                                            
-
-                                class Mod(QWidget):
-                                    def __init__(self,parent=None,root=None):
-                                        super().__init__(parent)
-                                        self.parent = parent
-                                        self.root = root
-
-
-                                class Start(QWidget):
-                                    def __init__(self,parent=None,root=None):
-                                        super().__init__(parent)
-                                        self.parent = parent
-                                        self.root = root
-
-                                class Start2(QWidget):
-                                    def __init__(self,parent=None,root=None):
-                                        super().__init__(parent)
-                                        self.parent = parent
-                                        self.root = root
-
-                        class Right(QLabel):
-                            def __init__(self,parent=None,root=None):
-                                super().__init__()
-                                self.parent = parent 
-                                self.root = root
+                                self.png = 0
+                                self.pixs = [None,None]
                                 self.init_wid()
-
+                                self.setPixmap(QPixmap(getPath("src/assets/backg/1.png")))
 
                             def init_wid(self):
-                                self.layout = QHBoxLayout(self)
-                                self.layout.setSpacing(0)
-                                self.layout.setContentsMargins(50,50,50,50)
-
-                                self.layout.addWidget(QWidget(),1)
+                                self.pngs = [QLabel(self),QLabel(self)]
                                 
-                                self.lay2 = QWidget()
-                                self.lay2.setFixedWidth(185)
-                                self.lay2_ = QVBoxLayout(self.lay2)
-                                self.layout.addWidget(self.lay2,0)
 
-                                self.lay2_.setSpacing(5)
-                                self.lay2_.setContentsMargins(0,0,0,0)
+                                self.shadow = QWidget(self)
 
-                                self.lay2_.addStretch(1)
+                                self.pngs[1].hide()
+                                self.resizeEvent(None)
+                                QTimer().singleShot(0, lambda:print(self.pngs[1].geometry().x(),self.pngs[1].geometry().y()))
 
-                                self.startbtn = self.btn(self,self.root,"#f7c334","wid.pages.start.startbtn")
-                                self.startbtn.setFixedSize(185,40)
-                                self.startbtn.clicked.connect(lambda: self.parent.parent.launcher.run(self.root.settings["defaultGame"]))
-                                self.lay2_.addWidget(self.startbtn,0)
+                            def setPixmap(self,pix=None):
+                                self.pixs[1-self.png] = pix
+                                self.pngs[1-self.png].hide()
+                                pix = self.pixs[1-self.png].scaled(
+                                    self.size(),
+                                    Qt.KeepAspectRatioByExpanding,
+                                    Qt.SmoothTransformation
+                                ) if self.pixs[1-self.png] is not None else QPixmap()
+                                self.pngs[1-self.png].setPixmap(pix)
+                                self.pngs[1-self.png].stackUnder(self.shadow)
+                                self.pngs[1-self.png].show()
+                                self.png = 1-self.png
+                                
 
-                                self.lay3 = QWidget()
-                                self.lay3.setFixedHeight(40)
-                                self.lay3_ = QHBoxLayout(self.lay3)
-                                self.lay3_.setContentsMargins(0,0,0,0)
-                                self.lay3_.setSpacing(5)
-                                self.lay2_.addWidget(self.lay3)
+                            def resizeEvent(self,event):
+                                for i,n in enumerate(self.pngs,start=0):
+                                    n.setFixedSize(self.size())
+                                    pix = self.pixs[i].scaled(
+                                            self.size(),
+                                            Qt.KeepAspectRatioByExpanding,
+                                            Qt.SmoothTransformation
+                                    ) if self.pixs[i] is not None else QPixmap()
+                                    n.setPixmap(pix)
+                                super().resizeEvent(event)
 
-                                self.modbtn = self.btn(self,self.root,"#5587c9", "wid.pages.start.modbtn")
-                                self.modbtn.setFixedSize(140,40)
-                                self.lay3_.addWidget(self.modbtn,0)
-
-                                self.setbtn = self.btn(self,self.root,"#5587c9", "")
-                                self.setbtn.setFixedSize(40,40)
-                                self.setbtn.setIcon(QIcon(getPath("src/assets/buttons/setting.png")))
-                                self.setbtn.setIconSize(QSize(40,40))
-                                self.lay3_.addWidget(self.setbtn,0)
-
-                                self.layout2 = QHBoxLayout(self)
-                                self.right = self.Right(self,self.root)
-                                self.layout2.addWidget(self.right,1) 
-
-                            class Right(QStackedWidget):
-                                def __init__(self, parent,root):
-                                    super().__init__()
-                                    self.setParent(parent)
-                                    self.parent = parent
-                                    self.root = root
-                                    
-                                    self.init_ui()
-                                    self.init_wid()
-                                    self.hide()
-
-                                def init_ui(self):
-                                    self.setAttribute(Qt.WA_TranslucentBackground,True)
-                                    self.setProperty("wid","widget")
-
-                                def init_wid(self):
-                                    self.mod = self.Mod(self,self.root)
-                                    self.addWidget(self.mod)
-
-                                    self.world = self.World(self,self.root)
-                                    self.addWidget(self.world)
-
-                                    self.start = self.Start(self,self.root)
-                                    self.addWidget(self.start)
-
-                                def changeTo(self, index):
-                                    if index > 3:
-                                        index = 3
-                                    if index == 0:
-                                        self.hide()
-                                    elif 1<=index<=3:
-                                        self.show()
-                                        self.setCurrentIndex(index + 1)
-
-                                class Mod(QWidget):
-                                    def __init__(self, parent,root):
-                                        super().__init__()
-                                        self.parent = parent
-                                        self.root = root
-
-                                        self.init_ui()
-
-                                    def init_ui(self):
-                                        self.setAttribute(Qt.WA_StyledBackground,True)
-
-                                class World(QWidget):
-                                    def __init__(self, parent,root):
-                                        super().__init__()
-                                        self.parent = parent
-                                        self.root = root
-                                        
-                                        self.init_ui()
-
-                                    def init_ui(self):
-                                        self.setAttribute(Qt.WA_StyledBackground,True)
-
-                                class Start(QWidget):
-                                    def __init__(self, parent,root):
-                                        super().__init__()
-                                        self.parent = parent
-                                        self.root = root
-                                        
-                                        self.init_ui()
-
-                                    def init_ui(self):
-                                        self.setAttribute(Qt.WA_StyledBackground,True)
-
-                                    def init_wid(self):
-                                        self.layout = QHBoxLayout(self)
-                                        self.layout.setContentMargins(0,0,0,0)
-                                        self.layout.setSpacing(0)
-
-                                        self.txt = self.TXT(self,self.root)
-                                        self.layout.addWidget(self.txt,1)
-
-                                    class TXT(QPlainTextEdit):
-                                        def __init__(self,parent=None,root=None):
-                                            super().__init__()
-                                            self.parent = parent
-                                            self.root= root
-                                            self.setReadOnly(True)
-                                            self.setProperty("wid", "log")
-                                            self.logs = []
-                                            self.setMaximnmBlockCount(1000)
-                                            self.parent.parent.parent.parent.launcher.game_log.connect(self.appendLog)
-
-                                        def appendLog(self,log):
-                                            if log["type"] == "info":
-                                                col = QColor("white") if self.root.settings["theme"] == "dark" else QColor("black")
-                                            else :
-                                                col = QColor("red")
-                                            self.logs.append([log["type"],log["text"]])
-                                            self.setTextColor(col)
-                                            self.appendPlainText(log["text"])
-                                            if len(self.logs) > 1000:
-                                                self.logs.pop(0)
-                                            
-
-
-
-                            class btn(QPushButton):
-                                def __init__(self, parent=None, root=None, color=None, text=None):
-                                    super().__init__()
-                                    self.parent = parent
-                                    self.root = root
-                                    self.init_ui()
-                                    if color is not None:
-                                        self.setColor(color)
-                                    if text is not None:
-                                        self.text = text
-                                        self.langing()
-
-                                def init_ui(self):
-                                    self.setAttribute(Qt.WA_StyledBackground, True)
-                                    self.setStyleSheet("""
-                                        QPushButton{
-                                            background-color: #00000000;
-                                            color: white;
-                                            border-radius: 10px;
-                                            font-size: 12px;
-                                        }
-                                    """)
-
-                                def setColor(self,color_):
-                                    self.setStyleSheet(f"""
-                                        QPushButton{{
-                                            background-color: {color_};
-                                            color: white;
-                                            border-radius: 10px;
-                                            font-size: 18px
-                                        }}
-                                        QPushButton:hover{{
-                                            border: 2px solid #88888844;
-                                        }}
-                                        QPushButton:pressed{{
-                                            border: 3px solid #88888888;
-                                        }}
-                                    """)
-
-                                def langing(self):
-                                    self.setText(self.root.langer.get(self.text))
-
-                                    
-
-                    class Right(Rightw):
-                        def __init__(self, parent=None, root=None):
-                            super().__init__(parent=parent, root=root)
-                            self.resize_(0)
 
                 class Download(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
