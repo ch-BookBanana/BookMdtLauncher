@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os, zipfile
+import os, zipfile, hashlib, json
 from .path_utils import getPath
 
 def _parse_simple_config_typed(content: str) -> dict:
@@ -65,13 +65,23 @@ class mdtScanner:
     @classmethod
     def getMdtMsg(cls, subdir_name):
         """返回 version.properties 解析后的字典，失败返回 None"""
+        png = None
+        try:
+            png_path = getPath(f"BML/.Mindustrys/{subdir_name}/icon.png")
+            if os.path.isfile(png_path):
+                png = png_path
+        except:
+            png = getPath("src/assets/icons/mdt/mdt.png")
+
         if not cls.isMdtFile(subdir_name):
             return None
         jar_path = cls._get_mdt_jar_path(subdir_name)
         try:
             with zipfile.ZipFile(jar_path, 'r') as zf:
                 data = zf.read('version.properties').decode('utf-8')
-                return _parse_simple_config_typed(data)
+                return _parse_simple_config_typed(data) | {
+                    "icon": png
+                }
         except Exception:
             return None
 

@@ -67,7 +67,9 @@ QThTimer 使用文档（简洁版，中文）
     - `task` 的 `job` 运行在共享子线程中，请避免在 job 中进行 GUI 操作；GUI 更新应通过信号回到主线程处理。
 """
 
-from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, Qt
+import inspect
+
+from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, QMetaObject, Qt
 
 _qthtimer_thread = None
 _active_timers = set()
@@ -93,9 +95,35 @@ def _shutdown_qthtimer_thread():
     _qthtimer_thread = None
 
 
+def _get_callback_arg_count(callback):
+    if callback is None:
+        return 0
+    try:
+        signature = inspect.signature(callback)
+        count = 0
+        for param in signature.parameters.values():
+            if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+                count += 1
+            elif param.kind == inspect.Parameter.VAR_POSITIONAL:
+                return None
+        return count
+    except Exception:
+        return 1
+
+
+def _make_signal_for_callback(callback):
+    arg_count = _get_callback_arg_count(callback)
+    if arg_count is None:
+        return pyqtSignal(object)
+    if arg_count <= 0:
+        return pyqtSignal()
+    return pyqtSignal(*([object] * arg_count))
+
+
 class _QThTimerWorker(QObject):
     timeout = pyqtSignal()
     finished = pyqtSignal(object)
+    _cleanup_worker = pyqtSignal()
 
     def __init__(self, interval=0, single_shot=False, job=None):
         super().__init__()
@@ -104,6 +132,7 @@ class _QThTimerWorker(QObject):
         self.timer.setSingleShot(bool(single_shot))
         self.job = job
         self.timer.timeout.connect(self._on_timeout)
+        self._cleanup_worker.connect(self._do_cleanup, Qt.QueuedConnection)
 
     @pyqtSlot()
     def _on_timeout(self):
@@ -124,6 +153,15 @@ class _QThTimerWorker(QObject):
     @pyqtSlot()
     def stop(self):
         self.timer.stop()
+
+    @pyqtSlot()
+    def _do_cleanup(self):
+        """在 worker 所在线程中安全停止定时器并销毁"""
+        try:
+            self.timer.stop()
+        except Exception:
+            pass
+        self.deleteLater()
 
     @pyqtSlot(int)
     def setInterval(self, interval):
@@ -207,7 +245,7 @@ class QThTimer(QObject):
         except Exception:
             pass
 
-        # 断开与 worker 的连接并删除 worker
+        # 断开信号连接
         try:
             self._worker.timeout.disconnect(self.timeout)
         except Exception:
@@ -216,20 +254,15 @@ class QThTimer(QObject):
             self._worker.finished.disconnect(self.finished)
         except Exception:
             pass
-
         try:
-            self._worker.deleteLater()
+            self._worker._cleanup_worker.emit()
         except Exception:
             pass
-
-        # 删除 event 对象（如果存在）
         try:
             if hasattr(self, '_event') and self._event is not None:
-                self._event.deleteLater()
+                QMetaObject.invokeMethod(self._event, 'deleteLater', Qt.QueuedConnection)
         except Exception:
             pass
-
-        # 从活动集合中移除并尝试关闭线程（若无活动计时器）
         try:
             if self in _active_timers:
                 _active_timers.discard(self)
@@ -316,8 +349,8 @@ class QThTimer(QObject):
 
         # 动态创建 Event 类，包含 lambda0, lambda1 ... 信号
         cls_dict = {}
-        for index in range(len(callbacks)):
-            cls_dict[f'lambda{index}'] = pyqtSignal(object)
+        for index, cb in enumerate(callbacks):
+            cls_dict[f'lambda{index}'] = _make_signal_for_callback(cb)
 
         EventClass = type('QThEvent', (QObject,), cls_dict)
         event = EventClass()
@@ -347,6 +380,70 @@ class QThTimer(QObject):
         if result_callback is not None:
             timer.finished.connect(result_callback)
         timer.setSingleShot(True)
+        timer.start()
+        return timer
+
+
+    @classmethod
+    def taskP(cls, interval, job, events=None, result_callback=None):
+        """
+        周期性后台任务，每隔 `interval` 毫秒在子线程执行一次 `job(event)`。
+
+        参数：
+          - job(event): 每次触发都在子线程执行，必须接受 event 参数。
+                可在 job 内使用 event.lambdas[i].emit(value) 回传数据。
+          - interval: 周期（毫秒）。
+          - events: 可选，接收 job 中 emit 的回调（主线程执行）。
+          - result_callback: 可选，每次 job 返回值的回调（主线程执行）。
+
+        返回：已启动的 QThTimer 实例。
+        用法：返回值的 destroy() 可停止该周期性任务。
+        """
+        # 归一化 events 为回调列表
+        callbacks = []
+        if events is None:
+            callbacks = []
+        elif callable(events):
+            callbacks = [events]
+        elif isinstance(events, list):
+            for item in events:
+                if item is None or callable(item):
+                    callbacks.append(item)
+                else:
+                    raise TypeError('events list items must be callable or None')
+        else:
+            raise TypeError('events must be callable or a list of callables')
+
+        # 动态创建 Event 类
+        cls_dict = {}
+        for index, cb in enumerate(callbacks):
+            cls_dict[f'lambda{index}'] = _make_signal_for_callback(cb)
+        EventClass = type('QThEvent', (QObject,), cls_dict)
+        event = EventClass()
+        event.lambdas = [getattr(event, f'lambda{index}') for index in range(len(callbacks))]
+        event.moveToThread(_get_qthtimer_thread())
+
+        # 连接回调（主线程）
+        for index, cb in enumerate(callbacks):
+            if cb is not None:
+                try:
+                    event.lambdas[index].connect(cb, Qt.QueuedConnection)
+                except Exception:
+                    pass
+
+        def _wrapped_job():
+            try:
+                result = job(event)
+                return result
+            except Exception as e:
+                return e
+
+        timer = cls(interval)
+        timer._event = event
+        timer.setJob(_wrapped_job)
+        timer.setSingleShot(False)  # 周期性
+        if result_callback is not None:
+            timer.finished.connect(result_callback)
         timer.start()
         return timer
 

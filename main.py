@@ -52,7 +52,16 @@ def change_color(path, color: QColor):
     painter.end()
     return QIcon(colored)
 
-
+def pngSha(path):
+    """计算png的sha256"""
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            data = f.read(65536)  # 64KB
+            if not data:
+                break
+            sha256.update(data)
+    return sha256.hexdigest()
 def t(text, *args):
     try:
         for i, arg in enumerate(reversed(args), start=1):
@@ -67,17 +76,23 @@ class Leftw(QWidget):
         super().__init__(None)
         self.parent = parent
         self.root = root
+        self.width_ = 0
         self.resize_(0)
         self.parent.parent.left.addWidget(self)
 
     def resizeEvent(self, event):
-        self.parent.parent.left.setFixedWidth(self.width())
+        self.parent.parent.left.setFixedWidth(self.width_)
         super().resizeEvent(event)
 
     def resize_(self,width):
         self.setFixedWidth(width)
+        self.width_ = width
 
-            
+    # def showEvent(self, event):
+    #     self.parent.parent.left.setFixedWidth(self.width_)
+    #     super().showEvent(event)
+
+       
 class Mainw(QWidget):
     def __init__(self, parent=None, root=None):
         super().__init__()
@@ -90,15 +105,21 @@ class Rightw(QWidget):
         super().__init__()
         self.parent = parent
         self.root = root
+        self.width_ = 0
         self.resize_(0)
         self.parent.parent.right.addWidget(self)
 
     def resizeEvent(self, event):
-        self.parent.parent.right.setFixedWidth(self.width())
+        self.parent.parent.right.setFixedWidth(self.width_)
         super().resizeEvent(event)
 
     def resize_(self,width):
         self.setFixedWidth(width)
+        self.width_ = width
+
+    # def showEvent(self,event):
+    #     super().showEvent(event)
+    #     self.parent.parent.left.setFixedWidth(self.width_)
 
 class Main():
     def __init__(self):
@@ -108,6 +129,7 @@ class Main():
             "BML/.Mindustrys"
         ]:
             os.makedirs(getPath(i), exist_ok=True)
+        self.signals = self.Signals(self,self)
         self.winreg = self.Winreg(self, self)
         self.logger = self.Logger(self, self)
         self.logger.info("\n------------Book MDT Launcher------------"
@@ -829,7 +851,9 @@ class Main():
                         self.parent.left.setCurrentWidget(self.left)
                         self.parent.main.setCurrentWidget(self.main)
                         self.parent.right.setCurrentWidget(self.right)
-                    
+                        self.parent.left.setFixedWidth(self.left.width_)
+                        self.parent.right.setFixedWidth(self.right.width_)
+
                     def click(self):
                         self.btn.click()
 
@@ -843,17 +867,32 @@ class Main():
                         cls_right = self.Right if hasattr(self, 'Right') else Rightw
                         self.right = cls_right(self, self.root)
 
-                        self.parent.pages.append(self)
-
                 class Start(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
+                        root.signals.register("start_gameChanged")
                         super().__init__(parent, root, text, logo)
+                        QThTimer.taskP(2000, self.left.changeTimer, [self.left.sets])
+                        QThTimer.task(self.left.changeTimer, [self.left.sets], None ,0)
+
+                    def changeGame(self, game=None):
+                        if game not in mdtScanner.getMdts():
+                            if len(mdtScanner.getMdts()) == 0:
+                                self.root.settings["defaultGame"] = None
+                            else:
+                                self.root.settings["defaultGame"] = game
+                            self.root.signals.emit("start_gameChanged", game)
+                            
 
                     class Left(Leftw):
                         def __init__(self, parent=None, root=None):
                             super().__init__(parent, root)
-                            self.resize_(200)
+                            self.resize_(250)
                             self.init_wid()
+                            self.game = {
+                                "icon": None,
+                                "name": None,
+                                "vers": None
+                            }
 
                         def init_wid(self):
                             self.layout = QVBoxLayout(self)
@@ -885,6 +924,51 @@ class Main():
                             self.main = QStackedWidget()
                             self.layout.addWidget(self.main,1)
 
+                        def sets(self,icon=(False,None),gameTxt=(False,None),versTxt=(False,None)):
+                            if icon[0]:
+                                self.icon.setPixmap(QPixmap(icon[1]))
+                            if gameTxt[0]:
+                                self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, 150))
+                            if versTxt[0]:
+                                self.versTxt.setText(QFontMetrics(self.versTxt.font()).elidedText(versTxt[1], Qt.ElideRight, 130))
+
+                        def changeTimer(self,event):
+                            i = [(False,None),(False,None),(False,None)]
+                            if len(mdtScanner.getMdts()) == 0:
+                                self.root.settings["defaultGame"] = None
+                            elif self.root.settings["defaultGame"] is None:
+                                self.root.settings["defaultGame"] = mdtScanner.getMdts()[0]
+                            if self.game["name"] != self.root.settings["defaultGame"]:
+                                if self.root.settings["defaultGame"] is None:
+                                    i[1] = (True,self.root.langer.get("wid.pages.start.left.noGame"))
+                                    i[2] = (True,self.root.langer.get("wid.pages.start.left.DGame"))
+                                    self.game["name"] = self.game["vers"] = None
+                                else:
+                                    game = self.root.settings["defaultGame"]
+                                    self.game["name"] = game
+                                    vers = mdtScanner.getMdtMsg(game)
+                                    self.game["vers"] = f"v{vers['number']}.{vers['build']}{vers['modifier']}"
+                                    i[1] = (True,game)
+                                    i[2] = (True,self.game["vers"])
+                            if self.game["name"] is not None:
+                                vers = f"v{mdtScanner.getMdtMsg(self.game['name'])['number']}.{mdtScanner.getMdtMsg(self.game['name'])['build']}{mdtScanner.getMdtMsg(self.game['name'])['modifier']}"
+                                if self.game["vers"] != vers:
+                                    self.game["vers"] = vers
+                                    i[2] = (True,vers)
+                            if self.game["name"] is not None and mdtScanner.getMdtMsg(self.game["name"])["icon"]:
+                                png = pngSha(mdtScanner.getMdtMsg(self.game["name"])["icon"])
+                            else:
+                                png = None
+                            if self.game["icon"] != png:
+                                self.game["icon"] = png
+                                i[0] = (True,QPixmap(mdtScanner.getMdtMsg(self.game["name"])["icon"]) if self.game["name"] is not None else QPixmap())
+                            if i[0][0] or i[1][0] or i[2][0]:
+                                event.lambdas[0].emit(i[0],i[1],i[2])
+                            
+                                    
+
+
+
                     class Main(Mainw):
                         def __init__(self,parent=None,root=None):
                             super().__init__(parent,root)
@@ -914,6 +998,8 @@ class Main():
                                 
 
                                 self.shadow = QWidget(self)
+                                self.shadow.setAttribute(Qt.WA_StyledBackground, True)
+                                self.shadow.setProperty("wid", "shadow")
 
                                 self.pngs[1].hide()
                                 self.resizeEvent(None)
@@ -942,6 +1028,7 @@ class Main():
                                             Qt.SmoothTransformation
                                     ) if self.pixs[i] is not None else QPixmap()
                                     n.setPixmap(pix)
+                                self.shadow.setGeometry(0,0,200,self.height())
                                 super().resizeEvent(event)
 
 
@@ -1235,6 +1322,47 @@ class Main():
             except Exception as e:
                 self.root.logger.error(f"Failed to list language files: {e}")
             return langs
+
+    class Signals():
+        def __init__(self, parent=None, root=None):
+            self.parent = parent
+            self.root = root
+            self._signals = {}
+
+        def register(self, name):
+            """注册一个新的信号"""
+            if name not in self._signals:
+                self._signals[name] = []
+
+        def connect(self, name, callback):
+            """连接一个回调函数到指定信号"""
+            if name not in self._signals:
+                self.register(name)
+            self._signals[name].append(callback)
+
+        def emit(self, name, *args, **kwargs):
+            """触发指定信号，调用所有连接的回调函数"""
+            if name in self._signals:
+                for callback in self._signals[name]:
+                    try:
+                        callback(*args, **kwargs)
+                    except Exception as e:
+                        self.root.logger.error(f"Error in signal '{name}' callback: {e}")
+
+        def disconnect(self, name, callback):
+            """断开指定信号的回调函数"""
+            if name in self._signals and callback in self._signals[name]:
+                self._signals[name].remove(callback)
+
+        def cancel(self, name):
+            """取消注册指定信号"""
+            if name in self._signals:
+                del self._signals[name]
+
+        def clear(self, name):
+            """清除指定信号的所有回调函数"""
+            if name in self._signals:
+                self._signals[name] = []
 
     class Winreg():
         def __init__(self, parent=None, root=None):
