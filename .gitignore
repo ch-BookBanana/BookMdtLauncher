@@ -3,3 +3,7 @@
 /venv/
 __pycache__/
 /test.py
+/build/
+/dist/
+/installer.cmd
+/main.spec

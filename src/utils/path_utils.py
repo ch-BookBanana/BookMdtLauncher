@@ -20,12 +20,17 @@ import sys
 
 
 def getPath(relative_path):
-    """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包后的环境"""
-    try:
-        base_path = sys._MEIPASS
-    except AttributeError:
-        if getattr(sys, 'frozen', False):
-            base_path = os.path.dirname(sys.executable)
+    """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包后的环境
+    规则：
+      - 以 src 开头的路径 → PyInstaller 释放目录 (_MEIPASS)
+      - 其他路径（如 BML/） → exe 同目录
+    """
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        if relative_path.startswith('src'):
+            base_path = getattr(sys, '_MEIPASS', exe_dir)
         else:
-            base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_path = exe_dir
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(base_path, relative_path)

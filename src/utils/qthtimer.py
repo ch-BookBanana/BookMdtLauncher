@@ -15,7 +15,7 @@ QThTimer 使用文档（简洁版，中文）
         * `start()` / `stop()`：启动或停止计时器（在子线程中运行）。
         * `setInterval(ms)`：设置触发间隔（毫秒）。
         * `setSingleShot(bool)`：是否仅触发一次。
-        * `destroy()`：显式销毁当前计时器，断开连接、清理 event、并在没有活动计时器时关闭共享线程。
+        * `destroy()`：显式销毁当前计时器，断开连接并清理 event。
 
     - 信号
         * `timeout`：计时器触发时发出（行为等同 QTimer.timeout）。
@@ -69,7 +69,7 @@ QThTimer 使用文档（简洁版，中文）
 
 import inspect
 
-from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, QMetaObject, Qt
+from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, Qt
 
 _qthtimer_thread = None
 _active_timers = set()
@@ -81,18 +81,30 @@ def _get_qthtimer_thread():
         _qthtimer_thread = QThread()
         _qthtimer_thread.setObjectName("QThTimerThread")
         _qthtimer_thread.start()
+        try:
+            from PyQt5.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(shutdown)
+        except Exception:
+            pass
     return _qthtimer_thread
 
 
 def _shutdown_qthtimer_thread():
+    """安全停止共享子线程。"""
     global _qthtimer_thread
-    try:
-        if _qthtimer_thread is not None and _qthtimer_thread.isRunning():
-            _qthtimer_thread.quit()
-            _qthtimer_thread.wait(1000)
-    except Exception:
-        pass
+    thread = _qthtimer_thread
     _qthtimer_thread = None
+    if thread is None or not thread.isRunning():
+        return
+    thread.quit()
+    if not thread.wait(5000):
+        try:
+            thread.terminate()
+            thread.wait(1000)
+        except Exception:
+            pass
 
 
 def _get_callback_arg_count(callback):
@@ -123,19 +135,23 @@ def _make_signal_for_callback(callback):
 class _QThTimerWorker(QObject):
     timeout = pyqtSignal()
     finished = pyqtSignal(object)
-    _cleanup_worker = pyqtSignal()
+    requestCleanup = pyqtSignal()                    # ★ 信号：外部（任意线程）请求清理
 
     def __init__(self, interval=0, single_shot=False, job=None):
         super().__init__()
+        self._destroyed = False
         self.timer = QTimer(self)
         self.timer.setInterval(int(interval))
         self.timer.setSingleShot(bool(single_shot))
         self.job = job
         self.timer.timeout.connect(self._on_timeout)
-        self._cleanup_worker.connect(self._do_cleanup, Qt.QueuedConnection)
+        # ★ 用信号槽连接清理逻辑，不做 invokeMethod
+        self.requestCleanup.connect(self._do_cleanup, Qt.QueuedConnection)
 
     @pyqtSlot()
     def _on_timeout(self):
+        if self._destroyed:
+            return
         if self.job is None:
             self.timeout.emit()
             return
@@ -144,6 +160,10 @@ class _QThTimerWorker(QObject):
             result = self.job()
         except Exception as e:
             result = e
+
+        if self._destroyed:
+            return
+
         self.finished.emit(result)
 
     @pyqtSlot()
@@ -152,17 +172,20 @@ class _QThTimerWorker(QObject):
 
     @pyqtSlot()
     def stop(self):
-        self.timer.stop()
+        try:
+            self.timer.stop()
+        except RuntimeError:
+            pass  # 忽略跨线程警告
 
     @pyqtSlot()
     def _do_cleanup(self):
-        """在 worker 所在线程中安全停止定时器并销毁"""
+        """在 worker 所在线程中安全停止定时器（通过信号槽触发，线程安全）。"""
+        self._destroyed = True
         try:
             self.timer.stop()
         except Exception:
             pass
-        self.deleteLater()
-
+        
     @pyqtSlot(int)
     def setInterval(self, interval):
         self.timer.setInterval(int(interval))
@@ -239,49 +262,42 @@ class QThTimer(QObject):
         self._request_stop.emit()
 
     def destroy(self):
-        """Stop and cleanup this timer, disconnect signals and free resources."""
-        try:
-            self.stop()
-        except Exception:
-            pass
+        """异步安全销毁计时器。"""
+        if getattr(self, '_destroyed', False):
+            return
+        self._destroyed = True
 
-        # 断开信号连接
-        try:
-            self._worker.timeout.disconnect(self.timeout)
-        except Exception:
-            pass
-        try:
-            self._worker.finished.disconnect(self.finished)
-        except Exception:
-            pass
-        try:
-            self._worker._cleanup_worker.emit()
-        except Exception:
-            pass
-        try:
-            if hasattr(self, '_event') and self._event is not None:
-                QMetaObject.invokeMethod(self._event, 'deleteLater', Qt.QueuedConnection)
-        except Exception:
-            pass
-        try:
-            if self in _active_timers:
-                _active_timers.discard(self)
-        except Exception:
-            pass
+        if self._event is not None:
+            ev = self._event
+            self._event = None
+            try:
+                ev.deleteLater()
+            except Exception:
+                pass
 
-        # 断开父对象连接
+        worker = self._worker
+        self._worker = None
+        if worker is not None:
+            worker._destroyed = True
+            try:
+                worker.requestCleanup.emit()
+            except Exception:
+                pass
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+
         try:
             if getattr(self, '_parent_obj', None) is not None:
                 self._parent_obj.destroyed.disconnect(self.destroy)
         except Exception:
             pass
 
-        # 清理引用
-        self._worker = None
-        self._event = None
-
-        if not _active_timers:
-            _shutdown_qthtimer_thread()
+        try:
+            _active_timers.discard(self)
+        except Exception:
+            pass
 
     @classmethod
     def once(cls, interval, callbacks=None):
@@ -332,7 +348,6 @@ class QThTimer(QObject):
 
         返回：已启动的 `QThTimer` 实例。
         """
-        # 归一化 events 为回调列表
         callbacks = []
         if events is None:
             callbacks = []
@@ -347,7 +362,6 @@ class QThTimer(QObject):
         else:
             raise TypeError('events must be callable or a list of callables')
 
-        # 动态创建 Event 类，包含 lambda0, lambda1 ... 信号
         cls_dict = {}
         for index, cb in enumerate(callbacks):
             cls_dict[f'lambda{index}'] = _make_signal_for_callback(cb)
@@ -356,10 +370,8 @@ class QThTimer(QObject):
         event = EventClass()
         event.lambdas = [getattr(event, f'lambda{index}') for index in range(len(callbacks))]
 
-        # 把 event 移到共享子线程
         event.moveToThread(_get_qthtimer_thread())
 
-        # 连接回调（在主线程运行）
         for index, cb in enumerate(callbacks):
             if cb is not None:
                 try:
@@ -367,7 +379,6 @@ class QThTimer(QObject):
                 except Exception:
                     pass
 
-        # 包装 job 使其接收 event
         def _wrapped_job():
             try:
                 return job(event)
@@ -399,7 +410,6 @@ class QThTimer(QObject):
         返回：已启动的 QThTimer 实例。
         用法：返回值的 destroy() 可停止该周期性任务。
         """
-        # 归一化 events 为回调列表
         callbacks = []
         if events is None:
             callbacks = []
@@ -414,7 +424,6 @@ class QThTimer(QObject):
         else:
             raise TypeError('events must be callable or a list of callables')
 
-        # 动态创建 Event 类
         cls_dict = {}
         for index, cb in enumerate(callbacks):
             cls_dict[f'lambda{index}'] = _make_signal_for_callback(cb)
@@ -423,7 +432,6 @@ class QThTimer(QObject):
         event.lambdas = [getattr(event, f'lambda{index}') for index in range(len(callbacks))]
         event.moveToThread(_get_qthtimer_thread())
 
-        # 连接回调（主线程）
         for index, cb in enumerate(callbacks):
             if cb is not None:
                 try:
@@ -441,7 +449,7 @@ class QThTimer(QObject):
         timer = cls(interval)
         timer._event = event
         timer.setJob(_wrapped_job)
-        timer.setSingleShot(False)  # 周期性
+        timer.setSingleShot(False)
         if result_callback is not None:
             timer.finished.connect(result_callback)
         timer.start()
@@ -450,7 +458,6 @@ class QThTimer(QObject):
 
 def shutdown():
     """销毁所有活动计时器并关闭共享子线程。"""
-    # 复制集合以避免在迭代时修改
     for t in list(_active_timers):
         try:
             t.destroy()

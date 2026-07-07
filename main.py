@@ -32,7 +32,6 @@ import sys, os, json, copy, winreg, logging, glob, locale, hashlib
 from datetime import datetime
 import ctypes
 import ctypes.wintypes
-from PyQt5.Qt import *
 from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher
@@ -41,7 +40,7 @@ from src.utils.QThTimer import QThTimer
 
 def change_color(path, color: QColor):
     """白底png改色"""
-    pix = QPixmap(path)
+    pix = QPixmap(getPath(path))
     colored = QPixmap(pix.size())
     colored.fill(Qt.transparent)
     painter = QPainter(colored)
@@ -122,7 +121,8 @@ class Rightw(QWidget):
     #     self.parent.parent.left.setFixedWidth(self.width_)
 
 class Main():
-    def __init__(self):
+    def __init__(self,app):
+        self.app = app
         for i in [
             "BML",
             "BML/logs",
@@ -147,6 +147,7 @@ class Main():
             "githubToken": None
         }
         self.settings = copy.deepcopy(self.defsettings)
+        app.aboutToQuit.connect(self.saveSettings)
 
         def deep_merge_settings(default, file_settings):
             for key, value in file_settings.items():
@@ -228,6 +229,8 @@ class Main():
                     self.logger.error(f"Error calling lighting on {widget}: {e}")
             try:
                 widget.setProperty('theme', theme_str)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
             except:
                 pass
             for child in widget.children():
@@ -246,6 +249,16 @@ class Main():
             super().__init__()
             self.parent = parent
             self.root = root
+
+
+
+            self.server = QLocalServer(self)
+            QLocalServer.removeServer("BookMdtLauncherMI")
+            if self.server.listen("BookMdtLauncherMI"):
+                self.server.newConnection.connect(self.showS)
+
+
+
             self.root.logger.debug("init QW.window")
             self.root.window = self
             self.setMinimumSize(QSize(600, 450))
@@ -285,6 +298,19 @@ class Main():
                 self.raise_()
             self.activateWindow()
 
+        def showS(self):
+            conn = self.server.nextPendingConnection()
+            if conn:
+                conn.readyRead.connect(self._on_read_data)
+                conn.disconnected.connect(conn.deleteLater)
+
+        def _on_read_data(self):
+            conn = self.sender()
+            data = conn.readAll()
+            if data == QByteArray(b"MAINWINSHOW"):
+                self.restore_from_tray()
+            conn.disconnectFromServer()
+            conn.deleteLater()
         def init_wid(self):
             self.root.logger.debug("init QW.window.left")
             self.left = self.Left(self, self.root)
@@ -313,7 +339,7 @@ class Main():
             if obj is self and event.type() == QEvent.Resize:
                 new_width = self.left.width()  # 假设宽度固定，或者从配置读取
                 self.left.setGeometry(0, 0, new_width, self.height())
-                self.lline.setGeometry(new_width - 1, 0, 1, self.height())
+                self.lline.init_ui()
 
                 self.root.logger.debug(f"Window resized via filter: {self.width()}x{self.height()}")
 
@@ -639,24 +665,18 @@ class Main():
                         self.logo_ = _logo
                         self.lighting()
 
-                    
-
         class LLine(QWidget):
             def __init__(self, parent=None, root=None):
                 super().__init__(parent)
                 self.parent = parent
                 self.root = root
                 self.init_ui()
-                self.init_wid()
 
             def init_ui(self):
                 self.setProperty("wid", "line")
-                self.setFixedWidth(1)
                 self.setAttribute(Qt.WA_StyledBackground, True)
                 self.setGeometry(self.parent.left.width(), 0, 1, self.parent.height())
 
-            def init_wid(self):
-                pass
 
         class Main(QWidget):
             def __init__(self, parent=None, root=None):
@@ -1003,8 +1023,7 @@ class Main():
 
                                 self.pngs[1].hide()
                                 self.resizeEvent(None)
-                                QTimer().singleShot(0, lambda:print(self.pngs[1].geometry().x(),self.pngs[1].geometry().y()))
-
+                                
                             def setPixmap(self,pix=None):
                                 self.pixs[1-self.png] = pix
                                 self.pngs[1-self.png].hide()
@@ -1044,8 +1063,162 @@ class Main():
                     def __init__(self, parent=None, root=None, text=None, logo=None):
                         super().__init__(parent, root, text, logo)
 
+                    class Left(Leftw):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent, root)
+                            self.resize_(120)
+                            self.init_wid()
+
+                        def init_wid(self):
+                            self.layout = QVBoxLayout(self)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setSpacing(0)
+
+                            self.scroll = QScrollArea(self)
+                            self.scroll.setWidgetResizable(True)
+                            self.scroll.setFrameShape(QFrame.NoFrame)
+                            self.layout.addWidget(self.scroll)
+
+                            self.main = QWidget()
+                            self.scroll_layout = QVBoxLayout(self.main)
+                            self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+                            self.scroll_layout.setSpacing(0)
+                            self.scroll_layout.setAlignment(Qt.AlignTop)
+                            self.scroll.setWidget(self.main)
+                            self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+                            self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+                            self.scroll_slider.setStyleSheet("""
+                                QScrollBar:vertical {
+                                    background: transparent;
+                                    width: 5px;
+                                    margin: 0;
+                                }
+                                QScrollBar::sub-line:vertical {
+                                    height: 0px;
+                                }
+                                QScrollBar::add-line:vertical {
+                                    height: 0px;
+                                }
+                                QScrollBar::handle:vertical {
+                                    min-height: 60px;
+                                    background: #888;
+                                    border-radius: 2px;
+                                }
+                                QScrollBar::handle:vertical:hover {
+                                    background: #aaa;
+                                }
+                                QScrollBar::add-page:vertical,
+                                QScrollBar::sub-page:vertical {
+                                    background: transparent;
+                                }
+                            """)
+                            
+                            self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                            self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                            self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                            self.bthGroup = QButtonGroup(self)
+
+                        def add_btn(self, text=None, icon=None):
+                            btn = self.Btns(text, icon, self, self.root)
+                            self.scroll_layout.addWidget(btn)
+                            self.bthGroup.addButton(btn)
+                            self.barShow()
+                            return btn
+
+                        def barShow(self):
+                            self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
+
+                        def resizeEvent(self,event):
+                            self.scroll_slider.setGeometry(self.scroll.width()-5,0,5,self.scroll.height())
+                            self.barShow()
+                            super().resizeEvent(event)
 
 
+                        class Btns(QPushButton):
+                            def __init__(self, text=None, icon=None, parent=None, root=None):
+                                super().__init__()
+                                self.parent = parent
+                                self.root = root
+                                self.text_ = text
+                                self.icon_ = icon
+                                self.init_ui()
+                                self.init_wid()
+
+                            def init_ui(self):
+                                self.setFixedSize(120, 30)
+                                self.setAttribute(Qt.WA_StyledBackground, False)
+                                self.setProperty("wid", "lbtn")
+                                self.setCheckable(True)
+
+                            def init_wid(self):
+                                self.layout = QHBoxLayout(self)
+                                self.layout.setContentsMargins(0, 0, 0, 0)
+                                self.layout.setSpacing(5)
+
+                                self.icon = QLabel()
+                                self.icon.setAttribute(Qt.WA_StyledBackground, False)
+                                self.icon.setFixedSize(30, 30)
+                                self.icon.setScaledContents(True)
+                                self.layout.addWidget(self.icon)
+
+                                self.text = QLabel()
+                                self.text.setAttribute(Qt.WA_StyledBackground, False)
+                                self.text.setFixedSize(90, 30)
+                                self.text.setProperty("wid", "lbtn")
+                                self.langing()
+                                self.layout.addWidget(self.text)
+
+                            def langing(self):
+                                if self.text_ is not None:
+                                    self.text.setText(self.root.langer.get(self.text_))
+                                    self.setToolTip(self.root.langer.get(self.text_))
+
+                            def lighting(self, light: bool):
+                                if self.icon_ is not None:
+                                    color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                                    logo = change_color(self.icon_, color)
+                                    pixmap = logo.pixmap(30,30)
+
+                                    if not pixmap.isNull():
+                                        smooth_pixmap = pixmap.scaled(
+                                            30, 30,
+                                            Qt.KeepAspectRatio,
+                                            Qt.FastTransformation
+                                        )
+                                        self.icon.setPixmap(smooth_pixmap)
+                                    else:
+                                        self.root.logger.warning(f"Failed to load pixmap for {self.icon_}")
+
+
+                            def setText(self, _text):
+                                self.text_ = _text
+                                self.langing()
+
+                            def setIcon(self, _icon):
+                                self.icon_ = _icon
+                                self.lighting(self.root.settings["theme"])
+                    
+                    class Main(Mainw):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent, root)
+                            self.init_wid()
+
+                        def init_wid(self):
+                            self.layout = QHBoxLayout(self)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setSpacing(0)
+                            self.layout.setAlignment(Qt.AlignLeft)
+
+                            self.line = QWidget()
+                            self.line.setProperty("wid", "line")
+                            self.line.setAttribute(Qt.WA_StyledBackground,True)
+                            self.line.setFixedWidth(1)
+                            self.layout.addWidget(self.line,0)
+
+                            self.pages = QStackedWidget()
+                            self.layout.addWidget(self.pages,1)
 
 
     class Tray(QSystemTrayIcon):
@@ -1398,6 +1571,20 @@ class Main():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    main = Main()
-    main.window.show()
-    sys.exit(app.exec_())
+    socket = QLocalSocket()
+    socket.connectToServer("BookMdtLauncherMI")
+
+    if socket.waitForConnected(200):
+        socket.write(b"MAINWINSHOW")
+        socket.flush()
+        socket.waitForBytesWritten(300)
+        socket.disconnectFromServer()
+        sys.exit(0)
+    else:
+        socket.deleteLater()
+
+
+        main = Main(app)
+        main.window.show()
+
+        sys.exit(app.exec_())
