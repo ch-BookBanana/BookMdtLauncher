@@ -1213,7 +1213,7 @@ class Main():
                             self.btns_ = []
 
 
-                            self.launcher = self.add_page("wid.pages.setting.launcher","src/assets/units.png",self.Launcher)
+                            self.launcher = self.add_page("wid.pages.setting.launcher","src/assets/icons/units.png",self.Launcher)
 
                             
 
@@ -1236,19 +1236,22 @@ class Main():
                                 self.text=text
                                 self.icon=icon
 
-                                self.init_wid()
+                                self._init_wid()
 
-                            def init_wid(self):
+                            def _init_wid(self):
                                 self.layout = QVBoxLayout(self)
                                 self.layout.setContentsMargins(0, 0, 0, 0)
                                 self.layout.setSpacing(0)
+                                self.layout.setAlignment(Qt.AlignHCenter)
 
                                 self.scroll = QScrollArea(self)
+                                self.scroll.setStyleSheet("max-width: 600px;")
                                 self.scroll.setWidgetResizable(True)
                                 self.scroll.setFrameShape(QFrame.NoFrame)
                                 self.layout.addWidget(self.scroll)
 
                                 self.main = QWidget()
+                                
                                 self.scroll_layout = QVBoxLayout(self.main)
                                 self.scroll_layout.setContentsMargins(30,0,30,0)
                                 self.scroll_layout.setSpacing(0)
@@ -1314,6 +1317,9 @@ class Main():
                                     self.layout = QHBoxLayout(self)
                                     self.layout.setContentsMargins(0, 0, 0, 0)
 
+                                    self.btn = QPushButton()
+
+
                                     self.text = QLabel()
                                     self.text.setProperty("wid","text")
                                     self.langer()
@@ -1348,13 +1354,36 @@ class Main():
                                     super().__init__()
                                     self.parent = parent
                                     self.root = root
+                                    self.text_ = text
                                     self.init_wid()
-                                    self.parent.scroll_layout.addWiget(self)
+                                    self.parent.scroll_layout.addSpacing(30)
+                                    self.parent.scroll_layout.addWidget(self)
                                 
                                 def init_wid(self):
                                     self.setFixedHeight(40)
                                     self.layout = QHBoxLayout(self)
                                     self.layout.setContentsMargins(0, 0, 0, 0)
+                                    self.layout.setSpacing(15)
+
+                                    self.l1 = QWidget()
+                                    self.l1.setProperty("wid","line")
+                                    self.l1.setFixedHeight(1)
+                                    self.layout.addWidget(self.l1,1)
+
+                                    self.text = QLabel()
+                                    self.text.setProperty("wid","text")
+                                    self.text.setStyleSheet("font-size: 22px;")
+                                    self.langer()
+                                    self.layout.addWidget(self.text,0)
+                                    
+                                    self.l2 = QWidget()
+                                    self.l2.setProperty("wid","line")
+                                    self.l2.setFixedHeight(1)
+                                    self.layout.addWidget(self.l2,1)
+
+                                def langer(self):
+                                    self.text.setText(self.root.langer.get(self.text_))
+
 
                             def barShow(self):
                                 self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
@@ -1370,8 +1399,12 @@ class Main():
 
                         class Launcher(Page):
                             def __init__(self, parent=None, root=None, text=None,icon=None):
-
                                 super().__init__(parent,root,text,icon)
+                                self.init_wid()
+
+                            def init_wid(self):
+                                self._title1 = self.Title(self,self.root,"wid.pages.setting.launcher.appearance")
+
 
 
 
