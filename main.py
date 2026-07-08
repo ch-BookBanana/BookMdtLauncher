@@ -175,25 +175,21 @@ class Main():
 
         self.saveSettings()
 
-        with open(getPath("src/resources/styles/app.qss"), "r", encoding="utf-8") as f:
-            self.qss = f.read()
-        QApplication.instance().setStyleSheet(self.qss)
-        self.logger.debug("load QtStyleSheet: \n" + self.qss)
-
         self.launcher = mdtLauncher()
 
         self.tray = self.Tray(self, self)
         self.window = self.Window(self, self)
 
-    def getQSS(self):
-        return self.qss
 
     def saveSettings(self):
         try:
             settings_path = getPath("BML/settings.json")
             with open(settings_path, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, separators=(',', ':'), ensure_ascii=False)
-            self.logger.info(self.langer.get("log.info.savesettings"))
+            try:
+                self.logger.info(self.langer.get("log.info.savesettings"))
+            except:
+                self.logger.info("Settings saved")
         except Exception as e:
             try:
                 self.logger.error(self.langer.get("log.error.savesettings") + "\n--Exception: " + str(e), exc_info=True)
@@ -202,47 +198,34 @@ class Main():
 
     def apply_theme(self):
         is_light = bool(self.settings["theme"])
-        theme_str = "light" if is_light else "dark"
+        theme_file = "light.qss" if is_light else "dark.qss"
 
-        # 设置主窗口主题属性并刷新样式
-        self.window.setProperty("theme", theme_str)
-        self.window.style().unpolish(self.window)
-        self.window.style().polish(self.window)
+        qss = ""
+        with open(getPath(f"src/resources/styles/{theme_file}"), "r", encoding="utf-8") as f:
+            qss = f.read()
 
-        # 刷新整个应用样式
         app = QApplication.instance()
         if app:
-            app.style().unpolish(app)
-            app.style().polish(app)
+            app.setStyleSheet(qss)
+            self.logger.debug(f"Loading QtStyleSheet from {theme_file}:\n{qss} ")
 
         font = QFont()
         font.setFamily("Microsoft Yahei")
         font.setPointSize(8)
         app.setFont(font)
 
-        # 递归查找并调用所有子控件的 lighting 函数
+        # 递归调用所有子控件的 lighting 函数（图标换色）
         def notify_lighting(widget, state):
             if hasattr(widget, 'lighting') and callable(widget.lighting):
                 try:
                     widget.lighting(state)
                 except Exception as e:
                     self.logger.error(f"Error calling lighting on {widget}: {e}")
-            try:
-                widget.setProperty('theme', theme_str)
-                widget.style().unpolish(widget)
-                widget.style().polish(widget)
-            except:
-                pass
             for child in widget.children():
                 notify_lighting(child, state)
 
         notify_lighting(self.window, is_light)
-        self.logger.info(t(self.langer.get("log.info.changetheme"), theme_str))
-        self_ = self
-        if hasattr(self, 'tray') and hasattr(self.tray, 'menu'):
-            self.tray.menu.setProperty('theme', theme_str)
-            self.tray.menu.style().unpolish(self.tray.menu)
-            self.tray.menu.style().polish(self.tray.menu)
+        self.logger.info(t(self.langer.get("log.info.changetheme"), "light" if is_light else "dark"))
 
     class Window(QWidget):
         def __init__(self, parent=None, root=None):
@@ -1069,6 +1052,7 @@ class Main():
                             self.resize_(120)
                             self.init_wid()
 
+
                         def init_wid(self):
                             self.layout = QVBoxLayout(self)
                             self.layout.setContentsMargins(0, 0, 0, 0)
@@ -1135,6 +1119,10 @@ class Main():
                             self.barShow()
                             super().resizeEvent(event)
 
+                        def showEvent(self,event):
+                            super().showEvent(event)
+                            self.barShow()
+
 
                         class Btns(QPushButton):
                             def __init__(self, text=None, icon=None, parent=None, root=None):
@@ -1160,8 +1148,9 @@ class Main():
                                 self.icon = QLabel()
                                 self.icon.setAttribute(Qt.WA_StyledBackground, False)
                                 self.icon.setFixedSize(30, 30)
-                                self.icon.setScaledContents(True)
+                                self.icon.setScaledContents(False)
                                 self.layout.addWidget(self.icon)
+                                self.icon.setAlignment(Qt.AlignCenter)
 
                                 self.text = QLabel()
                                 self.text.setAttribute(Qt.WA_StyledBackground, False)
@@ -1183,7 +1172,7 @@ class Main():
 
                                     if not pixmap.isNull():
                                         smooth_pixmap = pixmap.scaled(
-                                            30, 30,
+                                            22, 22,
                                             Qt.KeepAspectRatio,
                                             Qt.FastTransformation
                                         )
@@ -1219,6 +1208,172 @@ class Main():
 
                             self.pages = QStackedWidget()
                             self.layout.addWidget(self.pages,1)
+
+                            self.pages_ = []
+                            self.btns_ = []
+
+
+                            self.launcher = self.add_page("wid.pages.setting.launcher","src/assets/units.png",self.Launcher)
+
+                            
+
+                        def add_page(self,text=None,icon=None,page=None):
+                            if page is None: page = self.Page
+                            btn = self.parent.left.add_btn(text,icon)
+                            page_ = page(self,self.root,text,icon)
+                            self.pages_.append(page_)
+                            self.btns_.append(btn)
+                            self.pages.addWidget(page_)
+                            page_.btn = btn
+                            btn.clicked.connect(lambda: self.pages.setCurrentWidget(page_))
+                            return page_
+
+                        class Page(QWidget):
+                            def __init__(self,parent=None,root=None,text=None,icon=None):
+                                super().__init__()
+                                self.parent = parent
+                                self.root = root
+                                self.text=text
+                                self.icon=icon
+
+                                self.init_wid()
+
+                            def init_wid(self):
+                                self.layout = QVBoxLayout(self)
+                                self.layout.setContentsMargins(0, 0, 0, 0)
+                                self.layout.setSpacing(0)
+
+                                self.scroll = QScrollArea(self)
+                                self.scroll.setWidgetResizable(True)
+                                self.scroll.setFrameShape(QFrame.NoFrame)
+                                self.layout.addWidget(self.scroll)
+
+                                self.main = QWidget()
+                                self.scroll_layout = QVBoxLayout(self.main)
+                                self.scroll_layout.setContentsMargins(30,0,30,0)
+                                self.scroll_layout.setSpacing(0)
+                                self.scroll_layout.setAlignment(Qt.AlignTop)
+                                self.scroll.setWidget(self.main)
+                                self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+                                self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+                                self.scroll_slider.setStyleSheet("""
+                                    QScrollBar:vertical {
+                                        background: transparent;
+                                        width: 5px;
+                                        margin: 0;
+                                    }
+                                    QScrollBar::sub-line:vertical {
+                                        height: 0px;
+                                    }
+                                    QScrollBar::add-line:vertical {
+                                        height: 0px;
+                                    }
+                                    QScrollBar::handle:vertical {
+                                        min-height: 60px;
+                                        background: #888;
+                                        border-radius: 2px;
+                                    }
+                                    QScrollBar::handle:vertical:hover {
+                                        background: #aaa;
+                                    }
+                                    QScrollBar::add-page:vertical,
+                                    QScrollBar::sub-page:vertical {
+                                        background: transparent;
+                                    }
+                                """)
+                                
+                                self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                                self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                                self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                                self._title = QLabel()
+                                self._title.setProperty("wid", "title")
+                                self._title.setFixedHeight(38)
+                                self._title.setStyleSheet("font-size: 28px;")
+                                self._title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                                self.scroll_layout.addWidget(self._title)
+                                self.langing()
+
+                            def langing(self):
+                                self._title.setText(self.root.langer.get(self.text))
+                            
+                            class Bool(QWidget):
+                                push = pyqtSignal(bool)
+                                def __init__(self,parent=None,root=None,text=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.text_ = text
+                                    self.intro_ = ""
+                                    self.init_wid()
+                                    self.parent.scroll_layout.addWiget(self)
+                                
+                                def init_wid(self):
+                                    self.setFixedHeight(40)
+                                    self.layout = QHBoxLayout(self)
+                                    self.layout.setContentsMargins(0, 0, 0, 0)
+
+                                    self.text = QLabel()
+                                    self.text.setProperty("wid","text")
+                                    self.langer()
+                                    self.text.setStyleSheet("font-size: 20px;")
+                                    self.layout.addWidget(self.text)
+
+                                    self.intro = QLabel()
+                                    self.layout.addWidget(self.intro)
+
+                                    
+
+                                def langer(self):
+                                    self.text.setText(self.root.langer.get(self.text))
+
+                            class Line(QWidget):
+                                def __init__(self,parent=None,root=None,text=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.init_wid()
+                                    self.parent.scroll_layout.addWiget(self)
+                                
+                                def init_wid(self):
+                                    self.setFixedHeight(1)
+                                    self.layout = QHBoxLayout(self)
+                                    self.layout.setContentsMargins(10, 0, 10, 0)
+                                    self.line = QWidget()
+                                    self.line.setProperty("wid","line")
+
+                            class Title(QWidget):
+                                def __init__(self,parent=None,root=None,text=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.init_wid()
+                                    self.parent.scroll_layout.addWiget(self)
+                                
+                                def init_wid(self):
+                                    self.setFixedHeight(40)
+                                    self.layout = QHBoxLayout(self)
+                                    self.layout.setContentsMargins(0, 0, 0, 0)
+
+                            def barShow(self):
+                                self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
+
+                            def resizeEvent(self,event):
+                                self.scroll_slider.setGeometry(self.scroll.width()-5,0,5,self.scroll.height())
+                                self.barShow()
+                                super().resizeEvent(event)
+
+                            def showEvent(self,event):
+                                super().showEvent(event)
+                                self.barShow()
+
+                        class Launcher(Page):
+                            def __init__(self, parent=None, root=None, text=None,icon=None):
+
+                                super().__init__(parent,root,text,icon)
+
+
 
 
     class Tray(QSystemTrayIcon):

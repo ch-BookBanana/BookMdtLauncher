@@ -1,0 +1,77 @@
+QWidget {
+    background-color: rgb(245, 245, 245);
+}
+QWidget[wid="line"] {
+    background-color: rgb(189, 189, 189)
+}
+QWidget[wid="shadow"] {
+    background: qlineargradient(
+        x1: 1, y1: 0, x2: 0, y2: 0,
+        stop: 0 rgba(245, 245, 245, 0),
+        stop: 0.5 rgba(245, 245, 245, 0.5),
+        stop: 1 rgba(245, 245, 245, 1)
+    );
+}
+QLabel {
+    background: transparent;
+    border: none;
+}
+QLabel[wid="title"] {
+    background: transparent;
+    border: none;
+    color: rgb(59, 59, 59);
+}
+QLabel[wid="lbtn"] {
+    background-color: transparent;
+    border: none;
+    color: rgb(59, 59, 59);
+}
+QLabel[wid="png"] {
+    background-color: rgb(245, 245, 245);;
+    border: 3px solid #8f8f8f;
+}
+QLabel[wid="text"] {
+    background: transparent;
+    border: none;
+    color: rgb(0, 0, 0);
+}
+QPushButton[wid="lbtn"] {
+    background-color: transparent;
+    border: none;
+}
+QPushButton[wid="lbtn"]:hover {
+    background-color: rgba(124, 124, 124, 0.2);
+    border: none;
+}
+QPushButton[wid="lbtn"]:checked {
+    background-color: rgba(124, 124, 124, 0.5);
+    border: none;
+}
+QPushButton[wid="tbtn"] {
+    background-color: transparent;
+    border: none;
+}
+QPushButton[wid="tbtn"]:hover {
+    background-color: rgba(124, 124, 124, 0.2);
+    border: none;
+}
+QPushButton[wid="tbtn"]:checked {
+    background-color: rgba(124, 124, 124, 0.5);
+    border: none;
+}
+QMenu {
+    background-color: #f0f0f0;
+    color: #383838
+}
+QMenu::item:selected {
+    background-color: #d3d3d3;
+}
+QStackedWidget[wid="widget"] {
+    background-color: rgb(245, 245, 245);
+}
+QToolTip { 
+    background-color: rgb(245, 245, 245);
+    color: rgb(29, 29, 29);
+    border: 1px solid rgb(117, 117, 117);
+    border-radius: 1px;
+}
