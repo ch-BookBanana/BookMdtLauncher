@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import requests, json
+import requests, json, time
 
 class GithubAPI:
     def __init__(self, token=None):
@@ -23,6 +23,30 @@ class GithubAPI:
 
     def setToken(self, token_):
         self.token = token_
+
+    def checkConnection(self,lambda:lamb):
+        try:
+            start = time.perf_counter()
+            resp = requests.get(
+                "https://api.github.com/",
+                headers={"Authorization": f"token {self.token}"},
+                timeout=5
+            )
+            latency = int((time.perf_counter() - start) * 1000) 
+
+            if resp.status_code == 200:
+                return latency
+            else:
+                return abs(resp.status_code) * -1
+
+        except requests.exceptions.Timeout:
+            return -2
+        except requests.exceptions.ConnectionError:
+            return -3
+        except requests.exceptions.SSLError:
+            return -4
+        except:
+            return -99
 
     @classmethod
     def checkToken(self, token_= None):
@@ -87,4 +111,22 @@ class GithubAPI:
         except Exception:
             return False, None
 
+    def getRelease(self,repo):
+        url = f"https://api.github.com/repos/{repo}/releases"
+        headers = {
+            "Authorization": f"token {self.token}"
+        }
+        try :
+            params = {
+                "page": page,
+                "per_page": 50
+            }
+
+            rest = requests.get(url, headers=headers)
+            if rest.status_code == 200:
+                return True, rest.json()
+            else:
+                return False, rest.status_code
+        except Exception:
+            return False, None
     

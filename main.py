@@ -1193,6 +1193,7 @@ class Main():
                         def __init__(self, parent=None, root=None):
                             super().__init__(parent, root)
                             self.init_wid()
+                            self.btns_[0].click()
 
                         def init_wid(self):
                             self.layout = QHBoxLayout(self)
@@ -1309,8 +1310,12 @@ class Main():
                                     self.root = root
                                     self.text_ = text
                                     self.intro_ = ""
+                                    self.tips_ = ""
+                                    self.btnpix = [QPixmap()]*2
+                                    self.introable = False
+                                    self.tipsable = False
                                     self.init_wid()
-                                    self.parent.scroll_layout.addWiget(self)
+                                    self.parent.scroll_layout.addWidget(self)
                                 
                                 def init_wid(self):
                                     self.setFixedHeight(40)
@@ -1318,21 +1323,57 @@ class Main():
                                     self.layout.setContentsMargins(0, 0, 0, 0)
 
                                     self.btn = QPushButton()
-
+                                    self.btn.setFixedSize(35,35)
+                                    self.layout.addWidget(self.btn,0)
 
                                     self.text = QLabel()
                                     self.text.setProperty("wid","text")
-                                    self.langer()
                                     self.text.setStyleSheet("font-size: 20px;")
-                                    self.layout.addWidget(self.text)
+                                    self.layout.addWidget(self.text,0)
+                                    self.text.setFixedHeight(40)
 
                                     self.intro = QLabel()
                                     self.layout.addWidget(self.intro)
+                                    self.intro.hide()
+                                    self.intro.setFixedSize(30,30)
 
-                                    
+                                    self.tips = QLabel()
+                                    self.layout.addWidget(self.tips)
+                                    self.tips.hide()
+                                    self.tips.setFixedSize(30,30)
 
-                                def langer(self):
-                                    self.text.setText(self.root.langer.get(self.text))
+                                    self.langing()
+
+                                def btnEvent(self,booll):
+                                    self.btn.setPixmap(self.btnpix[0 if booll else 1])
+                                    self.push.emit(booll)
+
+                                def setToolBar(self,wid,shown=None,text=None):
+                                    if wid == "intro":
+                                        if shown is not None:
+                                            self.introable = shown
+                                            self.intro.setVisible(shown)
+                                        if text is not None: self.intro_ = text
+                                    if wid == "tips":
+                                        if shown is not None:
+                                            self.tipsable = shown
+                                            self.tips.setVisible(shown)
+                                        if text is not None: self.tips_ = text
+                                        self.lighting(self.root.settings["theme"])
+                                        self.langing()
+
+                                def langing(self):
+                                    self.text.setText(self.root.langer.get(self.text_))
+                                    self.intro.setToolTip(self.root.langer.get(self.intro_))
+                                    self.tips.setToolTip(self.root.langer.get(self.tips_))
+
+                                def lighting(self,light):
+                                    self.btnpix =[change_color(getPath("src/assets/actions/btn_on.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35)),change_color(getPath("src/assets/actions/btn_off.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35))]
+                                    if self.introable:
+                                        self.intro.setPixmap(change_color(getPath("src/assets/actions/intro.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(30,30)))
+                                    if self.tipsable:
+                                        self.tips.setPixmap(change_color(getPath("src/assets/actions/tips.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(30,30)))
+
 
                             class Line(QWidget):
                                 def __init__(self,parent=None,root=None,text=None):
@@ -1340,7 +1381,7 @@ class Main():
                                     self.parent = parent
                                     self.root = root
                                     self.init_wid()
-                                    self.parent.scroll_layout.addWiget(self)
+                                    self.parent.scroll_layout.addWidget(self)
                                 
                                 def init_wid(self):
                                     self.setFixedHeight(1)
@@ -1404,6 +1445,7 @@ class Main():
 
                             def init_wid(self):
                                 self._title1 = self.Title(self,self.root,"wid.pages.setting.launcher.appearance")
+                                self._t1_theme = self.Bool(self,self.root,"test")
 
 
 
