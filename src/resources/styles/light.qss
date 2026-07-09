@@ -59,8 +59,15 @@ QPushButton[wid="tbtn"]:checked {
     background-color: rgba(124, 124, 124, 0.5);
     border: none;
 }
+QPushButton[wid="check"] {
+    background-color: transparent;
+    border: none;
+}
 QMenu {
     background-color: #f0f0f0;
+    color: #383838
+}
+QMenu::item {
     color: #383838
 }
 QMenu::item:selected {
@@ -74,4 +81,12 @@ QToolTip {
     color: rgb(29, 29, 29);
     border: 1px solid rgb(117, 117, 117);
     border-radius: 1px;
+}
+QSlider::groove:horizontal[wid="mdt"] {
+    background: transparent;
+    border: 3px solid gray;
+}
+QSlider::handle:horizontal[wid="mdt"] {
+    background: gray;
+    width: 20px;
 }

@@ -36,7 +36,12 @@
     "wid.pages.game": "游戏",
     "wid.pages.setting": "设置",
     "wid.pages.setting.launcher": "启动器",
-    "wid.pages.setting.launcher.appearance": "外观",
+    "wid.pages.setting.launcher.preferences": "外观",
+    "wid.pages.setting.launcher.preferences.theme": "亮色模式",
+
+    "wid.pages.setting.launcher.launch": "启动",
+
+    "wid.pages.setting.launcher.java": "全局java",
 
     "tray.menu.close": "关闭"
 
