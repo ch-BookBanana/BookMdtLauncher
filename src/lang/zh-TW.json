@@ -1,0 +1,50 @@
+{
+    "init": "中文（臺灣）",
+    "init.en": "Chinese (Traditional)",
+    "init.load": "語言檔案載入成功，目前為「中文（臺灣）」",
+
+
+    "log.info.savesettings": "設定已儲存",
+
+    
+    "log.info.changetheme": "視窗切換主題為：$1",
+    "log.info.windowLoad": "啟動器視窗載入完成",
+
+    "log.info.trayLoad": "系統匣載入完成",
+    "log.info.trayTheme": "系統匣切換主題為：$1",
+    "log.info.cleanoldlogs": "已清理舊日誌：$1",
+
+    "log.warning.trayIconPath": "系統匣圖示路徑不存在：$1",
+
+    "log.error.savesettings": "儲存設定失敗",
+
+
+
+    "wid.top.close": "關閉",
+    "wid.top.minimize": "最小化",
+    "wid.top.maxmize": "最大化",
+    "wid.top.restore": "還原",
+
+    "wid.pages.start": "啟動",
+    "wid.pages.start.gameNotfound": "尚未下載遊戲",
+    "wid.pages.start.gameNotfound2": "請前往下載頁面進行下載",
+    "wid.pages.start.startbtn": "開始遊戲",
+    "wid.pages.start.modbtn": "模組管理",
+    "wid.pages.start.gamebtn": "選擇遊戲",
+
+    "wid.pages.download": "下載",
+    "wid.pages.game": "遊戲",
+    "wid.pages.setting": "設定",
+    "wid.pages.setting.launcher": "啟動器",
+    "wid.pages.setting.launcher.preferences": "外觀",
+    "wid.pages.setting.launcher.preferences.theme": "淺色主題",
+    "wid.pages.setting.launcher.preferences.lang": "選擇語言",
+
+    "wid.pages.setting.launcher.launch": "啟動",
+
+    "wid.pages.setting.launcher.java": "全域 Java",
+
+    "tray.menu.close": "關閉"
+
+
+}

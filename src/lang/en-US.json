@@ -1,6 +1,6 @@
 {
     "init": "English (US)",
-    "init.en": "english(us)",
+    "init.en": "English (US)",
     "init.load": "Language file loaded successfully, current language is \"English (US)\"",
 
 
@@ -12,10 +12,39 @@
 
     "log.info.trayLoad": "System tray loaded",
     "log.info.trayTheme": "System tray theme changed to: $1",
+    "log.info.cleanoldlogs": "Cleaned old logs: $1",
 
     "log.warning.trayIconPath": "Tray icon path does not exist: $1",
 
-    "log.error.savesettings": "Failed to save settings"
+    "log.error.savesettings": "Failed to save settings",
+
+
+
+    "wid.top.close": "Close",
+    "wid.top.minimize": "Minimize",
+    "wid.top.maxmize": "Maximize",
+    "wid.top.restore": "Restore",
+
+    "wid.pages.start": "Start",
+    "wid.pages.start.gameNotfound": "Game not downloaded yet",
+    "wid.pages.start.gameNotfound2": "Please go to the download page to download",
+    "wid.pages.start.startbtn": "Start Game",
+    "wid.pages.start.modbtn": "Mod Manager",
+    "wid.pages.start.gamebtn": "Select Game",
+
+    "wid.pages.download": "Download",
+    "wid.pages.game": "Game",
+    "wid.pages.setting": "Settings",
+    "wid.pages.setting.launcher": "Launcher",
+    "wid.pages.setting.launcher.preferences": "Appearance",
+    "wid.pages.setting.launcher.preferences.theme": "Light Theme",
+    "wid.pages.setting.launcher.preferences.lang": "Select Language",
+
+    "wid.pages.setting.launcher.launch": "Launch",
+
+    "wid.pages.setting.launcher.java": "Global Java",
+
+    "tray.menu.close": "Close"
 
 
 }

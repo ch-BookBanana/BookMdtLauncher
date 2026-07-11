@@ -144,7 +144,8 @@ class Main():
             "maxLogNum": 50,
             "closeByTray": True,
             "defaultGame": None,
-            "githubToken": None
+            "githubToken": [],
+            "javaPath": []
         }
         self.settings = copy.deepcopy(self.defsettings)
         app.aboutToQuit.connect(self.saveSettings)
@@ -814,10 +815,10 @@ class Main():
                     self.right = self.Right_(self,self.root)
                     self.layout.addWidget(self.right,0)
 
-                    self.start = self.Start(self,self.root,self.root.langer.get("wid.pages.start"),getPath("src/assets/buttons/start.png"))
-                    self.download = self.Download(self,self.root,self.root.langer.get("wid.pages.download"),getPath("src/assets/buttons/download.png"))
-                    self.game = self.Game(self,self.root,self.root.langer.get("wid.pages.game"),getPath("src/assets/buttons/game.png"))
-                    self.setting = self.Setting(self,self.root,self.root.langer.get("wid.pages.setting"),getPath("src/assets/buttons/setting.png"))
+                    self.start = self.Start(self,self.root,"wid.pages.start",getPath("src/assets/buttons/start.png"))
+                    self.download = self.Download(self,self.root,"wid.pages.download",getPath("src/assets/buttons/download.png"))
+                    self.game = self.Game(self,self.root,"wid.pages.game",getPath("src/assets/buttons/game.png"))
+                    self.setting = self.Setting(self,self.root,"wid.pages.setting",getPath("src/assets/buttons/setting.png"))
 
                 class Left_(QStackedWidget):
                     def __init__(self, parent=None, root=None):
@@ -987,6 +988,74 @@ class Main():
                             self.backg = self.Backg(self,self)
                             self.layout.addWidget(self.backg)
 
+                            self.lay2 = QHBoxLayout(self.backg)
+                            self.lay2.setContentsMargins(0,0,0,0)
+                            self.lay2.setSpacing(0)
+                            self.stack = QStackedWidget()
+                            self.stack.setStyleSheet("background:transparent;")
+                            self.lay2.addWidget(self.stack)
+
+                            self.start = self.Start(self,self.root)
+
+                        class _Main(QWidget):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent)
+                                self.parent = parent
+                                self.root = root
+                                self.index = self.parent.stack.addWidget(self)
+
+                        class Start(_Main):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent,root)
+                                self.init_ui()
+                                self.init_wid()
+
+                            def init_ui(self):
+                                self.setAttribute(Qt.WA_StyledBackground, False)
+
+                            def init_wid(self):
+                                self.layout = QGridLayout(self)
+                                self.layout.setContentsMargins(30,30,30,30)
+                                self.layout.setSpacing(5)
+
+                                self.layout.setColumnStretch(0,1)
+                                self.layout.setColumnStretch(1,0)
+                                self.layout.setColumnStretch(2,0)
+                                self.layout.setRowStretch(0,1)
+                                self.layout.setRowStretch(1,0)
+                                self.layout.setRowStretch(2,0)
+
+                                self.start = self.Btn(self,self.root,"255,184, 0")
+                                self.start.setFixedSize(180,50)
+                                self.layout.addWidget(self.start,1,1,1,2)
+                                QTimer.singleShot(10, lambda: print(self.start.x(),self.start.y(),self.start.width(),self.start.height()))
+                                
+                                self.settings = self.Btn(self,self.root,"110,65,151")
+                                self.settings.setFixedSize(50,50)
+                                self.layout.addWidget(self.settings,2,2,1,1)
+
+                            class Btn(QPushButton):
+                                def __init__(self,parent=None,root=None,color="0,0,0"):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.color = color
+                                    self.setAttribute(Qt.WA_StyledBackground, True)
+                                    self.setStyleSheet(f"""
+                                        QPushButton{{
+                                            background-color:rgba({self.color},0.4);
+                                            color:white;
+                                            border-radius:10px;
+                                            font-size:20px;
+
+                                        }}
+                                        QPushButton:hover{{
+                                            background-color:rgba({self.color},1);
+                                        }}
+                                    """)
+
+
+
 
                         class Backg(QWidget):
                             def __init__(self,parent=None,root=None):
@@ -1075,31 +1144,6 @@ class Main():
                             self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
                             self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                            self.scroll_slider.setStyleSheet("""
-                                QScrollBar:vertical {
-                                    background: transparent;
-                                    width: 5px;
-                                    margin: 0;
-                                }
-                                QScrollBar::sub-line:vertical {
-                                    height: 0px;
-                                }
-                                QScrollBar::add-line:vertical {
-                                    height: 0px;
-                                }
-                                QScrollBar::handle:vertical {
-                                    min-height: 60px;
-                                    background: #888;
-                                    border-radius: 2px;
-                                }
-                                QScrollBar::handle:vertical:hover {
-                                    background: #aaa;
-                                }
-                                QScrollBar::add-page:vertical,
-                                QScrollBar::sub-page:vertical {
-                                    background: transparent;
-                                }
-                            """)
                             
                             self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
                             self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
@@ -1264,31 +1308,6 @@ class Main():
                                 self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
                                 self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                                self.scroll_slider.setStyleSheet("""
-                                    QScrollBar:vertical {
-                                        background: transparent;
-                                        width: 5px;
-                                        margin: 0;
-                                    }
-                                    QScrollBar::sub-line:vertical {
-                                        height: 0px;
-                                    }
-                                    QScrollBar::add-line:vertical {
-                                        height: 0px;
-                                    }
-                                    QScrollBar::handle:vertical {
-                                        min-height: 60px;
-                                        background: #888;
-                                        border-radius: 2px;
-                                    }
-                                    QScrollBar::handle:vertical:hover {
-                                        background: #aaa;
-                                    }
-                                    QScrollBar::add-page:vertical,
-                                    QScrollBar::sub-page:vertical {
-                                        background: transparent;
-                                    }
-                                """)
                                 
                                 self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
                                 self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
@@ -1325,6 +1344,7 @@ class Main():
                                     self.layout = QHBoxLayout(self)
                                     self.layout.setAlignment(Qt.AlignVCenter)
                                     self.layout.setContentsMargins(0, 0, 0, 0)
+                                    self.layout.setSpacing(5)
 
                                     self.btn = QPushButton()
                                     self.btn.setProperty("wid","check")
@@ -1339,17 +1359,27 @@ class Main():
                                     self.layout.addWidget(self.text,0)
                                     self.text.setFixedHeight(30)
 
+                                    self.layout.addStretch(1)
+
                                     self.intro = QLabel()
                                     self.layout.addWidget(self.intro)
                                     self.intro.hide()
                                     self.intro.setFixedSize(20,20)
+
+                                    self.intro.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+                                    intr = self.intro.sizePolicy()
+                                    intr.setRetainSizeWhenHidden(True)
+                                    self.intro.setSizePolicy(intr)
 
                                     self.tips = QLabel()
                                     self.layout.addWidget(self.tips)
                                     self.tips.hide()
                                     self.tips.setFixedSize(20,20)
 
-                                    self.layout.addStretch(1)
+                                    self.tips.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+                                    tip = self.tips.sizePolicy()
+                                    tip.setRetainSizeWhenHidden(True)
+                                    self.tips.setSizePolicy(intr)
 
                                     self.langing()
                                     self.lighting(self.root.settings["theme"])
@@ -1425,7 +1455,7 @@ class Main():
                                     self.text = QLabel()
                                     self.text.setProperty("wid","text")
                                     self.text.setStyleSheet("font-size: 22px;")
-                                    self.langer()
+                                    self.langing()
                                     self.layout.addWidget(self.text,0)
                                     
                                     self.l2 = QWidget()
@@ -1433,7 +1463,7 @@ class Main():
                                     self.l2.setFixedHeight(1)
                                     self.layout.addWidget(self.l2,1)
 
-                                def langer(self):
+                                def langing(self):
                                     self.text.setText(self.root.langer.get(self.text_))
 
                             class Slider(QWidget):
@@ -1497,6 +1527,8 @@ class Main():
 
                                     self.setFixedHeight(40)
                                     self.layout = QHBoxLayout(self)
+                                    self.layout.setContentsMargins(0, 0, 0, 0)
+                                    self.layout.setSpacing(5)
                                     self.scroll = Slid(Qt.Horizontal)
                                     self.scroll.setProperty("wid","mdt")
                                     self.scroll.setFixedHeight(30)
@@ -1508,10 +1540,20 @@ class Main():
                                     self.intro.hide()
                                     self.intro.setFixedSize(20,20)
 
+                                    self.intro.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+                                    intr = self.intro.sizePolicy()
+                                    intr.setRetainSizeWhenHidden(True)
+                                    self.intro.setSizePolicy(intr)
+
                                     self.tips = QLabel()
                                     self.layout.addWidget(self.tips)
                                     self.tips.hide()
                                     self.tips.setFixedSize(20,20)
+
+                                    self.tips.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+                                    tip = self.tips.sizePolicy()
+                                    tip.setRetainSizeWhenHidden(True)
+                                    self.tips.setSizePolicy(intr)
                                     
                                     self.lay2 = QHBoxLayout(self.scroll)
                                     self.lay2.setContentsMargins(5, 0, 5, 0)
@@ -1568,6 +1610,105 @@ class Main():
                                         self.lighting(self.root.settings["theme"])
                                         self.langing()
 
+                            class DropBtnCombo(QComboBox):
+                                """只在点击下拉箭头时弹出下拉框"""
+                                def mousePressEvent(self, event):
+                                    opt = QStyleOptionComboBox()
+                                    self.initStyleOption(opt)
+                                    drop_rect = self.style().subControlRect(
+                                        QStyle.CC_ComboBox, opt, QStyle.SC_ComboBoxArrow, self
+                                    )
+                                    if drop_rect.contains(event.pos()):
+                                        self.showPopup()
+                                    else:
+                                        super().mousePressEvent(event)
+
+                            class Combo(QWidget):
+                                push = pyqtSignal(str)
+
+                                class _QComboBox(QComboBox):
+                                    popupAboutToShow = pyqtSignal()
+                                    def showPopup(self):
+                                        self.popupAboutToShow.emit()
+                                        super().showPopup()
+
+                                def __init__(self,parent=None,root=None,text=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.text_ = text
+                                    self.intro_ = ""
+                                    self.tips_ = ""
+                                    self.introable = False
+                                    self.tipsable = False
+                                    self.init_wid()
+                                    self.parent.scroll_layout.addWidget(self)
+                                
+                                def init_wid(self):
+                                    self.setFixedHeight(40)
+                                    self.layout = QHBoxLayout(self)
+                                    self.layout.setAlignment(Qt.AlignVCenter)
+                                    self.layout.setContentsMargins(0, 0, 0, 0)
+                                    self.layout.setSpacing(5)
+
+                                    self.layout.addSpacing(28)
+
+                                    self.text = QLabel()
+                                    self.text.setProperty("wid","text")
+                                    self.text.setStyleSheet("font-size: 17px;")
+                                    self.text.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+                                    self.layout.addWidget(self.text,0)
+                                    self.text.setFixedHeight(30)
+
+                                    self.layout.addStretch(1)
+
+                                    self.combo = self._QComboBox()
+                                    self.combo.setFixedHeight(25)
+                                    self.combo.setFixedWidth(150)
+                                    self.layout.addWidget(self.combo,0)
+
+                                    self.intro = QLabel()
+                                    self.layout.addWidget(self.intro)
+                                    self.intro.hide()
+                                    self.intro.setFixedSize(20,20)
+
+                                    self.intro.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+                                    intr = self.intro.sizePolicy()
+                                    intr.setRetainSizeWhenHidden(True)
+                                    self.intro.setSizePolicy(intr)
+
+                                    self.tips = QLabel()
+                                    self.layout.addWidget(self.tips)
+                                    self.tips.hide()
+                                    self.tips.setFixedSize(20,20)
+
+                                    self.tips.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+                                    tip = self.tips.sizePolicy()
+                                    tip.setRetainSizeWhenHidden(True)
+                                    self.tips.setSizePolicy(intr)
+
+                                    self.langing()
+
+                                def setToolBar(self,wid,shown=None,text=None):
+                                    if wid == "intro":
+                                        if shown is not None:
+                                            self.introable = shown
+                                            self.intro.setVisible(shown)
+                                        if text is not None: self.intro_ = text
+                                    if wid == "tips":
+                                        if shown is not None:
+                                            self.tipsable = shown
+                                            self.tips.setVisible(shown)
+                                        if text is not None: self.tips_ = text
+                                        self.lighting(self.root.settings["theme"])
+                                        self.langing()
+
+                                def langing(self):
+                                    self.text.setText(self.root.langer.get(self.text_))
+                                    self.intro.setToolTip(self.root.langer.get(self.intro_))
+                                    self.tips.setToolTip(self.root.langer.get(self.tips_))
+
+
                             def barShow(self):
                                 self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
 
@@ -1592,12 +1733,22 @@ class Main():
                                 self._t1_theme.btn.setChecked(self.root.settings["theme"])
                                 self._t1_theme.push.connect(self.root.setTheme)
 
+                                self._t1_lang = self.Combo(self,self.root,"wid.pages.setting.launcher.preferences.lang")
+                                def _t1_lang_showEvent(self,combo):
+                                    items = self.root.langer.get_langs_info()
+                                    combo.clear()
+                                    for lang_name, lang_info in items.items():
+                                        combo.addItem(f"{lang_info[0]}",lang_name)
+                                        combo.setItemData(combo.count()-1,lang_info[1], Qt.ToolTipRole)
+                                    combo.setCurrentIndex(combo.findData(self.root.settings["language"]))
+                                _t1_lang_showEvent(self,self._t1_lang.combo)
+                                self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
+                                self._t1_lang.combo.activated.connect(lambda: self.root.langer.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 else None)
+
                                 self._title2 = self.Title(self,self.root,"wid.pages.setting.launcher.launch")
 
-                                self.test = self.Slider(self,self.root,"test")
-                                self.test.scroll.setRange(1,100)
                                 self._title3 = self.Title(self,self.root,"wid.pages.setting.launcher.java")
-                                
+                                self._t1_theme.setToolBar("intro",shown=True)
 
 
 
@@ -1800,7 +1951,6 @@ class Main():
             self.default_lang = "en-US"  # 定义默认回退语言
 
             self.load(self.current_lang)
-            self.root.logger.info(self.get("init.load"))
 
         def load(self, lang):
             """加载语言文件并自动刷新所有支持多语言的控件"""
@@ -1810,6 +1960,7 @@ class Main():
             try:
                 with open(lang_path, "r", encoding="utf-8") as f:
                     self.langs = json.load(f)
+                self.parent.settings["language"] = lang
             except Exception as e:
                 self.root.logger.error(f"Failed to load language file {lang_path}: {e}")
                 self.langs = {}
@@ -1850,6 +2001,7 @@ class Main():
             # 从主窗口开始遍历
             if hasattr(self.root, 'window') and self.root.window:
                 QTimer.singleShot(0, lambda: (notify_langing(self.root.window), self.root.logger.debug("Langing...")))
+            self.root.logger.info(self.get("init.load"))
 
         def get(self, key):
             """
@@ -1876,6 +2028,34 @@ class Main():
             except Exception as e:
                 self.root.logger.error(f"Failed to list language files: {e}")
             return langs
+
+        def get_langs_info(self):
+            """
+            获取所有语言文件的名称及 init 信息。
+            返回字典：键为语言文件名（不带后缀），值为列表 [init, init.en]
+            """
+            info = {}
+            lang_dir = getPath("src/lang")
+            try:
+                if not os.path.exists(lang_dir):
+                    return info
+                for file in os.listdir(lang_dir):
+                    if file.endswith(".json"):
+                        lang_name = file.replace(".json", "")
+                        lang_path = os.path.join(lang_dir, file)
+                        try:
+                            with open(lang_path, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                            info[lang_name] = [
+                                data.get("init", lang_name),
+                                data.get("init.en", lang_name)
+                            ]
+                        except Exception as e:
+                            self.root.logger.error(f"Failed to read language file {lang_path}: {e}")
+                            info[lang_name] = [lang_name, lang_name]
+            except Exception as e:
+                self.root.logger.error(f"Failed to list language files: {e}")
+            return info
 
     class Signals():
         def __init__(self, parent=None, root=None):
@@ -1971,6 +2151,8 @@ if __name__ == "__main__":
         except Exception as e:
             import traceback, webbrowser
             err_msg = traceback.format_exc()
+
+            print(err_msg)
 
             dialog = QDialog()
             dialog.setWindowTitle("Book MDT Launcher - Error")

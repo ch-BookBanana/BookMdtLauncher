@@ -1,0 +1,50 @@
+{
+    "init": "日本語",
+    "init.en": "Japanese",
+    "init.load": "言語ファイルの読み込みに成功しました、現在は「日本語」です",
+
+
+    "log.info.savesettings": "設定を保存しました",
+
+    
+    "log.info.changetheme": "ウィンドウテーマを変更しました: $1",
+    "log.info.windowLoad": "ランチャーウィンドウの読み込みが完了しました",
+
+    "log.info.trayLoad": "システムトレイの読み込みが完了しました",
+    "log.info.trayTheme": "システムトレイのテーマを変更しました: $1",
+    "log.info.cleanoldlogs": "古いログを削除しました: $1",
+
+    "log.warning.trayIconPath": "トレイアイコンのパスが存在しません: $1",
+
+    "log.error.savesettings": "設定の保存に失敗しました",
+
+
+
+    "wid.top.close": "閉じる",
+    "wid.top.minimize": "最小化",
+    "wid.top.maxmize": "最大化",
+    "wid.top.restore": "元に戻す",
+
+    "wid.pages.start": "起動",
+    "wid.pages.start.gameNotfound": "まだゲームをダウンロードしていません",
+    "wid.pages.start.gameNotfound2": "ダウンロードページからダウンロードしてください",
+    "wid.pages.start.startbtn": "ゲーム開始",
+    "wid.pages.start.modbtn": "MOD管理",
+    "wid.pages.start.gamebtn": "ゲーム選択",
+
+    "wid.pages.download": "ダウンロード",
+    "wid.pages.game": "ゲーム",
+    "wid.pages.setting": "設定",
+    "wid.pages.setting.launcher": "ランチャー",
+    "wid.pages.setting.launcher.preferences": "外観",
+    "wid.pages.setting.launcher.preferences.theme": "ライトテーマ",
+    "wid.pages.setting.launcher.preferences.lang": "言語選択",
+
+    "wid.pages.setting.launcher.launch": "起動",
+
+    "wid.pages.setting.launcher.java": "グローバルJava",
+
+    "tray.menu.close": "閉じる"
+
+
+}

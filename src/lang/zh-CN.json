@@ -1,6 +1,6 @@
 {
-    "init": "中文(大陆)",
-    "init.en": "chinese(mainland)",
+    "init": "中文（大陆）",
+    "init.en": "Chinese (Simplified)",
     "init.load": "语言文件加载成功,当前为\"中文(大陆)\"",
 
 
@@ -37,7 +37,8 @@
     "wid.pages.setting": "设置",
     "wid.pages.setting.launcher": "启动器",
     "wid.pages.setting.launcher.preferences": "外观",
-    "wid.pages.setting.launcher.preferences.theme": "亮色模式",
+    "wid.pages.setting.launcher.preferences.theme": "浅色主题",
+    "wid.pages.setting.launcher.preferences.lang": "选择语言",
 
     "wid.pages.setting.launcher.launch": "启动",
 

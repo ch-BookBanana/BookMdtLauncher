@@ -1,0 +1,50 @@
+{
+    "init": "한국어",
+    "init.en": "Korean",
+    "init.load": "언어 파일이 성공적으로 로드되었습니다, 현재 \"한국어\"입니다",
+
+
+    "log.info.savesettings": "설정이 저장되었습니다",
+
+    
+    "log.info.changetheme": "창 테마 변경: $1",
+    "log.info.windowLoad": "런처 창 로드 완료",
+
+    "log.info.trayLoad": "시스템 트레이 로드 완료",
+    "log.info.trayTheme": "시스템 트레이 테마 변경: $1",
+    "log.info.cleanoldlogs": "오래된 로그 정리됨: $1",
+
+    "log.warning.trayIconPath": "트레이 아이콘 경로가 존재하지 않습니다: $1",
+
+    "log.error.savesettings": "설정 저장 실패",
+
+
+
+    "wid.top.close": "닫기",
+    "wid.top.minimize": "최소화",
+    "wid.top.maxmize": "최대화",
+    "wid.top.restore": "복원",
+
+    "wid.pages.start": "시작",
+    "wid.pages.start.gameNotfound": "아직 게임을 다운로드하지 않았습니다",
+    "wid.pages.start.gameNotfound2": "다운로드 페이지에서 다운로드하세요",
+    "wid.pages.start.startbtn": "게임 시작",
+    "wid.pages.start.modbtn": "모드 관리",
+    "wid.pages.start.gamebtn": "게임 선택",
+
+    "wid.pages.download": "다운로드",
+    "wid.pages.game": "게임",
+    "wid.pages.setting": "설정",
+    "wid.pages.setting.launcher": "런처",
+    "wid.pages.setting.launcher.preferences": "외관",
+    "wid.pages.setting.launcher.preferences.theme": "라이트 테마",
+    "wid.pages.setting.launcher.preferences.lang": "언어 선택",
+
+    "wid.pages.setting.launcher.launch": "실행",
+
+    "wid.pages.setting.launcher.java": "전역 Java",
+
+    "tray.menu.close": "닫기"
+
+
+}

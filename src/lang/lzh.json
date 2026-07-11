@@ -1,0 +1,51 @@
+{
+    "init": "文言（華夏）",
+    "init.en": "Classical Chinese",
+    "init.load": "善哉！雅言已載，今作華夏之聲。",
+
+
+    "log.info.savesettings": "諸設已錄，萬無一失。",
+
+    
+    "log.info.changetheme": "牖色既易，今為$1。",
+    "log.info.windowLoad": "窗牖既成，以待君命。",
+
+    "log.info.trayLoad": "案鈴已懸，默然而立。",
+    "log.info.trayTheme": "案鈴易色，今為$1。",
+    "log.info.cleanoldlogs": "故牘已焚，$1不復存焉。",
+
+    "log.warning.trayIconPath": "案鈴無形，其徑不存：$1",
+
+    "log.error.savesettings": "嗚呼！錄事不諧，功敗垂成。",
+
+
+
+    "wid.top.close": "闔",
+    "wid.top.minimize": "收攝",
+    "wid.top.maxmize": "張滿",
+    "wid.top.restore": "復舊",
+
+    "wid.pages.start": "始",
+    "wid.pages.start.gameNotfound": "戲尚未備，空空如也",
+    "wid.pages.start.gameNotfound2": "往下載之頁，覓戲備之",
+    "wid.pages.start.startbtn": "開戲",
+    "wid.pages.start.modbtn": "理模",
+    "wid.pages.start.gamebtn": "擇戲",
+
+    "wid.pages.download": "納戲",
+    "wid.pages.game": "藏戲",
+    "wid.pages.setting": "機杼",
+    "wid.pages.setting.launcher": "啟闔之器",
+    "wid.pages.setting.launcher.preferences": "容止",
+    "wid.pages.setting.launcher.preferences.theme": "晝夜之觀",
+    "wid.pages.setting.launcher.preferences.lang": "擇言",
+
+    "wid.pages.setting.launcher.launch": "啟行",
+
+    "wid.pages.setting.launcher.java": "通域爪哇",
+
+    "tray.menu.close": "闔"
+
+
+}
+
