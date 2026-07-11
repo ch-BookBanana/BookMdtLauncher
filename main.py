@@ -2000,7 +2000,7 @@ class Main():
 
             # 从主窗口开始遍历
             if hasattr(self.root, 'window') and self.root.window:
-                QTimer.singleShot(0, lambda: (notify_langing(self.root.window), self.root.logger.debug("Langing...")))
+                QTimer.singleShot(0, lambda: notify_langing(self.root.window))
             self.root.logger.info(self.get("init.load"))
 
         def get(self, key):
