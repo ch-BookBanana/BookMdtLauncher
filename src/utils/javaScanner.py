@@ -176,7 +176,7 @@ class javaScanner:
                 ver = cls._get_version_from_release(p)
             # 如果两者都未提供版本，则忽略该路径
             if ver:
-                final.append([p, ver])
+                final.append([p.replace('\\', '/'), ver])
 
         final.sort(key=lambda x: x[0].lower())
         return final

@@ -40,9 +40,12 @@
     "wid.pages.setting.launcher.preferences.theme": "라이트 테마",
     "wid.pages.setting.launcher.preferences.lang": "언어 선택",
 
-    "wid.pages.setting.launcher.launch": "실행",
+    "wid.pages.setting.launcher.general": "일반",
 
     "wid.pages.setting.launcher.java": "전역 Java",
+    "wid.pages.setting.launcher.java.select": "Java 선택",
+    "wid.pages.setting.launcher.java.select.none": "사용 가능한 Java 없음",
+    "wid.pages.setting.launcher.java.select.auto": "자동 선택",
 
     "tray.menu.close": "닫기"
 

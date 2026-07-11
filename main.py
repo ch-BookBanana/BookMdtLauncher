@@ -35,6 +35,7 @@ import ctypes.wintypes
 from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher
+from src.utils.javaScanner import javaScanner
 from src.utils.QThTimer import QThTimer
 
 
@@ -144,8 +145,9 @@ class Main():
             "maxLogNum": 50,
             "closeByTray": True,
             "defaultGame": None,
+            "javaPath": None,
             "githubToken": [],
-            "javaPath": []
+            "javaPaths": []
         }
         self.settings = copy.deepcopy(self.defsettings)
         app.aboutToQuit.connect(self.saveSettings)
@@ -1745,13 +1747,52 @@ class Main():
                                 self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
                                 self._t1_lang.combo.activated.connect(lambda: self.root.langer.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 else None)
 
-                                self._title2 = self.Title(self,self.root,"wid.pages.setting.launcher.launch")
+
+                                self._title2 = self.Title(self,self.root,"wid.pages.setting.launcher.general")
+
 
                                 self._title3 = self.Title(self,self.root,"wid.pages.setting.launcher.java")
-                                self._t1_theme.setToolBar("intro",shown=True)
+                                self._t3_select = self.Combo(self,self.root,"wid.pages.setting.launcher.java.select")
+                                self._t3_select_hasjava = True
+                                def _t3_select_showEvent(self):
+                                    self._t3_select.combo.clear()
+                                    if not self.root.settings["javaPaths"]:
+                                        self.root.settings["javaPaths"] = javaScanner.getJavas()
+                                        if not self.root.settings["javaPaths"]:
+                                            self._t3_select_hasjava = False
+                                            self._t3_select.combo.addItem("nojava",self.root.langer.get("wid.pages.setting.launcher.java.select.none"))
+                                            return
+                                    else:
+                                        javas = self.root.settings["javaPaths"]
+                                        for java in javas:
+                                            if not javaScanner.isJava(java[0]):
+                                                javas.remove(java)
+                                        if not javas:
+                                            _t3_select_showEvent(self)
+                                            return
+                                        self._t3_select_hasjava = True
+                                        self._t3_select.combo.addItem(self.root.langer.get("wid.pages.setting.launcher.java.select.auto"),"auto")
+                                        for java in javas:
+                                            self._t3_select.combo.addItem(f"v{java[1]}",java[0])
+                                            self._t3_select.combo.setItemData(self._t3_select.combo.count()-1,java[0],Qt.ToolTipRole)
+                                        select = "auto"
+                                        for java in javas:
+                                            if self.root.settings["javaPath"] == java[0]:
+                                                select = java[0]
+                                        self.root.settings["javaPath"] = select if select != "auto" else None
+                                        self._t3_select.combo.setCurrentIndex(self._t3_select.combo.findData(select))
+                                        
+                                _t3_select_showEvent(self)
+                                self._t3_select.combo.popupAboutToShow.connect(lambda:_t3_select_showEvent(self))
+                                self._t3_select.combo.activated.connect(lambda:(self.root.settings.__setitem__("javaPath",self._t3_select.combo.currentData() if (self._t3_select.combo.currentData() != "auto") else None)))
 
-
-
+                            def langing(self):
+                                try:
+                                    t3SelecIndex1 = self._t3_select.combo.findData("nojava")
+                                    t3SelecIndex2 = self._t3_select.combo.findData("auto")
+                                    if t3SelecIndex1 >= 0:self._t3_select.combo.setItemText(t3SelecIndex1,self.root.langer.get("wid.pages.setting.launcher.java.select.none"))
+                                    if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,self.root.langer.get("wid.pages.setting.launcher.java.select.auto"))
+                                except : pass
 
     class Tray(QSystemTrayIcon):
         def __init__(self, parent=None, root=None):

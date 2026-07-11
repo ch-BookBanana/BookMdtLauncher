@@ -40,9 +40,12 @@
     "wid.pages.setting.launcher.preferences.theme": "Light Theme",
     "wid.pages.setting.launcher.preferences.lang": "Select Language",
 
-    "wid.pages.setting.launcher.launch": "Launch",
+    "wid.pages.setting.launcher.general": "General",
 
     "wid.pages.setting.launcher.java": "Global Java",
+    "wid.pages.setting.launcher.java.select": "Select Java",
+    "wid.pages.setting.launcher.java.select.none": "No Java Available",
+    "wid.pages.setting.launcher.java.select.auto": "Auto Select",
 
     "tray.menu.close": "Close"
 

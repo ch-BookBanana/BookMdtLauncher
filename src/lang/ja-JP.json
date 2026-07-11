@@ -40,9 +40,12 @@
     "wid.pages.setting.launcher.preferences.theme": "ライトテーマ",
     "wid.pages.setting.launcher.preferences.lang": "言語選択",
 
-    "wid.pages.setting.launcher.launch": "起動",
+    "wid.pages.setting.launcher.general": "一般",
 
     "wid.pages.setting.launcher.java": "グローバルJava",
+    "wid.pages.setting.launcher.java.select": "Javaを選択",
+    "wid.pages.setting.launcher.java.select.none": "利用可能なJavaなし",
+    "wid.pages.setting.launcher.java.select.auto": "自動選択",
 
     "tray.menu.close": "閉じる"
 

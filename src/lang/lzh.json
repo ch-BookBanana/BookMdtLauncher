@@ -40,9 +40,12 @@
     "wid.pages.setting.launcher.preferences.theme": "晝夜之觀",
     "wid.pages.setting.launcher.preferences.lang": "擇言",
 
-    "wid.pages.setting.launcher.launch": "啟行",
+    "wid.pages.setting.launcher.general": "常務",
 
     "wid.pages.setting.launcher.java": "通域爪哇",
+    "wid.pages.setting.launcher.java.select": "擇爪哇",
+    "wid.pages.setting.launcher.java.select.none": "爪哇無覓處",
+    "wid.pages.setting.launcher.java.select.auto": "自擇之",
 
     "tray.menu.close": "闔"
 

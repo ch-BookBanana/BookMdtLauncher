@@ -40,9 +40,12 @@
     "wid.pages.setting.launcher.preferences.theme": "淺色主題",
     "wid.pages.setting.launcher.preferences.lang": "選擇語言",
 
-    "wid.pages.setting.launcher.launch": "啟動",
+    "wid.pages.setting.launcher.general": "一般",
 
     "wid.pages.setting.launcher.java": "全域 Java",
+    "wid.pages.setting.launcher.java.select": "選擇 Java",
+    "wid.pages.setting.launcher.java.select.none": "無可用 Java",
+    "wid.pages.setting.launcher.java.select.auto": "自動選擇",
 
     "tray.menu.close": "關閉"
 
