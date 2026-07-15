@@ -29,7 +29,7 @@
     "wid.pages.start.gameNotfound": "还没有下载游戏",
     "wid.pages.start.gameNotfound2": "请前往下载页面进行下载",
     "wid.pages.start.startbtn": "开始游戏",
-    "wid.pages.start.modbtn": "模组管理",
+    "wid.pages.start.modbtn": "管理模组",
     "wid.pages.start.gamebtn": "选择游戏",
 
     "wid.pages.download": "下载",
@@ -47,7 +47,11 @@
     "wid.pages.setting.launcher.java.select.none": "无可用Java",
     "wid.pages.setting.launcher.java.select.auto": "自动选择",
 
-    "tray.menu.close": "关闭"
+    "tray.menu.close": "关闭",
 
 
+    "text.cancel": "取消",
+    "text.yes": "确定",
+    "text.return": "返回",
+    "text.default": "默认"
   }

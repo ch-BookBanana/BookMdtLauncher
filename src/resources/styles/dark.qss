@@ -1,8 +1,12 @@
+* {outline: none;}
 QWidget {
-    background-color: rgb(43, 43, 43);
+    background: rgb(43, 43, 43);
+}
+QWidget[wid="color2"] {
+    background: rgb(55, 55, 55);
 }
 QWidget[wid="line"] {
-    background-color: rgb(134, 134, 134)
+    background: rgb(134, 134, 134)
 }
 QWidget[wid="shadow"] {
     background: qlineargradient(
@@ -22,12 +26,12 @@ QLabel[wid="title"] {
     color: rgb(175, 175, 175);
 }
 QLabel[wid="lbtn"] {
-    background-color: transparent;
+    background: transparent;
     border: none;
     color: rgb(175, 175, 175);
 }
 QLabel[wid="png"] {
-    background-color: rgb(43, 43, 43);
+    background: rgb(43, 43, 43);
     border: 3px solid #525252;;
 }
 QLabel[wid="text"] {
@@ -35,49 +39,60 @@ QLabel[wid="text"] {
     border: none;
     color: rgb(255, 255, 255);
 }
+QPushButton[wid="btn"] {
+    background: transparent;
+    border: 1px solid rgb(175, 175, 175);
+    border-radius: 5px;
+    color: rgb(255, 255, 255);
+    font-size: 12px;
+}
+QPushButton[wid="btn"]:pressed {
+    background: rgba(124, 124, 124, 0.1);
+    border: 1px solid rgb(124, 124, 124);
+}
 QPushButton[wid="lbtn"] {
-    background-color: transparent;
+    background: transparent;
     border: none;
 }
 QPushButton[wid="lbtn"]:hover {
-    background-color: rgba(124, 124, 124, 0.2);
+    background: rgba(124, 124, 124, 0.2);
     border: none;
 }
 QPushButton[wid="lbtn"]:checked {
-    background-color: rgba(124, 124, 124, 0.5);
+    background: rgba(124, 124, 124, 0.5);
     border: none;
 }
 QPushButton[wid="tbtn"] {
-    background-color: transparent;
+    background: transparent;
     border: none;
 }
 QPushButton[wid="tbtn"]:hover {
-    background-color: rgba(124, 124, 124, 0.2);
+    background: rgba(124, 124, 124, 0.2);
     border: none;
 }
 QPushButton[wid="tbtn"]:checked {
-    background-color: rgba(124, 124, 124, 0.5);
+    background: rgba(124, 124, 124, 0.5);
     border: none;
 }
 QPushButton[wid="check"] {
-    background-color: transparent;
+    background: transparent;
     border: none;
 }
 QMenu {
-    background-color: rgb(45, 45, 45);
+    background: rgb(45, 45, 45);
     color: rgb(247, 247, 247)
 }
 QMenu::item {
     color: rgb(247, 247, 247);
 }
 QMenu::item:selected {
-    background-color: rgba(255, 255, 255, 0.275);
+    background: rgba(255, 255, 255, 0.275);
 }
 QStackedWidget[wid="widget"] {
-    background-color: rgb(43, 43, 43);
+    background: rgb(43, 43, 43);
 }
 QToolTip { 
-    background-color: rgb(43, 43, 43);
+    background: rgb(43, 43, 43);
     color: rgb(219, 219, 219);
     border: 1px solid rgb(142, 142, 142);
     border-radius: 1px;
@@ -91,7 +106,7 @@ QSlider::handle:horizontal[wid="mdt"] {
     width: 20px;
 }
 QComboBox {
-    background-color: rgb(43, 43, 43);
+    background: rgb(43, 43, 43);
     color: rgb(247, 247, 247);
     border: 1px solid rgb(134, 134, 134);
     border-radius: 2px;
@@ -103,16 +118,16 @@ QComboBox::drop-down {
     width: 15px;
 }
 QComboBox QAbstractItemView {
-    background-color: rgb(45, 45, 45);
+    background: rgb(45, 45, 45);
     color: rgb(247, 247, 247);
     border: 1px solid rgb(134, 134, 134);
     outline: none;
 }
 QComboBox QAbstractItemView::item:hover {
-    background-color: rgba(124, 124, 124, 0.2);
+    background: rgba(124, 124, 124, 0.2);
 }
 QComboBox QAbstractItemView::item:selected {
-    background-color: rgba(124, 124, 124, 0.5);
+    background: rgba(124, 124, 124, 0.5);
 }
 QScrollBar:vertical {
     background: transparent;

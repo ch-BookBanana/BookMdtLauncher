@@ -1,14 +1,14 @@
 {
     "init": "文言（華夏）",
     "init.en": "Classical Chinese",
-    "init.load": "善哉！雅言已載，今作華夏之聲。",
+    "init.load": "文言載畢，今作華夏之聲。",
 
 
     "log.info.savesettings": "諸設已錄，萬無一失。",
 
     
     "log.info.changetheme": "牖色既易，今為$1。",
-    "log.info.windowLoad": "窗牖既成，以待君命。",
+    "log.info.windowLoad": "牖既成，以待君命。",
 
     "log.info.trayLoad": "案鈴已懸，默然而立。",
     "log.info.trayTheme": "案鈴易色，今為$1。",
@@ -27,9 +27,9 @@
 
     "wid.pages.start": "始",
     "wid.pages.start.gameNotfound": "戲尚未備，空空如也",
-    "wid.pages.start.gameNotfound2": "往下載之頁，覓戲備之",
-    "wid.pages.start.startbtn": "開戲",
-    "wid.pages.start.modbtn": "理模",
+    "wid.pages.start.gameNotfound2": "往納戲之頁，可覓而備之",
+    "wid.pages.start.startbtn": "啟戲",
+    "wid.pages.start.modbtn": "治模",
     "wid.pages.start.gamebtn": "擇戲",
 
     "wid.pages.download": "納戲",
@@ -45,7 +45,7 @@
     "wid.pages.setting.launcher.java": "通域爪哇",
     "wid.pages.setting.launcher.java.select": "擇爪哇",
     "wid.pages.setting.launcher.java.select.none": "爪哇無覓處",
-    "wid.pages.setting.launcher.java.select.auto": "自擇之",
+    "wid.pages.setting.launcher.java.select.auto": "自擇",
 
     "tray.menu.close": "闔"
 

@@ -147,16 +147,24 @@ class Main():
             "defaultGame": None,
             "javaPath": None,
             "githubToken": [],
-            "javaPaths": []
+            "javaPaths": [],
+            "gameList": {"::default": []}
         }
         self.settings = copy.deepcopy(self.defsettings)
         app.aboutToQuit.connect(self.saveSettings)
 
-        def deep_merge_settings(default, file_settings):
+        def deep_merge_settings(default, file_settings, nested=False):
             for key, value in file_settings.items():
-                if key in default and isinstance(default[key], dict) and isinstance(value, dict):
-                    deep_merge_settings(default[key], value)
-                elif key in default:
+                if key not in default:
+                    continue
+                if isinstance(default[key], dict) and isinstance(value, dict):
+                    if nested:
+                        for sub_key, sub_value in value.items():
+                            if sub_key not in default[key]:
+                                default[key][sub_key] = sub_value
+                    else:
+                        deep_merge_settings(default[key], value, nested=True)
+                elif not nested:
                     default[key] = value
 
         try:
@@ -179,9 +187,38 @@ class Main():
         self.saveSettings()
 
         self.launcher = mdtLauncher()
+        self.signals.register("gameRenovated")
+        QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
+        QThTimer.task(self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
 
         self.tray = self.Tray(self, self)
         self.window = self.Window(self, self)
+
+        # 后台预加载所有游戏数据到缓存，加速后续切换
+        QThTimer.task(lambda event: mdtScanner.preload_all(), None, None, 100)
+
+    def gameRenovate(self, event):
+        mdts = mdtScanner.getMdts()
+        games = copy.deepcopy(self.settings["gameList"])
+        changed = False
+        for key, game_list in games.items():
+            for game in list(game_list):
+                if game in mdts:
+                    mdts.remove(game)
+                else:
+                    game_list.remove(game)
+                    changed = True
+        if mdts:
+            games.setdefault("::default", []).extend(mdts)
+            changed = True
+        if changed:
+            mdtScanner.invalidate_cache()
+            event.lambdas[0].emit()
+            event.lambdas[1].emit()
+            self.settings["gameList"] = games
+        
+        
+        
 
     def setTheme(self,theme):
         self.settings["theme"] = 1 if theme else 0
@@ -882,14 +919,27 @@ class Main():
                         super().__init__(parent, root, text, logo)
                         QThTimer.taskP(2000, self.left.changeTimer, [self.left.sets])
                         QThTimer.task(self.left.changeTimer, [self.left.sets], None ,0)
+                        self.root.launcher.game_launched.connect(lambda: self.main.stack.setCurrentIndex(3))
+                        self.root.launcher.game_launched.connect(lambda: self.left.main.setCurrentIndex(3))
+                        self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
+                        self.root.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
+                        self.root.launcher.game_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
+                        self.root.launcher.game_finished.connect(lambda: self.left.main.setCurrentIndex(0))
+                        self.root.launcher.log.connect(lambda dic: (self.root.logger.info("[launcher]"+dic["text"]) if dic["type"] == "info" else self.root.logger.error("[launcher]"+dic["text"])))
 
                     def changeGame(self, game=None):
-                        if game not in mdtScanner.getMdts():
-                            if len(mdtScanner.getMdts()) == 0:
+                        mdts = mdtScanner.getMdts()
+                        if game == self.root.settings["defaultGame"]: return
+                        if game not in mdts:
+                            if len(mdts) == 0:
                                 self.root.settings["defaultGame"] = None
                             else:
-                                self.root.settings["defaultGame"] = game
-                            self.root.signals.emit("start_gameChanged", game)
+                                self.root.settings["defaultGame"] = mdts[0]
+                        else:
+                            self.root.settings["defaultGame"] = game
+                        self.root.signals.emit("start_gameChanged", game)
+                        QThTimer.task(self.left.changeTimer, [self.left.sets])
+
                             
 
                     class Left(Leftw):
@@ -900,7 +950,8 @@ class Main():
                             self.game = {
                                 "icon": None,
                                 "name": None,
-                                "vers": None
+                                "vers": None,
+                                "icon_key": None
                             }
 
                         def init_wid(self):
@@ -930,12 +981,15 @@ class Main():
                             self.versTxt.setText("版本")
 
                             self.layout.addSpacing(30)
-                            self.main = QStackedWidget()
+                            self.main = self.Bottom(self,self.root)
                             self.layout.addWidget(self.main,1)
 
                         def sets(self,icon=(False,None),gameTxt=(False,None),versTxt=(False,None)):
                             if icon[0]:
-                                self.icon.setPixmap(QPixmap(icon[1]))
+                                pm = icon[1]
+                                if pm and not pm.isNull():
+                                    pm = pm.scaled(120, 120, Qt.KeepAspectRatio, Qt.FastTransformation)
+                                self.icon.setPixmap(pm)
                             if gameTxt[0]:
                                 self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, 150))
                             if versTxt[0]:
@@ -943,38 +997,153 @@ class Main():
 
                         def changeTimer(self,event):
                             i = [(False,None),(False,None),(False,None)]
-                            if len(mdtScanner.getMdts()) == 0:
+                            mdts = mdtScanner.getMdts()
+                            if len(mdts) == 0:
                                 self.root.settings["defaultGame"] = None
                             elif self.root.settings["defaultGame"] is None:
-                                self.root.settings["defaultGame"] = mdtScanner.getMdts()[0]
-                            if self.game["name"] != self.root.settings["defaultGame"]:
-                                if self.root.settings["defaultGame"] is None:
+                                self.root.settings["defaultGame"] = mdts[0]
+                            default_game = self.root.settings["defaultGame"]
+                            game_msg = mdtScanner.getMdtMsg(default_game) if default_game else None
+                            if self.game["name"] != default_game:
+                                if default_game is None:
                                     i[1] = (True,self.root.langer.get("wid.pages.start.left.noGame"))
                                     i[2] = (True,self.root.langer.get("wid.pages.start.left.DGame"))
-                                    self.game["name"] = self.game["vers"] = None
+                                    self.game["name"] = self.game["vers"] = self.game["icon_key"] = None
                                 else:
-                                    game = self.root.settings["defaultGame"]
-                                    self.game["name"] = game
-                                    vers = mdtScanner.getMdtMsg(game)
-                                    self.game["vers"] = f"v{vers['number']}.{vers['build']}{vers['modifier']}"
-                                    i[1] = (True,game)
+                                    self.game["name"] = default_game
+                                    if game_msg:
+                                        self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}"
+                                    i[1] = (True,default_game)
                                     i[2] = (True,self.game["vers"])
-                            if self.game["name"] is not None:
-                                vers = f"v{mdtScanner.getMdtMsg(self.game['name'])['number']}.{mdtScanner.getMdtMsg(self.game['name'])['build']}{mdtScanner.getMdtMsg(self.game['name'])['modifier']}"
-                                if self.game["vers"] != vers:
-                                    self.game["vers"] = vers
-                                    i[2] = (True,vers)
-                            if self.game["name"] is not None and mdtScanner.getMdtMsg(self.game["name"])["icon"]:
-                                png = pngSha(mdtScanner.getMdtMsg(self.game["name"])["icon"])
+                            elif self.game["name"] is not None and game_msg:
+                                new_vers = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}"
+                                if self.game["vers"] != new_vers:
+                                    self.game["vers"] = new_vers
+                                    i[2] = (True,new_vers)
+                            if self.game["name"] is not None and game_msg and game_msg["icon"]:
+                                icon_path = game_msg["icon"]
+                                try:
+                                    icon_key = f"{icon_path}:{os.path.getmtime(icon_path)}:{os.path.getsize(icon_path)}"
+                                except OSError:
+                                    icon_key = None
                             else:
-                                png = None
-                            if self.game["icon"] != png:
-                                self.game["icon"] = png
-                                i[0] = (True,QPixmap(mdtScanner.getMdtMsg(self.game["name"])["icon"]) if self.game["name"] is not None else QPixmap())
+                                icon_key = None
+
+                            if self.game.get("icon_key") != icon_key:
+                                self.game["icon_key"] = icon_key
+                                if icon_key is not None:
+                                    i[0] = (True, QPixmap(game_msg["icon"]))
+                                else:
+                                    i[0] = (True, QPixmap())
+
                             if i[0][0] or i[1][0] or i[2][0]:
                                 event.lambdas[0].emit(i[0],i[1],i[2])
                             
-                                    
+                        class Bottom(QStackedWidget):
+                            def __init__(self, parent=None, root=None):
+                                super().__init__()
+                                self.root = root
+                                self.parent = parent
+                                self.init_wid()
+                                
+                            def init_wid(self):
+                                self.start = self.Start(self,self.root)
+                                self.mod = self.Mod(self,self.root)
+                                self.world = self.World(self,self.root)
+                                self.launch = self.Launch(self,self.root)
+                                self.suspend = self.Suspend(self,self.root)
+
+                            class Pages(QWidget):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__()
+                                    self.root = root
+                                    self.parent = parent
+                                    self.index = self.parent.addWidget(self)
+
+                                class Btn(QPushButton):
+                                    def __init__(self, parent=None, root=None):
+                                        super().__init__()
+                                        self.root = root
+                                        self.parent = parent
+                                        self.setProperty("wid","btn")
+
+                            class Start(Pages):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__(parent,root)
+                                    self.init_wid()
+                                    self.langing()
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(30,50,30,50)
+                                    self.layout.setSpacing(10)
+                                    self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+
+                                    self.world =self.Btn(self,self.root)
+                                    self.world.setFixedSize(QSize(170,50))
+                                    self.layout.addWidget(self.world)
+
+                                    self.world.clicked.connect(lambda: self.parent.setCurrentIndex(2))
+                                    self.world.clicked.connect(lambda: self.parent.parent.parent.main.stack.setCurrentIndex(2))
+
+                                def langing(self):
+                                    self.world.setText(self.root.langer.get("wid.pages.start.gamebtn"))
+
+                            class Mod(Pages):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__(parent,root)
+                                    self.init_wid()
+                                    self.langing()
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(30,50,30,50)
+                                    self.layout.setSpacing(10)
+                                    self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+
+                                    self.cancle =self.Btn(self,self.root)
+                                    self.cancle.setFixedSize(QSize(170,50))
+                                    self.layout.addWidget(self.cancle)
+
+                                    self.cancle.clicked.connect(lambda: self.parent.setCurrentIndex(0))
+                                    self.cancle.clicked.connect(lambda: self.parent.parent.parent.main.stack.setCurrentIndex(0))
+
+                                def langing(self):
+                                    self.cancle.setText(self.root.langer.get("text.return"))
+
+                            class World(Pages):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__(parent,root)
+                                    self.init_wid()
+                                    self.langing()
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(30,50,30,50)
+                                    self.layout.setSpacing(10)
+                                    self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+
+                                    self.cancle =self.Btn(self,self.root)
+                                    self.cancle.setFixedSize(QSize(170,50))
+                                    self.layout.addWidget(self.cancle)
+
+                                    self.cancle.clicked.connect(lambda: self.parent.setCurrentIndex(0))
+                                    self.cancle.clicked.connect(lambda: self.parent.parent.parent.main.stack.setCurrentIndex(0))
+
+                                def langing(self):
+                                    self.cancle.setText(self.root.langer.get("text.return"))
+
+                            class Launch(Pages):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__(parent,root)
+
+                            class Suspend(Pages):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__(parent,root)
+
+
+
+                            
 
 
 
@@ -984,36 +1153,46 @@ class Main():
                             self.init_wid()
 
                         def init_wid(self):
-                            self.layout = QHBoxLayout(self)
-                            self.layout.setContentsMargins(0,0,0,0)
-                            self.layout.setSpacing(0)
-                            self.backg = self.Backg(self,self)
+                            self.layout = QStackedLayout(self)
+                            self.layout.setStackingMode(QStackedLayout.StackAll)
+
+                            self.backg = self.Backg(self,self.root)
                             self.layout.addWidget(self.backg)
 
-                            self.lay2 = QHBoxLayout(self.backg)
-                            self.lay2.setContentsMargins(0,0,0,0)
-                            self.lay2.setSpacing(0)
                             self.stack = QStackedWidget()
-                            self.stack.setStyleSheet("background:transparent;")
-                            self.lay2.addWidget(self.stack)
+                            self.layout.addWidget(self.stack)
+
+                            self.layout.setCurrentIndex(1)
 
                             self.start = self.Start(self,self.root)
+                            self.mod = self.Mod(self,self.root)
+                            self.world = self.World(self,self.root)
+                            self.launch = self.Launch(self,self.root)
+                            self.log = self.Log(self,self.root)
+
+
+
 
                         class _Main(QWidget):
                             def __init__(self,parent=None,root=None):
-                                super().__init__(parent)
+                                super().__init__()
                                 self.parent = parent
                                 self.root = root
+                                self.setProperty("wid","color2")
                                 self.index = self.parent.stack.addWidget(self)
+
+                            def showEvent(self,event):
+                                super().showEvent(event)
+                                self.parent.backg.setVisible(not self.testAttribute(Qt.WA_StyledBackground))
+                                self.parent.stack.setStyleSheet(""if self.testAttribute(Qt.WA_StyledBackground) else "background:transparent;")
+
 
                         class Start(_Main):
                             def __init__(self,parent=None,root=None):
                                 super().__init__(parent,root)
-                                self.init_ui()
                                 self.init_wid()
-
-                            def init_ui(self):
-                                self.setAttribute(Qt.WA_StyledBackground, False)
+                                self.langing()
+                                self.setAttribute(Qt.WA_StyledBackground,False)
 
                             def init_wid(self):
                                 self.layout = QGridLayout(self)
@@ -1034,7 +1213,20 @@ class Main():
                                 
                                 self.settings = self.Btn(self,self.root,"110,65,151")
                                 self.settings.setFixedSize(50,50)
+                                self.settings.setIconSize(QSize(25,25))
+                                self.settings.setIcon(QIcon(QPixmap(getPath("src/assets/buttons/setting.png")).scaled(50,50,Qt.KeepAspectRatio,Qt.FastTransformation)))
                                 self.layout.addWidget(self.settings,2,2,1,1)
+
+                                self.mod = self.Btn(self,self.root,"52, 152, 219")
+                                self.mod.setFixedHeight(50)
+                                self.layout.addWidget(self.mod,2,1,1,1)
+
+                                self.start.clicked.connect(lambda: self.root.launcher.run(self.root.settings["defaultGame"]))
+
+                            def langing(self):
+                                self.start.setText(self.root.langer.get("wid.pages.start.startbtn"))
+                                self.mod.setText(self.root.langer.get("wid.pages.start.modbtn"))
+                                
 
                             class Btn(QPushButton):
                                 def __init__(self,parent=None,root=None,color="0,0,0"):
@@ -1048,13 +1240,223 @@ class Main():
                                             background-color:rgba({self.color},0.4);
                                             color:white;
                                             border-radius:10px;
-                                            font-size:20px;
+                                            font-size:16px;
 
                                         }}
                                         QPushButton:hover{{
                                             background-color:rgba({self.color},1);
                                         }}
                                     """)
+
+                        class Mod(_Main):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent,root)
+                                self.setAttribute(Qt.WA_StyledBackground,True)
+
+                        class World(_Main):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent,root)
+                                self.setAttribute(Qt.WA_StyledBackground,True)
+                                self.games = {}
+                                self.init_wid()
+                                self.renovate()
+                                self.games["::default"].gameW.show()
+
+                            def init_wid(self):
+                                self.layout = QVBoxLayout(self)
+                                self.layout.setContentsMargins(0, 0, 0, 0)
+                                self.layout.setSpacing(0)
+
+                                self.scroll = QScrollArea(self)
+                                self.scroll.setWidgetResizable(True)
+                                self.scroll.setFrameShape(QFrame.NoFrame)
+                                self.layout.addWidget(self.scroll)
+
+                                self.main = QWidget()
+                                self.main.setProperty("wid","color2")
+                                self.scroll_layout = QVBoxLayout(self.main)
+                                self.scroll_layout.setContentsMargins(10,10,10,10)
+                                self.scroll_layout.setSpacing(10)
+                                self.scroll_layout.setAlignment(Qt.AlignTop)
+                                self.scroll.setWidget(self.main)
+
+                            def renovate(self):
+                                games = copy.deepcopy(self.root.settings["gameList"])
+                                for key,value in self.games.items():
+                                    if key not in games.keys():
+                                        self.games[key].deleteLater()
+                                        del self.games[key]
+                                    if set(value.games) != set(games[key]):
+                                        self.games[key].renovate(key)
+                                    games.remove(key)
+                                for key,value in games.items():
+                                    self.games[key] = self.Lists(self,self.root)
+                                    self.games[key].renovate(key)
+                                
+
+                            class Lists(QWidget):
+                                def __init__(self,parent=None,root=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.light = None
+                                    self.game = ""
+                                    self.btnPix = [QPixmap(),QPixmap()]
+                                    self.setAttribute(Qt.WA_StyledBackground, True)
+                                    self.games = {}
+                                    self.launch = False
+                                    self.setStyleSheet("border-radius:10px;")
+                                    self.init_wid()
+                                    
+                                    self.parent.scroll_layout.addWidget(self)
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(10,10,10,10)
+                                    self.layout.setSpacing(5)
+
+                                    self.top = QWidget()
+                                    self.top.setFixedHeight(40)
+                                    self.layout.addWidget(self.top)
+
+                                    self.topL = QHBoxLayout(self.top)
+                                    self.topL.setContentsMargins(15,0,0,0)
+                                    self.topL.setSpacing(5)
+                                    self.topL.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+
+                                    self.label = QLabel()
+                                    self.label.setProperty("wid","text")
+                                    self.label.setStyleSheet("font-size:16px;")
+                                    self.topL.addWidget(self.label,0)
+
+                                    self.label2 = QLabel()
+                                    self.label2.setProperty("wid","lbtn")
+                                    self.label2.setStyleSheet("font-size:14px;")
+                                    self.topL.addWidget(self.label2,0)
+
+                                    self.topL.addStretch(1)
+
+                                    self.button = QPushButton()
+                                    self.button.setFixedSize(40,40)
+                                    self.button.setProperty("wid","lbtn")
+                                    self.button.setStyleSheet("border-radius:20px;")
+                                    self.topL.addWidget(self.button)
+
+                                    class VisiWidget(QWidget):
+                                        visibled = pyqtSignal(bool)
+
+                                        def showEvent(self,event):
+                                            self.visibled.emit(True)
+                                            super().showEvent(event)
+
+                                        def hideEvent(self,event):
+                                            self.visibled.emit(False)
+                                            super().hideEvent(event)
+
+                                    self.gameW = VisiWidget()
+                                    self.gameW.visibled.connect(lambda i:self.button.setIcon(QIcon(self.btnPix[int(i)]))
+)
+                                    self.layout.addWidget(self.gameW)
+                                    self.gameW.hide()
+
+                                    self.gameL = QVBoxLayout(self.gameW)
+                                    self.gameL.setContentsMargins(0,0,0,0)
+                                    self.gameL.setSpacing(5)
+                                    self.line = QWidget()
+                                    self.line.setFixedHeight(1)
+                                    self.line.setProperty("wid","line")
+                                    self.gameL.addWidget(self.line)
+
+                                    self.button.clicked.connect(lambda:self.gameW.setVisible(not self.gameW.isVisible()))
+
+
+                                def renovate(self,games):
+                                    self.game = games
+                                    gamelist = copy.deepcopy(self.root.settings["gameList"][games])
+                                    for key,value in self.games.items():
+                                        if key not in gamelist.keys():
+                                            self.games[key].deleteLater()
+                                            self.games.remove(key)
+                                    for value in gamelist:
+                                        self.games[value] = self.Item(self,self.root,value)
+                                    self.langing()
+                                    self.label2.setText(f"({len(gamelist)})")
+
+                                def langing(self):
+                                    self.label.setText(self.game if self.game != "::default" else self.root.langer.get("text.default"))
+
+                                def lighting(self,light):
+                                    if self.light != light:
+                                        self.light = light
+                                        self.btnPix[1] = change_color(getPath("src/assets/actions/eye.png"),QColor(25,25,25) if light else QColor(220,220,220))
+                                        self.btnPix[0] = change_color(getPath("src/assets/actions/eye-off.png"),QColor(25,25,25) if light else QColor(220,220,220))
+                                    self.button.setIcon(QIcon(self.btnPix[int(self.gameW.isVisible())]))
+
+                                    
+
+
+                                class Item(QPushButton):
+                                    def __init__(self,parent=None,root=None,game=None):
+                                        super().__init__()
+                                        self.parent = parent
+                                        self.root = root
+                                        self.game = game
+                                        self.parent.gameL.addWidget(self)
+                                        self.setFixedHeight(40)
+                                        self.setProperty("wid","lbtn")
+                                        self.init_wid()
+                                        self.clicked.connect(lambda:self.parent.parent.parent.parent.changeGame(self.game))
+
+                                    def init_wid(self):
+                                        self.layout = QHBoxLayout(self)
+                                        self.layout.setContentsMargins(5,5,5,5)
+                                        self.layout.setSpacing(10)
+
+                                        self.pixmap = QLabel()
+                                        self.pixmap.setFixedSize(30,30)
+                                        self.pixmap.setScaledContents(True)
+                                        self.layout.addWidget(self.pixmap,0)
+
+                                        self.textW = QWidget()
+                                        self.textW.setStyleSheet("background:transparent;")
+                                        self.layout.addWidget(self.textW,1)
+
+                                        self.textL = QVBoxLayout(self.textW)
+                                        self.textL.setContentsMargins(0,0,0,0)
+                                        self.textL.setSpacing(0)
+
+                                        self.text = QLabel()
+                                        self.text.setStyleSheet("background:transparent;font-size:14px;")
+                                        self.text.setProperty("wid","text")
+                                        self.textL.addWidget(self.text)
+                                        self.text.setFixedHeight(20)
+
+                                        self.version = QLabel()
+                                        self.version.setStyleSheet("background:transparent;")
+                                        self.version.setProperty("wid","lbtn")
+                                        self.textL.addWidget(self.version)
+                                        self.version.setFixedHeight(10)
+
+                                    def showEvent(self,event):
+                                        super().showEvent(event)
+                                        pngPath = mdtScanner.getMdtMsg(self.game)["icon"]
+                                        if pngPath is not None:
+                                            self.pixmap.setPixmap(QPixmap(pngPath))
+                                        self.text.setText(self.game)
+                                        vers = mdtScanner.getMdtMsg(self.game)
+                                        self.version.setText(f"v{vers['number']}.{vers['build']}{vers['modifier']}")
+
+
+
+                        class Launch(_Main):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent,root)
+                                self.setAttribute(Qt.WA_StyledBackground,True)
+
+                        class Log(_Main):
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent,root)
+                                self.setAttribute(Qt.WA_StyledBackground,True)
 
 
 
@@ -1634,6 +2036,11 @@ class Main():
                                         self.popupAboutToShow.emit()
                                         super().showPopup()
 
+                                    def wheelEvent(self, event):
+                                        event.ignore()
+                                        if self.parent():
+                                            self.parent().wheelEvent(event)
+
                                 def __init__(self,parent=None,root=None,text=None):
                                     super().__init__()
                                     self.parent = parent
@@ -1745,7 +2152,7 @@ class Main():
                                     combo.setCurrentIndex(combo.findData(self.root.settings["language"]))
                                 _t1_lang_showEvent(self,self._t1_lang.combo)
                                 self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
-                                self._t1_lang.combo.activated.connect(lambda: self.root.langer.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 else None)
+                                self._t1_lang.combo.activated.connect(lambda: self.root.langer.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == self.root.settings["language"] else None)
 
 
                                 self._title2 = self.Title(self,self.root,"wid.pages.setting.launcher.general")
@@ -2098,46 +2505,55 @@ class Main():
                 self.root.logger.error(f"Failed to list language files: {e}")
             return info
 
-    class Signals():
+    class Signals(QObject):
+        _internal = pyqtSignal(str, tuple)
+
         def __init__(self, parent=None, root=None):
+            super().__init__()
             self.parent = parent
             self.root = root
-            self._signals = {}
+            self._callbacks = {}
+            self._internal.connect(self._dispatch)
 
-        def register(self, name):
-            """注册一个新的信号"""
-            if name not in self._signals:
-                self._signals[name] = []
-
-        def connect(self, name, callback):
-            """连接一个回调函数到指定信号"""
-            if name not in self._signals:
-                self.register(name)
-            self._signals[name].append(callback)
-
-        def emit(self, name, *args, **kwargs):
-            """触发指定信号，调用所有连接的回调函数"""
-            if name in self._signals:
-                for callback in self._signals[name]:
+        def _dispatch(self, name, args):
+            """pyqtSignal 驱动的内部分发"""
+            if name in self._callbacks:
+                for callback in self._callbacks[name]:
                     try:
-                        callback(*args, **kwargs)
+                        callback(*args)
                     except Exception as e:
                         self.root.logger.error(f"Error in signal '{name}' callback: {e}")
 
+        def register(self, name):
+            """注册一个新的信号"""
+            if name not in self._callbacks:
+                self._callbacks[name] = []
+
+        def connect(self, name, callback):
+            """连接一个回调函数到指定信号"""
+            if name not in self._callbacks:
+                self.register(name)
+            self._callbacks[name].append(callback)
+
+        def emit(self, name, *args, **kwargs):
+            """触发指定信号，通过 pyqtSignal 驱动调用所有回调"""
+            if name in self._callbacks:
+                self._internal.emit(name, args)
+
         def disconnect(self, name, callback):
             """断开指定信号的回调函数"""
-            if name in self._signals and callback in self._signals[name]:
-                self._signals[name].remove(callback)
+            if name in self._callbacks and callback in self._callbacks[name]:
+                self._callbacks[name].remove(callback)
 
         def cancel(self, name):
             """取消注册指定信号"""
-            if name in self._signals:
-                del self._signals[name]
+            if name in self._callbacks:
+                del self._callbacks[name]
 
         def clear(self, name):
             """清除指定信号的所有回调函数"""
-            if name in self._signals:
-                self._signals[name] = []
+            if name in self._callbacks:
+                self._callbacks[name] = []
 
     class Winreg():
         def __init__(self, parent=None, root=None):

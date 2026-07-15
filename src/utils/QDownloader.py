@@ -413,7 +413,6 @@ class QDownloader(QObject):
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 if attempt < max_retries - 1:
                     wait = 2 ** attempt
-                    print(f"⚠️ 块 {block_idx} 第 {attempt+1}/{max_retries} 次重试，{wait}s 后继续...")
                     time.sleep(wait)
                     # 更新断点位置
                     if os.path.exists(tmp_path):
