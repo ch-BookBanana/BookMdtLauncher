@@ -1,5 +1,4 @@
 import os
-import json
 from PyQt5.QtCore import QProcess, QProcessEnvironment, pyqtSignal
 
 from .path_utils import getPath
@@ -14,11 +13,12 @@ class mdtLauncher(QProcess):
     game_log = pyqtSignal(dict)        # 进程输出日志，dict: {"type":"info"/"error", "text":...}
     log = pyqtSignal(dict)             # 通用日志信号（启动阶段 info/error）
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self, parent=None, settings=None):
+        super().__init__()
         self.envs = QProcessEnvironment.systemEnvironment()
         self.going = 0   # 0: 空闲, 1: 校验中/准备启动, 2: 进程运行中
         self.data = {}   # 本次启动的关键路径信息
+        self.settings = settings or {}
         self._finished_emitted = False
 
     def _launch(self, mdt_name, java_path=None, args=None, data_path=None):
@@ -94,29 +94,14 @@ class mdtLauncher(QProcess):
             self.data["javaPath"] = java_path
             self.log.emit({"type": "info", "text": "Java path validated: " + java_path})
         else:
-            # 从配置文件读取 java_path 的情况
-            bml_config = os.path.join(self.data["mdtPath"], "BML.json")
-            self.log.emit({"type": "info", "text": "Reading Java config from: " + bml_config})
-            if not os.path.exists(bml_config):
-                self.log.emit({"type": "error", "text": "javaConfigNotFound"})
-                self.going = 0
-                self._emit_finished(-1)
-                return False
-
+            # 从 mdtScanner 获取 BML 配置（含 javaPath 解析与回退）
+            self.log.emit({"type": "info", "text": "Reading BML config via mdtScanner for: " + mdt_name})
             try:
-                with open(bml_config, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                    self.log.emit({"type": "info", "text": "BML.json loaded successfully"})
-
-                    java_from_config = config.get("javaPath")
-
-                    if not java_from_config:
-                        raise ValueError("missing java path")
-                    self.log.emit({"type": "info", "text": "Java path from config: " + str(java_from_config)})
-                    java_from_config = os.path.expandvars(str(java_from_config))
-                    if not os.path.isabs(java_from_config):
-                        java_from_config = os.path.join(self.data["mdtPath"], java_from_config)
-                        self.log.emit({"type": "info", "text": "Resolved relative Java path to: " + java_from_config})
+                mdt_data = mdtScanner.getMdtData(mdt_name, self.settings)
+                java_from_config = mdt_data.get("javaPath")
+                if not java_from_config:
+                    raise ValueError("missing java path")
+                self.log.emit({"type": "info", "text": "Java path from BML config: " + str(java_from_config)})
             except Exception:
                 self.log.emit({"type": "error", "text": "javaConfigInvalid"})
                 self.going = 0

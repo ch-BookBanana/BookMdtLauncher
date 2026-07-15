@@ -88,10 +88,6 @@ class Leftw(QWidget):
         self.setFixedWidth(width)
         self.width_ = width
 
-    # def showEvent(self, event):
-    #     self.parent.parent.left.setFixedWidth(self.width_)
-    #     super().showEvent(event)
-
        
 class Mainw(QWidget):
     def __init__(self, parent=None, root=None):
@@ -148,7 +144,7 @@ class Main():
             "javaPath": None,
             "githubToken": [],
             "javaPaths": [],
-            "gameList": {"::default": []}
+            "gameList": {"<:|default|:>": []}
         }
         self.settings = copy.deepcopy(self.defsettings)
         app.aboutToQuit.connect(self.saveSettings)
@@ -186,7 +182,7 @@ class Main():
 
         self.saveSettings()
 
-        self.launcher = mdtLauncher()
+        self.launcher = mdtLauncher(self, self.settings)
         self.signals.register("gameRenovated")
         QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
         QThTimer.task(self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
@@ -198,6 +194,7 @@ class Main():
         QThTimer.task(lambda event: mdtScanner.preload_all(), None, None, 100)
 
     def gameRenovate(self, event):
+        mdtScanner.invalidate_cache()
         mdts = mdtScanner.getMdts()
         games = copy.deepcopy(self.settings["gameList"])
         changed = False
@@ -209,13 +206,12 @@ class Main():
                     game_list.remove(game)
                     changed = True
         if mdts:
-            games.setdefault("::default", []).extend(mdts)
+            games.setdefault("<:|default|:>", []).extend(mdts)
             changed = True
         if changed:
-            mdtScanner.invalidate_cache()
+            self.settings["gameList"] = games
             event.lambdas[0].emit()
             event.lambdas[1].emit()
-            self.settings["gameList"] = games
         
         
         
@@ -917,7 +913,7 @@ class Main():
                     def __init__(self, parent=None, root=None, text=None, logo=None):
                         root.signals.register("start_gameChanged")
                         super().__init__(parent, root, text, logo)
-                        QThTimer.taskP(2000, self.left.changeTimer, [self.left.sets])
+                        QThTimer.taskP(1000, self.left.changeTimer, [self.left.sets])
                         QThTimer.task(self.left.changeTimer, [self.left.sets], None ,0)
                         self.root.launcher.game_launched.connect(lambda: self.main.stack.setCurrentIndex(3))
                         self.root.launcher.game_launched.connect(lambda: self.left.main.setCurrentIndex(3))
@@ -999,8 +995,9 @@ class Main():
                             i = [(False,None),(False,None),(False,None)]
                             mdts = mdtScanner.getMdts()
                             if len(mdts) == 0:
-                                self.root.settings["defaultGame"] = None
-                            elif self.root.settings["defaultGame"] is None:
+                                if self.root.settings["defaultGame"] is not None:
+                                    self.root.settings["defaultGame"] = None
+                            elif self.root.settings["defaultGame"] is None or self.root.settings["defaultGame"] not in mdts:
                                 self.root.settings["defaultGame"] = mdts[0]
                             default_game = self.root.settings["defaultGame"]
                             game_msg = mdtScanner.getMdtMsg(default_game) if default_game else None
@@ -1209,8 +1206,7 @@ class Main():
                                 self.start = self.Btn(self,self.root,"255,184, 0")
                                 self.start.setFixedSize(180,50)
                                 self.layout.addWidget(self.start,1,1,1,2)
-                                QTimer.singleShot(10, lambda: print(self.start.x(),self.start.y(),self.start.width(),self.start.height()))
-                                
+
                                 self.settings = self.Btn(self,self.root,"110,65,151")
                                 self.settings.setFixedSize(50,50)
                                 self.settings.setIconSize(QSize(25,25))
@@ -1260,7 +1256,8 @@ class Main():
                                 self.games = {}
                                 self.init_wid()
                                 self.renovate()
-                                self.games["::default"].gameW.show()
+                                self.games["<:|default|:>"].gameW.show()
+                                self.root.signals.connect("gameRenovated", self.renovate)
 
                             def init_wid(self):
                                 self.layout = QVBoxLayout(self)
@@ -1282,15 +1279,19 @@ class Main():
 
                             def renovate(self):
                                 games = copy.deepcopy(self.root.settings["gameList"])
-                                for key,value in self.games.items():
-                                    if key not in games.keys():
-                                        self.games[key].deleteLater()
-                                        del self.games[key]
-                                    if set(value.games) != set(games[key]):
-                                        self.games[key].renovate(key)
-                                    games.remove(key)
-                                for key,value in games.items():
-                                    self.games[key] = self.Lists(self,self.root)
+                                keys_to_delete = []
+                                for key, value in list(self.games.items()):
+                                    if key not in games:
+                                        value.deleteLater()
+                                        keys_to_delete.append(key)
+                                    else:
+                                        if set(value.games) != set(games[key]):
+                                            value.renovate(key)
+                                        del games[key]
+                                for key in keys_to_delete:
+                                    del self.games[key]
+                                for key, value in games.items():
+                                    self.games[key] = self.Lists(self, self.root)
                                     self.games[key].renovate(key)
                                 
 
@@ -1305,7 +1306,7 @@ class Main():
                                     self.setAttribute(Qt.WA_StyledBackground, True)
                                     self.games = {}
                                     self.launch = False
-                                    self.setStyleSheet("border-radius:10px;")
+                                    self.setStyleSheet("border-radius:10px;max-width:600px;")
                                     self.init_wid()
                                     
                                     self.parent.scroll_layout.addWidget(self)
@@ -1354,8 +1355,7 @@ class Main():
                                             super().hideEvent(event)
 
                                     self.gameW = VisiWidget()
-                                    self.gameW.visibled.connect(lambda i:self.button.setIcon(QIcon(self.btnPix[int(i)]))
-)
+                                    self.gameW.visibled.connect(lambda i:self.button.setIcon(QIcon(self.btnPix[int(i)])))
                                     self.layout.addWidget(self.gameW)
                                     self.gameW.hide()
 
@@ -1370,20 +1370,19 @@ class Main():
                                     self.button.clicked.connect(lambda:self.gameW.setVisible(not self.gameW.isVisible()))
 
 
-                                def renovate(self,games):
+                                def renovate(self, games):
                                     self.game = games
                                     gamelist = copy.deepcopy(self.root.settings["gameList"][games])
-                                    for key,value in self.games.items():
-                                        if key not in gamelist.keys():
-                                            self.games[key].deleteLater()
-                                            self.games.remove(key)
-                                    for value in gamelist:
-                                        self.games[value] = self.Item(self,self.root,value)
+                                    for key, value in list(self.games.items()):
+                                        value.deleteLater()
+                                    self.games.clear()
+                                    for game_name in gamelist:
+                                        self.games[game_name] = self.Item(self, self.root, game_name)
                                     self.langing()
                                     self.label2.setText(f"({len(gamelist)})")
 
                                 def langing(self):
-                                    self.label.setText(self.game if self.game != "::default" else self.root.langer.get("text.default"))
+                                    self.label.setText(self.game if self.game != "<:|default|:>" else self.root.langer.get("text.default"))
 
                                 def lighting(self,light):
                                     if self.light != light:
@@ -1414,12 +1413,13 @@ class Main():
 
                                         self.pixmap = QLabel()
                                         self.pixmap.setFixedSize(30,30)
+                                        self.pixmap.setStyleSheet("width:30px;")
                                         self.pixmap.setScaledContents(True)
                                         self.layout.addWidget(self.pixmap,0)
 
                                         self.textW = QWidget()
                                         self.textW.setStyleSheet("background:transparent;")
-                                        self.layout.addWidget(self.textW,1)
+                                        self.layout.addWidget(self.textW)
 
                                         self.textL = QVBoxLayout(self.textW)
                                         self.textL.setContentsMargins(0,0,0,0)
@@ -1428,7 +1428,7 @@ class Main():
                                         self.text = QLabel()
                                         self.text.setStyleSheet("background:transparent;font-size:14px;")
                                         self.text.setProperty("wid","text")
-                                        self.textL.addWidget(self.text)
+                                        self.textL.addWidget(self.text,0)
                                         self.text.setFixedHeight(20)
 
                                         self.version = QLabel()
@@ -1436,6 +1436,8 @@ class Main():
                                         self.version.setProperty("wid","lbtn")
                                         self.textL.addWidget(self.version)
                                         self.version.setFixedHeight(10)
+
+                                        self.layout.addStretch(1)
 
                                     def showEvent(self,event):
                                         super().showEvent(event)
@@ -2270,7 +2272,7 @@ class Main():
             配置根 Logger ("Main") 的 Handler 和格式。
             其他子 Logger 将共享这些 Handler。
             """
-            loglevel = logging.DEBUG
+            loglevel = logging.INFO
             self.base_logger_name = "Main"
 
             # 获取或创建主 logger

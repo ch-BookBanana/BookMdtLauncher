@@ -41,15 +41,12 @@ def _parse_simple_config_typed(content: str) -> dict:
     return config
 
 class mdtScanner:
-    # 根目录：.Mindustrys，相对于启动器脚本同级目录
-    # 假设 .Mindustrys 位于启动器脚本同级目录
     base_dir = getPath("BML/.Mindustrys")
 
     # ---- 缓存系统 (mtime-based) ----
     _mdts_cache = None
     _mdts_cache_mtime = 0
     _mdt_msg_cache = {}       # {subdir_name: ((jar_mtime, png_mtime), data)}
-    _base_dir_mtime = 0
 
     @classmethod
     def invalidate_cache(cls, game=None):
@@ -115,14 +112,10 @@ class mdtScanner:
             pass
 
         cache_key = (jar_mtime, png_mtime, png_size)
-
-        # 命中缓存（mtime 未变）
         if subdir_name in cls._mdt_msg_cache:
             cached_key, cached_data = cls._mdt_msg_cache[subdir_name]
             if cached_key == cache_key:
                 return cached_data
-
-        # 缓存未命中，读取 jar
         if not os.path.isfile(jar_path):
             cls._mdt_msg_cache.pop(subdir_name, None)
             return None
@@ -162,3 +155,59 @@ class mdtScanner:
         cls._mdts_cache = result
         cls._mdts_cache_mtime = current_mtime
         return list(result)
+
+    @classmethod
+    def _retrieve_mdt_data(cls, subdir_name):
+        """读取 data.json，与默认值深度合并后写回。"""
+        default_data = {
+            "javaPath": None
+        }
+        data_path = os.path.join(cls.base_dir, subdir_name, "BML.json")
+        file_data = {}
+        if os.path.isfile(data_path):
+            try:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    file_data = json.load(f)
+            except Exception:
+                file_data = {}
+        merged = dict(default_data)
+        for key, value in file_data.items():
+            if key not in default_data:
+                continue
+            if isinstance(default_data[key], dict) and isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if sub_key in default_data[key]:
+                        merged[key][sub_key] = sub_value
+            else:
+                merged[key] = value
+        try:
+            os.makedirs(os.path.dirname(data_path), exist_ok=True)
+            with open(data_path, "w", encoding="utf-8") as f:
+                json.dump(merged, f, separators=(',', ':'), ensure_ascii=False)
+        except Exception:
+            pass
+
+
+    @classmethod
+    def getMdtData(cls, subdir_name, settings):
+        """返回指定子目录的 data.json 内容，失败返回默认值。"""
+        cls._retrieve_mdt_data(subdir_name)
+        data_path = getPath(os.path.join(cls.base_dir, subdir_name, "BML.json"))
+        data = {}
+        if os.path.isfile(data_path):
+            with open(data_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if (data["javaPath"] == "<:|follow|:>" and settings["javaPath"] is None) or data["javaPath"] is None:
+            max_vers = -1
+            max_path = None
+            for path,version in settings["javaPaths"]:
+                vers = version.split(".")[0]
+                if int(vers) > max_vers:
+                    max_vers = int(vers)
+                    max_path = path
+                if vers == "17":
+                    max_path = path
+                    max_vers = 17
+                    break
+            data["javaPath"] = max_path
+        return data   
