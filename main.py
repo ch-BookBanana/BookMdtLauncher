@@ -37,6 +37,7 @@ from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher
 from src.utils.javaScanner import javaScanner
 from src.utils.QThTimer import QThTimer
+from src.utils.githubAPI import GithubAPI
 
 
 def change_color(path, color: QColor):
@@ -62,6 +63,7 @@ def pngSha(path):
                 break
             sha256.update(data)
     return sha256.hexdigest()
+
 def t(text, *args):
     try:
         for i, arg in enumerate(reversed(args), start=1):
@@ -113,13 +115,20 @@ class Rightw(QWidget):
         self.setFixedWidth(width)
         self.width_ = width
 
-    # def showEvent(self,event):
-    #     super().showEvent(event)
-    #     self.parent.parent.left.setFixedWidth(self.width_)
 
 class Main():
     def __init__(self,app):
         self.app = app
+    
+        # 全局拦截滚动条右键菜单
+        class _ScrollBarFilter(QObject):
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.ContextMenu and isinstance(obj, QScrollBar):
+                    return True
+                return super().eventFilter(obj, event)
+        self._scroll_bar_filter = _ScrollBarFilter()
+        self.app.installEventFilter(self._scroll_bar_filter)
+
         for i in [
             "BML",
             "BML/logs",
@@ -136,13 +145,23 @@ class Main():
                          "\n-----------------------------------------")
         self.defsettings = {
             "language": None,
-            "checkTime": 2000,
             "theme": 0,
             "maxLogNum": 50,
             "closeByTray": True,
             "defaultGame": None,
             "javaPath": None,
-            "githubToken": [],
+            "github": {
+                "token":None,
+                "useful": None,
+                "user":{
+                    "name":None,
+                    "headurl":None
+                },
+                "rate": {
+                    "core":   {"remaining": None, "reset": []},
+                    "search": {"remaining": None, "reset": []}
+                }
+            },
             "javaPaths": [],
             "gameList": {"<:|default|:>": []}
         }
@@ -176,13 +195,22 @@ class Main():
             self.logger.error("ERR:Fail to load settings, using default setting"
                               "\n--Exception: " + str(e), exc_info=True)
             self.settings = copy.deepcopy(self.defsettings)
+            try:
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    self.logger.warning("Error setting: \n" + str(e), exc_info=True)
+            except:
+                pass
 
         self.langer = self.Langer(self, self)
         self.logger._cleanup_old_logs()
 
         self.saveSettings()
 
+
         self.launcher = mdtLauncher(self, self.settings)
+        self.githubAPI = GithubAPI()
+
+
         self.signals.register("gameRenovated")
         QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
         QThTimer.task(self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
@@ -333,6 +361,7 @@ class Main():
                 self.restore_from_tray()
             conn.disconnectFromServer()
             conn.deleteLater()
+
         def init_wid(self):
             self.root.logger.debug("init QW.window.left")
             self.left = self.Left(self, self.root)
@@ -357,6 +386,8 @@ class Main():
             self.left.raise_()
             self.lline.raise_()
 
+            self.githubSetting = self.GithubSetting(self, self.root)
+
         def eventFilter(self, obj, event):
             if obj is self and event.type() == QEvent.Resize:
                 new_width = self.left.width()  # 假设宽度固定，或者从配置读取
@@ -377,7 +408,7 @@ class Main():
 
                 #
                 if msg.message == 0x0084:
-                    if not self.isMaximized():
+                    if not self.isMaximized() and not self.githubSetting.isVisible():
                         # 获取鼠标在屏幕上的坐标
                         pos = self.mapFromGlobal(QCursor.pos())
                         x, y = pos.x(), pos.y()
@@ -422,6 +453,192 @@ class Main():
 
             # 3. 其他消息交给默认处理
             return super().nativeEvent(eventType, message)
+
+        def resizeEvent(self, event):
+            super().resizeEvent(event)
+            self.githubSetting.setGeometry(0,0,self.width(),self.height())
+            
+
+        class GithubSetting(QWidget):
+            def __init__(self, parent=None, root=None):
+                super().__init__(parent)
+                self.parent = parent
+                self.root = root
+                self.init_ui()
+                self.init_wid()
+                self.hide()
+
+            def init_ui(self):
+                self.setGeometry(self.geometry())
+                self.setAttribute(Qt.WA_StyledBackground, True)
+                self.setProperty("wid_", "_window.github")
+                self.setStyleSheet('QWidget[wid_="_window.github"]{background-color: rgba(0,0,0,0.5);}')
+
+            def init_wid(self):
+                self.l = QHBoxLayout(self)
+                self.l.setContentsMargins(0, 0, 0, 0)
+                self.l.setSpacing(0)
+                self.l.setAlignment(Qt.AlignCenter)
+
+                self.main = self.Main(self, self.root)
+                self.l.addWidget(self.main,0)
+
+            class Main(QWidget):
+                def __init__(self, parent=None, root=None):
+                    super().__init__()
+                    self.parent = parent
+                    self.root = root
+                    self.githubAPI = self.root.githubAPI
+                    self.init_ui()
+                    self.init_wid()
+                    
+
+                def init_ui(self):
+                    self.setFixedSize(500,350)
+                    self.setAttribute(Qt.WA_StyledBackground, True)
+
+                def init_wid(self):
+                    self.layout = QVBoxLayout(self)
+                    self.layout.setContentsMargins(0, 0, 0, 0)
+                    self.layout.setSpacing(0)
+                    self.layout.setAlignment(Qt.AlignTop)
+
+                    self.top = self.Top(self, self.root)
+                    self.layout.addWidget(self.top,0)
+                    
+                    self.line = QWidget(self)
+                    self.line.setFixedHeight(1)
+                    self.line.setProperty("wid","line")
+                    self.layout.addWidget(self.line,0)
+
+                    self.main = self.Main(self, self.root)
+                    self.layout.addWidget(self.main,1)
+
+
+                class Top(QWidget):
+                    def __init__(self, parent=None, root=None):
+                        super().__init__(parent)
+                        self.parent = parent
+                        self.root = root
+                        self.init_ui()
+                        self.init_wid()
+
+                    def init_ui(self):
+                        self.setFixedHeight(30)
+                        self.setAttribute(Qt.WA_StyledBackground, True)
+
+                    def init_wid(self):
+                        self.layout = QHBoxLayout(self)
+                        self.layout.setContentsMargins(30, 0, 0, 0)
+                        self.layout.setSpacing(0)
+                        self.layout.setAlignment(Qt.AlignLeft)
+
+                        self.title = QLabel("GitHub")
+                        self.title.setProperty("wid", "title")
+                        self.title.setStyleSheet("font-size: 16px;")
+                        self.layout.addWidget(self.title,0)
+
+                        self.layout.addStretch(1)
+
+                        self.close = self.Close(self, self.root)
+                        self.layout.addWidget(self.close,0)
+
+                        self.close.clicked.connect(self.parent.parent.hide)
+
+                    class Close(QPushButton):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__()
+                            self.parent = parent
+                            self.root = root
+                            self.init_ui()
+
+                        def init_ui(self):
+                            self.setFixedSize(30, 30)
+                            self.setProperty("wid", "tbtn")
+                        
+                        def lighting(self, light: bool):
+                            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                            logo = change_color(getPath("src/assets/tribtns/close.png"),color)
+                            icon = QIcon(logo.pixmap(30,30))
+
+                            self.setIcon(icon)
+
+                class Main(QWidget):
+                    def __init__(self, parent=None, root=None):
+                        super().__init__(parent)
+                        self.parent = parent
+                        self.root = root
+                        self.init_wid()
+
+                    def init_wid(self):
+                        self.layout = QVBoxLayout(self)
+                        self.layout.setContentsMargins(0, 0, 0, 0)
+                        self.layout.setSpacing(0)
+
+                        self.scroll = QScrollArea(self)
+                        self.scroll.setWidgetResizable(True)
+                        self.scroll.setFrameShape(QFrame.NoFrame)
+                        self.layout.addWidget(self.scroll)
+
+                        self.main = self.Main(self, self.root)
+                        self.scroll.setWidget(self.main)
+
+                    class Main(QWidget):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent)
+                            self.parent = parent
+                            self.root = root
+                            self.init_wid()
+
+                        def init_wid(self):
+                            self.layout = QVBoxLayout(self)
+                            self.layout.setContentsMargins(20,20,20,20)
+                            self.layout.setSpacing(0)
+                            self.layout.setAlignment(Qt.AlignTop)
+
+
+                            self.l1w = QWidget()
+                            self.l1w.setFixedHeight(100)
+                            self.layout.addWidget(self.l1w,0)
+
+                            self.l1 = QHBoxLayout(self.l1w)
+                            self.l1.setContentsMargins(0, 0, 0, 0)
+                            self.l1.setSpacing(0)
+
+                            self.headIcon = QLabel()
+                            self.headIcon.setProperty("wid","png")
+                            self.headIcon.setFixedSize(100,100)
+                            self.headIcon.setStyleSheet("border-radius:50px;")
+                            self.l1.addWidget(self.headIcon,0)
+
+                            self.l1_l1w = QWidget()
+                            self.l1.addWidget(self.l1_l1w,1)
+
+                            self.l1_l1 = QVBoxLayout(self.l1_l1w)
+                            self.l1_l1.setContentsMargins(10, 0, 0, 0)
+                            self.l1_l1.setSpacing(5)
+                            self.l1_l1.setAlignment(Qt.AlignTop)
+
+                            self.userName = QLabel("User-Name")
+                            self.userName.setProperty("wid","text")
+                            self.userName.setStyleSheet("font-size: 25px;")
+                            self.userName.setAlignment(Qt.AlignLeft)
+                            self.userName.setFixedHeight(28)
+                            self.l1_l1.addWidget(self.userName,0)
+
+                            self.tokenText = QLabel("Token_aaaaaa")
+                            self.tokenText.setProperty("wid","title")
+                            self.tokenText.setStyleSheet("font-size: 16px;")
+                            self.tokenText.setAlignment(Qt.AlignLeft)
+                            self.tokenText.setFixedHeight(20)
+                            self.l1_l1.addWidget(self.tokenText,0)
+
+
+                            self.test = QWidget()
+                            self.test.setFixedHeight(1000)
+                            self.layout.addWidget(self.test,0)
+
+
 
         class Left(QWidget):
             def __init__(self, parent=None, root=None):
@@ -744,9 +961,12 @@ class Main():
                 def init_wid(self):
                     self.root.logger.debug("init QW.windowL.mainL.topL")
                     self.layout = QHBoxLayout(self)
-                    self.layout.setContentsMargins(0, 0, 0, 0)
+                    self.layout.setContentsMargins(7, 0, 5, 0)
                     self.layout.setSpacing(0)
                     self.layout.setAlignment(Qt.AlignRight)
+
+                    self.github = self.GitHub(self, self.root)
+                    self.layout.addWidget(self.github)
 
                     self.layout.addStretch(1)
 
@@ -772,7 +992,7 @@ class Main():
                     self.tbt_close.clicked.connect(lambda: self.close_())
                     self.tbt_close.setStyleSheet("QPushButton:hover{background: red;}")
                     self.layout.addWidget(self.tbt_close)
-                    self.layout.addSpacing(5)
+
 
                 def maxmize(self):
                     if self.root.window.isMaximized():
@@ -785,6 +1005,36 @@ class Main():
                         self.root.window.hide()
                     else:
                         self.root.window.close()
+
+                class GitHub(QPushButton):
+                    def __init__(self, parent=None, root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+                        self.init_ui()
+                        self.clicked.connect(lambda: self.root.window.githubSetting.show())
+                        self.root.githubAPI.refreshed.connect(lambda:self.enterEvent(None))
+
+                    def init_ui(self):
+                        self.setFixedSize(28, 28)
+                        self.setAttribute(Qt.WA_StyledBackground, False)
+                        self.setStyleSheet("QPushButton {border-radius: 15px;}")
+
+                    def lighting(self, light):
+                        self.setIcon(QIcon(change_color(getPath("src/assets/brands/github.png"),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
+                        self.setIconSize(QSize(28, 28))
+
+                    def enterEvent(self, event):
+                        super().enterEvent(event)
+                        if self.root.settings["github"]["token"] is None:
+                            self.setToolTip(str(t(
+                                self.root.langer.get("github.token.none" if self.root.settings["github"]["token"] is None else "github.token"),
+                                self.root.settings["github"]["rate"]["core"]["remaining"],
+                                (self.root.settings["github"]["rate"]["core"]["reset"] if len(self.root.settings["github"]["rate"]["core"]["reset"]) > 0 else None),
+                                self.root.settings["github"]["rate"]["search"]["remaining"],
+                                (self.root.settings["github"]["rate"]["search"]["reset"] if len(self.root.settings["github"]["rate"]["search"]["reset"]) > 0 else None
+                            ))))
+
 
                 class TriBtn(QPushButton):
                     def __init__(self, logo: list, parent=None, root=None):
@@ -1274,7 +1524,7 @@ class Main():
                                 self.scroll_layout = QVBoxLayout(self.main)
                                 self.scroll_layout.setContentsMargins(10,10,10,10)
                                 self.scroll_layout.setSpacing(10)
-                                self.scroll_layout.setAlignment(Qt.AlignTop)
+                                self.scroll_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
                                 self.scroll.setWidget(self.main)
 
                             def renovate(self):
@@ -1390,9 +1640,6 @@ class Main():
                                         self.btnPix[1] = change_color(getPath("src/assets/actions/eye.png"),QColor(25,25,25) if light else QColor(220,220,220))
                                         self.btnPix[0] = change_color(getPath("src/assets/actions/eye-off.png"),QColor(25,25,25) if light else QColor(220,220,220))
                                     self.button.setIcon(QIcon(self.btnPix[int(self.gameW.isVisible())]))
-
-                                    
-
 
                                 class Item(QPushButton):
                                     def __init__(self,parent=None,root=None,game=None):
@@ -1667,7 +1914,7 @@ class Main():
                             self.btns_ = []
 
 
-                            self.launcher = self.add_page("wid.pages.setting.launcher","src/assets/icons/units.png",self.Launcher)
+                            self.launcher = self.add_page("wid.pages.setting.launcher","src/assets/actions/units.png",self.Launcher)
 
                             
 

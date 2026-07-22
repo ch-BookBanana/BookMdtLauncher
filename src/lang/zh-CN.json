@@ -50,6 +50,14 @@
     "tray.menu.close": "关闭",
 
 
+
+    "github.token":       "GitHub\n\n--通用API--\n剩余次数:$1\n刷新时间:$2\n--搜索API--\n剩余次数:$3\n刷新时间:$4",
+    "github.token.none":  "GitHub\n未填写token，填写后可获取更多\n搜索次数\n\n--通用API--\n剩余次数:$1\n刷新时间:$2\n--搜索API--\n剩余次数:$3\n刷新时间:$4",
+    "github.token.error": "GitHub\ntoken无效，请检查你的token有\n效期限\n\n--通用API--\n剩余次数:$1\n刷新时间:$2\n--搜索API--\n剩余次数:$3\n刷新时间:$4",
+    
+
+
+
     "text.cancel": "取消",
     "text.yes": "确定",
     "text.return": "返回",
