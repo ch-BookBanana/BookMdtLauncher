@@ -28,7 +28,7 @@ init = {
 
 
 from PyQt5.Qt import *
-import sys, os, json, copy, winreg, logging, glob, locale, hashlib
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64
 from datetime import datetime
 import ctypes
 import ctypes.wintypes
@@ -151,7 +151,8 @@ class Main():
             "defaultGame": None,
             "javaPath": None,
             "github": {
-                "token":None,
+                "token_enc":None,
+                "token_key":None,
                 "useful": None,
                 "user":{
                     "name":None,
@@ -168,18 +169,13 @@ class Main():
         self.settings = copy.deepcopy(self.defsettings)
         app.aboutToQuit.connect(self.saveSettings)
 
-        def deep_merge_settings(default, file_settings, nested=False):
+        def deep_merge_settings(default, file_settings):
             for key, value in file_settings.items():
                 if key not in default:
                     continue
                 if isinstance(default[key], dict) and isinstance(value, dict):
-                    if nested:
-                        for sub_key, sub_value in value.items():
-                            if sub_key not in default[key]:
-                                default[key][sub_key] = sub_value
-                    else:
-                        deep_merge_settings(default[key], value, nested=True)
-                elif not nested:
+                    deep_merge_settings(default[key], value)
+                else:
                     default[key] = value
 
         try:
@@ -209,6 +205,14 @@ class Main():
 
         self.launcher = mdtLauncher(self, self.settings)
         self.githubAPI = GithubAPI()
+        if self.settings["github"]["token_enc"]:
+            raw = self._decrypt_settings_token()
+            if raw:
+                self.githubAPI.setToken(raw)
+            QThTimer.task(
+                lambda e: self.githubAPI.checkToken(),
+                result_callback=self._on_startup_rate_check
+            )
 
 
         self.signals.register("gameRenovated")
@@ -242,7 +246,48 @@ class Main():
             event.lambdas[1].emit()
         
         
-        
+    _OBF_BYTE = 0x5A
+
+    @classmethod
+    def _obf_store(cls, s):
+        """固定 XOR → base64，settings 存储前混淆"""
+        return base64.b64encode(
+            bytes(b ^ cls._OBF_BYTE for b in s.encode())
+        ).decode()
+
+    @classmethod
+    def _deobf_store(cls, s):
+        """逆向：base64 解码 → XOR 还原"""
+        b = base64.b64decode(s)
+        return bytes(byte ^ cls._OBF_BYTE for byte in b).decode()
+
+    def _encrypt_settings_token(self, raw):
+        enc, key = GithubAPI._encrypt(raw)
+        self.settings["github"]["token_enc"] = Main._obf_store(enc)
+        self.settings["github"]["token_key"] = Main._obf_store(key)
+
+    def _decrypt_settings_token(self):
+        return GithubAPI._decrypt(
+            Main._deobf_store(self.settings["github"]["token_enc"]),
+            Main._deobf_store(self.settings["github"]["token_key"])
+        )
+
+    def _on_startup_rate_check(self, result):
+        ok, data = result
+        if ok:
+            rate = self.githubAPI.rate
+            self.settings["github"]["rate"]["core"] = {
+                "remaining": rate["core"]["remaining"],
+                "reset": rate["core"]["reset"]
+            }
+            self.settings["github"]["rate"]["search"] = {
+                "remaining": rate["search"]["remaining"],
+                "reset": rate["search"]["reset"]
+            }
+            self.settings["github"]["useful"] = True
+        else:
+            self.settings["github"]["useful"] = False
+        self.saveSettings()
 
     def setTheme(self,theme):
         self.settings["theme"] = 1 if theme else 0
@@ -491,11 +536,25 @@ class Main():
                     self.githubAPI = self.root.githubAPI
                     self.init_ui()
                     self.init_wid()
+                    self.githubAPI.refreshed.connect(self._on_rate_refreshed)
                     
 
                 def init_ui(self):
                     self.setFixedSize(500,350)
                     self.setAttribute(Qt.WA_StyledBackground, True)
+
+                def _on_rate_refreshed(self):
+                    rate = self.githubAPI.rate
+                    self.root.settings["github"]["rate"]["core"] = {
+                        "remaining": rate["core"]["remaining"],
+                        "reset": rate["core"]["reset"]
+                    }
+                    self.root.settings["github"]["rate"]["search"] = {
+                        "remaining": rate["search"]["remaining"],
+                        "reset": rate["search"]["reset"]
+                    }
+                    if self.isVisible():
+                        self.main.main._update_rate_section()
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -588,12 +647,14 @@ class Main():
                             super().__init__(parent)
                             self.parent = parent
                             self.root = root
+                            self._editing = False
                             self.init_wid()
+                            self.langing()
 
                         def init_wid(self):
                             self.layout = QVBoxLayout(self)
                             self.layout.setContentsMargins(20,20,20,20)
-                            self.layout.setSpacing(0)
+                            self.layout.setSpacing(10)
                             self.layout.setAlignment(Qt.AlignTop)
 
 
@@ -626,18 +687,421 @@ class Main():
                             self.userName.setFixedHeight(28)
                             self.l1_l1.addWidget(self.userName,0)
 
-                            self.tokenText = QLabel("Token_aaaaaa")
-                            self.tokenText.setProperty("wid","title")
-                            self.tokenText.setStyleSheet("font-size: 16px;")
-                            self.tokenText.setAlignment(Qt.AlignLeft)
-                            self.tokenText.setFixedHeight(20)
-                            self.l1_l1.addWidget(self.tokenText,0)
+                            self.tokenStatus = QLabel("")
+                            self.tokenStatus.setProperty("wid","title")
+                            self.tokenStatus.setStyleSheet("font-size: 12px;")
+                            self.tokenStatus.setAlignment(Qt.AlignLeft)
+                            self.tokenStatus.setFixedHeight(16)
+                            self.l1_l1.addWidget(self.tokenStatus,0)
 
+                            self.l1_l1_l1w = QWidget()
+                            self.l1_l1.addWidget(self.l1_l1_l1w,1)
 
-                            self.test = QWidget()
-                            self.test.setFixedHeight(1000)
-                            self.layout.addWidget(self.test,0)
+                            self.l1_l1_l1 = QHBoxLayout(self.l1_l1_l1w)
+                            self.l1_l1_l1.setContentsMargins(0, 0, 0, 0)
+                            self.l1_l1_l1.setSpacing(5)
 
+                            self.coreBadge = QLabel()
+                            self.coreBadge.setProperty("wid","badge")
+                            self.coreBadge.setFixedHeight(22)
+                            self.l1_l1_l1.addWidget(self.coreBadge,0)
+
+                            self.searchBadge = QLabel()
+                            self.searchBadge.setProperty("wid","badge")
+                            self.searchBadge.setFixedHeight(22)
+                            self.l1_l1_l1.addWidget(self.searchBadge,0)
+
+                            self.l1_l1_l1.addStretch(1)
+
+                            self.layout.addSpacing(20)
+
+                            self.tokenTitle = QLabel()
+                            self.tokenTitle.setProperty("wid","text")
+                            self.tokenTitle.setStyleSheet("font-size: 14px;font-weight:bold;")
+                            self.tokenTitle.setFixedHeight(20)
+                            self.layout.addWidget(self.tokenTitle,0)
+
+                            self.tokenStack = QStackedWidget()
+                            self.tokenStack.setFixedHeight(35)
+                            self.layout.addWidget(self.tokenStack,0)
+
+                            self.tokenInputW = QWidget()
+                            self.tokenInputL = QHBoxLayout(self.tokenInputW)
+                            self.tokenInputL.setContentsMargins(0, 0, 0, 0)
+                            self.tokenInputL.setSpacing(5)
+
+                            self.tokenInput = QLineEdit()
+                            self.tokenInput.setProperty("wid","input")
+                            self.tokenInput.setFixedHeight(30)
+                            self.tokenInputL.addWidget(self.tokenInput,1)
+
+                            self.tokenSaveBtn = QPushButton()
+                            self.tokenSaveBtn.setProperty("wid","btn")
+                            self.tokenSaveBtn.setFixedSize(60,30)
+                            self.tokenSaveBtn.clicked.connect(self._save_token)
+                            self.tokenInputL.addWidget(self.tokenSaveBtn,0)
+
+                            self.tokenCancelBtn = QPushButton()
+                            self.tokenCancelBtn.setProperty("wid","btn")
+                            self.tokenCancelBtn.setFixedSize(60,30)
+                            self.tokenCancelBtn.clicked.connect(self._cancel_edit)
+                            self.tokenCancelBtn.setVisible(False)
+                            self.tokenInputL.addWidget(self.tokenCancelBtn,0)
+
+                            self.tokenStack.addWidget(self.tokenInputW)
+
+                            self.tokenDisplayW = QWidget()
+                            self.tokenDisplayL = QHBoxLayout(self.tokenDisplayW)
+                            self.tokenDisplayL.setContentsMargins(0, 0, 0, 0)
+                            self.tokenDisplayL.setSpacing(5)
+
+                            self.tokenMaskedLabel = QLabel()
+                            self.tokenMaskedLabel.setProperty("wid","title")
+                            self.tokenMaskedLabel.setStyleSheet("font-size: 13px;")
+                            self.tokenMaskedLabel.setFixedHeight(30)
+                            self.tokenDisplayL.addWidget(self.tokenMaskedLabel,1)
+
+                            self.tokenEditBtn = QPushButton()
+                            self.tokenEditBtn.setProperty("wid","btn")
+                            self.tokenEditBtn.setFixedSize(60,30)
+                            self.tokenEditBtn.clicked.connect(self._start_edit)
+                            self.tokenDisplayL.addWidget(self.tokenEditBtn,0)
+
+                            self.tokenClearBtn = QPushButton()
+                            self.tokenClearBtn.setProperty("wid","btn")
+                            self.tokenClearBtn.setFixedSize(60,30)
+                            self.tokenClearBtn.clicked.connect(self._clear_token)
+                            self.tokenDisplayL.addWidget(self.tokenClearBtn,0)
+
+                            self.tokenStack.addWidget(self.tokenDisplayW)
+
+                            self.tokenMsg = QLabel()
+                            self.tokenMsg.setProperty("wid","title")
+                            self.tokenMsg.setStyleSheet("font-size: 11px;")
+                            self.tokenMsg.setFixedHeight(16)
+                            self.layout.addWidget(self.tokenMsg,0)
+
+                            self.tokenTestBtnW = QWidget()
+                            self.tokenTestBtnL = QHBoxLayout(self.tokenTestBtnW)
+                            self.tokenTestBtnL.setContentsMargins(0, 0, 0, 0)
+                            self.tokenTestBtnL.setSpacing(5)
+
+                            self.tokenTestBtn = QPushButton()
+                            self.tokenTestBtn.setProperty("wid","btn")
+                            self.tokenTestBtn.setFixedSize(80,28)
+                            self.tokenTestBtn.clicked.connect(self._test_token)
+                            self.tokenTestBtnL.addWidget(self.tokenTestBtn,0)
+
+                            self.tokenLatencyBtn = QPushButton()
+                            self.tokenLatencyBtn.setProperty("wid","btn")
+                            self.tokenLatencyBtn.setFixedSize(80,28)
+                            self.tokenLatencyBtn.clicked.connect(self._test_latency)
+                            self.tokenTestBtnL.addWidget(self.tokenLatencyBtn,0)
+
+                            self.tokenTestBtnL.addStretch(1)
+                            self.layout.addWidget(self.tokenTestBtnW,0)
+
+                            self.layout.addSpacing(10)
+
+                            self.rateTitle = QLabel()
+                            self.rateTitle.setProperty("wid","text")
+                            self.rateTitle.setStyleSheet("font-size: 14px;font-weight:bold;")
+                            self.rateTitle.setFixedHeight(20)
+                            self.layout.addWidget(self.rateTitle,0)
+
+                            self.rateCoreW = QWidget()
+                            self.rateCoreL = QHBoxLayout(self.rateCoreW)
+                            self.rateCoreL.setContentsMargins(0, 0, 0, 0)
+                            self.rateCoreL.setSpacing(10)
+
+                            self.rateCoreLabel = QLabel()
+                            self.rateCoreLabel.setProperty("wid","text")
+                            self.rateCoreLabel.setStyleSheet("font-size: 12px;")
+                            self.rateCoreLabel.setFixedHeight(20)
+                            self.rateCoreL.addWidget(self.rateCoreLabel,0)
+
+                            self.rateCoreValue = QLabel()
+                            self.rateCoreValue.setProperty("wid","title")
+                            self.rateCoreValue.setStyleSheet("font-size: 12px;")
+                            self.rateCoreValue.setFixedHeight(20)
+                            self.rateCoreL.addWidget(self.rateCoreValue,1)
+
+                            self.layout.addWidget(self.rateCoreW,0)
+
+                            self.rateSearchW = QWidget()
+                            self.rateSearchL = QHBoxLayout(self.rateSearchW)
+                            self.rateSearchL.setContentsMargins(0, 0, 0, 0)
+                            self.rateSearchL.setSpacing(10)
+
+                            self.rateSearchLabel = QLabel()
+                            self.rateSearchLabel.setProperty("wid","text")
+                            self.rateSearchLabel.setStyleSheet("font-size: 12px;")
+                            self.rateSearchLabel.setFixedHeight(20)
+                            self.rateSearchL.addWidget(self.rateSearchLabel,0)
+
+                            self.rateSearchValue = QLabel()
+                            self.rateSearchValue.setProperty("wid","title")
+                            self.rateSearchValue.setStyleSheet("font-size: 12px;")
+                            self.rateSearchValue.setFixedHeight(20)
+                            self.rateSearchL.addWidget(self.rateSearchValue,1)
+
+                            self.layout.addWidget(self.rateSearchW,0)
+
+                            self.layout.addStretch(1)
+
+                        def langing(self):
+                            self.tokenTitle.setText(self.root.langer.get("github.settings.tokenTitle"))
+                            self.tokenSaveBtn.setText(self.root.langer.get("github.settings.tokenSave"))
+                            self.tokenCancelBtn.setText(self.root.langer.get("text.cancel"))
+                            self.tokenEditBtn.setText(self.root.langer.get("github.settings.tokenEdit"))
+                            self.tokenClearBtn.setText(self.root.langer.get("github.settings.tokenClear"))
+                            self.tokenTestBtn.setText(self.root.langer.get("github.settings.testToken"))
+                            self.tokenLatencyBtn.setText(self.root.langer.get("github.settings.testLatency"))
+                            self.rateTitle.setText(self.root.langer.get("github.settings.rateTitle"))
+                            self.rateCoreLabel.setText(self.root.langer.get("github.settings.rateCore"))
+                            self.rateSearchLabel.setText(self.root.langer.get("github.settings.rateSearch"))
+                            self._refresh_ui()
+
+                        def showEvent(self, event):
+                            super().showEvent(event)
+                            self._refresh_ui()
+
+                        def _refresh_ui(self):
+                            token = self.root.settings["github"]["token_enc"]
+                            self._update_user_section()
+                            self._update_token_section(token)
+                            self._update_rate_section()
+
+                        def _update_user_section(self):
+                            user = self.root.settings["github"]["user"]
+                            name = user.get("name") if user else None
+                            headurl = user.get("headurl") if user else None
+
+                            if name:
+                                self.userName.setText(name)
+                                self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
+                            elif self.root.settings["github"]["token_enc"] and self.root.settings["github"]["useful"] is False:
+                                self.userName.setText(self.root.langer.get("github.settings.notLoggedIn"))
+                                self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.invalid"))
+                            elif self.root.settings["github"]["token_enc"]:
+                                self.userName.setText(self.root.langer.get("github.settings.userLoading"))
+                                self.tokenStatus.setText("")
+                            else:
+                                self.userName.setText(self.root.langer.get("github.settings.notLoggedIn"))
+                                self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.none"))
+
+                            if headurl:
+                                self._load_avatar(headurl)
+                            else:
+                                self.headIcon.clear()
+
+                        def _load_avatar(self, url):
+                            def _fetch():
+                                try:
+                                    import requests as _req
+                                    resp = _req.get(url, timeout=10)
+                                    if resp.status_code == 200:
+                                        pix = QPixmap()
+                                        pix.loadFromData(resp.content)
+                                        return pix
+                                except Exception:
+                                    pass
+                                return QPixmap()
+                            def _set_round(pix):
+                                if not pix or pix.isNull():
+                                    return
+                                size = min(pix.width(), pix.height())
+                                scaled = pix.scaled(94, 94, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                                round_pix = QPixmap(94, 94)
+                                round_pix.fill(Qt.transparent)
+                                painter = QPainter(round_pix)
+                                painter.setRenderHint(QPainter.Antialiasing)
+                                path = QPainterPath()
+                                path.addEllipse(0, 0, 94, 94)
+                                painter.setClipPath(path)
+                                offset_x = (94 - scaled.width()) // 2
+                                offset_y = (94 - scaled.height()) // 2
+                                painter.drawPixmap(offset_x, offset_y, scaled)
+                                painter.end()
+                                self.headIcon.setPixmap(round_pix)
+                            QThTimer.task(lambda e,_url=url: _fetch(), result_callback=_set_round)
+
+                        def _update_token_section(self, token):
+                            if self._editing:
+                                return
+                            if token:
+                                self.tokenStack.setCurrentIndex(1)
+                                masked = self.root.githubAPI.getMaskedToken()
+                                self.tokenMaskedLabel.setText(masked if masked else "****")
+                                self.tokenMsg.setText("")
+                            else:
+                                self.tokenStack.setCurrentIndex(0)
+                                self.tokenInput.clear()
+                                self.tokenMsg.setText("")
+
+                        def _update_rate_section(self):
+                            rate = self.root.githubAPI.rate
+                            core = rate.get("core", {})
+                            search = rate.get("search", {})
+
+                            core_rem = core.get("remaining")
+                            search_rem = search.get("remaining")
+                            core_reset = core.get("reset", [])
+                            search_reset = search.get("reset", [])
+
+                            if core_rem is not None:
+                                self.coreBadge.setText(f"Core: {core_rem}")
+                                self.coreBadge.setVisible(True)
+                                reset_str = ""
+                                if len(core_reset) == 6:
+                                    reset_str = f"{core_reset[0]}-{core_reset[1]:02d}-{core_reset[2]:02d} {core_reset[3]:02d}:{core_reset[4]:02d}:{core_reset[5]:02d}"
+                                self.rateCoreValue.setText(
+                                    f"{self.root.langer.get('github.settings.rateRemaining')}: {core_rem}   "
+                                    f"{self.root.langer.get('github.settings.rateReset')}: {reset_str}"
+                                )
+                            else:
+                                self.coreBadge.setVisible(False)
+                                self.rateCoreValue.setText("")
+
+                            if search_rem is not None:
+                                self.searchBadge.setText(f"Search: {search_rem}")
+                                self.searchBadge.setVisible(True)
+                                reset_str = ""
+                                if len(search_reset) == 6:
+                                    reset_str = f"{search_reset[0]}-{search_reset[1]:02d}-{search_reset[2]:02d} {search_reset[3]:02d}:{search_reset[4]:02d}:{search_reset[5]:02d}"
+                                self.rateSearchValue.setText(
+                                    f"{self.root.langer.get('github.settings.rateRemaining')}: {search_rem}   "
+                                    f"{self.root.langer.get('github.settings.rateReset')}: {reset_str}"
+                                )
+                            else:
+                                self.searchBadge.setVisible(False)
+                                self.rateSearchValue.setText("")
+
+                        def _start_edit(self):
+                            self._editing = True
+                            self.tokenStack.setCurrentIndex(0)
+                            self.tokenCancelBtn.setVisible(True)
+                            self.tokenInput.clear()
+
+                        def _cancel_edit(self):
+                            self._editing = False
+                            token = self.root.settings["github"]["token_enc"]
+                            if token:
+                                self.tokenStack.setCurrentIndex(1)
+                            self.tokenInput.clear()
+
+                        def _save_token(self):
+                            new_token = self.tokenInput.text().strip()
+                            if not new_token:
+                                self.tokenMsg.setText(self.root.langer.get("github.settings.tokenEmpty"))
+                                return
+
+                            self.root.githubAPI.setToken(new_token)
+                            self.root._encrypt_settings_token(new_token)
+                            new_token = None
+
+                            self.tokenSaveBtn.setEnabled(False)
+                            self.tokenMsg.setText(self.root.langer.get("github.settings.tokenChecking"))
+
+                            def _on_checked(result):
+                                ok, data = result
+                                self.tokenSaveBtn.setEnabled(True)
+                                if ok:
+                                    self.root.settings["github"]["useful"] = True
+                                    rate = self.root.githubAPI.rate
+                                    self.root.settings["github"]["rate"]["core"] = {
+                                        "remaining": rate["core"]["remaining"],
+                                        "reset": rate["core"]["reset"]
+                                    }
+                                    self.root.settings["github"]["rate"]["search"] = {
+                                        "remaining": rate["search"]["remaining"],
+                                        "reset": rate["search"]["reset"]
+                                    }
+                                    self.root.saveSettings()
+                                    self._editing = False
+                                    self._refresh_ui()
+                                    self._fetch_user()
+                                else:
+                                    self.root.settings["github"]["useful"] = False
+                                    self.tokenMsg.setText(
+                                        f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
+                                    )
+
+                            QThTimer.task(
+                                lambda e: self.root.githubAPI.checkToken(),
+                                result_callback=_on_checked
+                            )
+
+                        def _clear_token(self):
+                            self.root.githubAPI.setToken(None)
+                            self.root.settings["github"]["token_enc"] = None
+                            self.root.settings["github"]["token_key"] = None
+                            self.root.settings["github"]["useful"] = None
+                            self.root.settings["github"]["user"] = {"name": None, "headurl": None}
+                            self.root.saveSettings()
+                            self._editing = False
+                            self._refresh_ui()
+
+                        def _test_token(self):
+                            if not self.root.settings["github"]["token_enc"]:
+                                self.tokenMsg.setText(self.root.langer.get("github.settings.tokenEmpty"))
+                                return
+                            self.tokenTestBtn.setEnabled(False)
+                            self.tokenMsg.setText(self.root.langer.get("github.settings.tokenChecking"))
+                            def _done(result):
+                                self.tokenTestBtn.setEnabled(True)
+                                ok, data = result
+                                if ok:
+                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
+                                else:
+                                    self.tokenMsg.setText(
+                                        f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
+                                    )
+                            QThTimer.task(
+                                lambda e: self.root.githubAPI.checkToken(),
+                                result_callback=_done
+                            )
+
+                        def _test_latency(self):
+                            if not self.root.settings["github"]["token_enc"]:
+                                self.tokenMsg.setText(self.root.langer.get("github.settings.tokenEmpty"))
+                                return
+                            self.tokenLatencyBtn.setEnabled(False)
+                            self.tokenMsg.setText(self.root.langer.get("github.settings.latencyChecking"))
+                            def _done(latency):
+                                self.tokenLatencyBtn.setEnabled(True)
+                                if latency > 0:
+                                    self.tokenMsg.setText(
+                                        self.root.langer.get("github.settings.latencyResult").replace("$1", str(latency))
+                                    )
+                                elif latency == -2:
+                                    self.tokenMsg.setText(self.root.langer.get("github.settings.latencyTimeout"))
+                                elif latency == -3:
+                                    self.tokenMsg.setText(self.root.langer.get("github.settings.latencyConnError"))
+                                else:
+                                    self.tokenMsg.setText(
+                                        self.root.langer.get("github.settings.latencyError").replace("$1", str(latency))
+                                    )
+                            QThTimer.task(
+                                lambda e: self.root.githubAPI.checkConnection(),
+                                result_callback=_done
+                            )
+
+                        def _fetch_user(self):
+                            def _on_user(result):
+                                ok, data = result
+                                if ok:
+                                    body = data.get("body", {})
+                                    self.root.settings["github"]["user"] = {
+                                        "name": body.get("login"),
+                                        "headurl": body.get("avatar_url")
+                                    }
+                                    self.root.saveSettings()
+                                    self._refresh_ui()
+                            QThTimer.task(
+                                lambda e: self.root.githubAPI.getUser(),
+                                result_callback=_on_user
+                            )
 
 
         class Left(QWidget):
@@ -1026,14 +1490,59 @@ class Main():
 
                     def enterEvent(self, event):
                         super().enterEvent(event)
-                        if self.root.settings["github"]["token"] is None:
-                            self.setToolTip(str(t(
-                                self.root.langer.get("github.token.none" if self.root.settings["github"]["token"] is None else "github.token"),
-                                self.root.settings["github"]["rate"]["core"]["remaining"],
-                                (self.root.settings["github"]["rate"]["core"]["reset"] if len(self.root.settings["github"]["rate"]["core"]["reset"]) > 0 else None),
-                                self.root.settings["github"]["rate"]["search"]["remaining"],
-                                (self.root.settings["github"]["rate"]["search"]["reset"] if len(self.root.settings["github"]["rate"]["search"]["reset"]) > 0 else None
-                            ))))
+                        token = self.root.settings["github"]["token_enc"]
+                        # 优先用实时 rate，缺失则回退 settings
+                        live_rate = self.root.githubAPI.rate
+                        rate = self.root.settings["github"]["rate"]
+
+                        def _fmt_reset(entry):
+                            r = entry.get("reset", [])
+                            if len(r) == 6:
+                                return f"{r[3]:02d}:{r[4]:02d}:{r[5]:02d}"
+                            return "-"
+
+                        def _get(entry, key, fallback_entry=None):
+                            v = entry.get(key)
+                            if v is not None and v != []:
+                                return v
+                            if fallback_entry is not None:
+                                v = fallback_entry.get(key)
+                                if v is not None and v != []:
+                                    return v
+                            return None
+
+                        core_rem = _get(rate["core"], "remaining", live_rate["core"])
+                        search_rem = _get(rate["search"], "remaining", live_rate["search"])
+                        core_reset = _fmt_reset(
+                            rate["core"] if rate["core"].get("reset") else live_rate["core"]
+                        )
+                        search_reset = _fmt_reset(
+                            rate["search"] if rate["search"].get("reset") else live_rate["search"]
+                        )
+
+                        # 如果 live 也没有数据且有 token，触发 checkToken 获取
+                        if token is not None and (
+                            core_rem is None or search_rem is None
+                        ):
+                            QThTimer.task(
+                                self.root.githubAPI.checkToken
+                            )
+
+                        if token is None:
+                            key = "github.token.none"
+                        elif self.root.settings["github"]["useful"] is False:
+                            key = "github.token.error"
+                        else:
+                            key = "github.token"
+
+                        # t() 内部 reversed(args)，所以传参也反向：
+                        #   $1=剩余次数 $2=刷新时间 $3=剩余次数 $4=刷新时间
+                        #   需要 reversed 后得到 core_rem, core_reset, search_rem, search_reset
+                        #   故传入: search_reset, search_rem, core_reset, core_rem
+                        self.setToolTip(str(t(
+                            self.root.langer.get(key),
+                            search_reset, search_rem, core_reset, core_rem
+                        )))
 
 
                 class TriBtn(QPushButton):
@@ -2416,7 +2925,7 @@ class Main():
                                         self.root.settings["javaPaths"] = javaScanner.getJavas()
                                         if not self.root.settings["javaPaths"]:
                                             self._t3_select_hasjava = False
-                                            self._t3_select.combo.addItem("nojava",self.root.langer.get("wid.pages.setting.launcher.java.select.none"))
+                                            self._t3_select.combo.addItem(self.root.langer.get("wid.pages.setting.launcher.java.select.none"),"nojava")
                                             return
                                     else:
                                         javas = self.root.settings["javaPaths"]
@@ -2438,7 +2947,7 @@ class Main():
                                         self.root.settings["javaPath"] = select if select != "auto" else None
                                         self._t3_select.combo.setCurrentIndex(self._t3_select.combo.findData(select))
                                         
-                                _t3_select_showEvent(self)
+                                QTimer.singleShot(0,lambda: _t3_select_showEvent(self))
                                 self._t3_select.combo.popupAboutToShow.connect(lambda:_t3_select_showEvent(self))
                                 self._t3_select.combo.activated.connect(lambda:(self.root.settings.__setitem__("javaPath",self._t3_select.combo.currentData() if (self._t3_select.combo.currentData() != "auto") else None)))
 

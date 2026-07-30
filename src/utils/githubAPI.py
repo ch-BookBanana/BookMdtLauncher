@@ -37,6 +37,8 @@ class GithubAPI(QObject):
             "core":   self._make_timer("core"),
             "search": self._make_timer("search"),
         }
+        # 确保 _schedule_reset 通过信号回主线程执行（QTimer 不能跨线程操作）
+        self.refreshed.connect(self._schedule_reset)
 
     def _make_timer(self, name):
         t = QTimer(self)
@@ -46,6 +48,9 @@ class GithubAPI(QObject):
 
     def _refresh(self, resp):
         resource = resp.headers.get("X-RateLimit-Resource", "core")
+        # 仅处理 v3 REST API（core/search），忽略 graphql 等
+        if resource not in ("core", "search"):
+            return
         entry = self.rate.get(resource)
         if entry is None:
             return
@@ -56,7 +61,6 @@ class GithubAPI(QObject):
             lt = time.localtime(reset_ts)
             entry["reset"] = [lt.tm_year, lt.tm_mon, lt.tm_mday,
                               lt.tm_hour, lt.tm_min, lt.tm_sec]
-        self._schedule_reset()
         self.refreshed.emit()
 
     def _schedule_reset(self):
@@ -113,16 +117,13 @@ class GithubAPI(QObject):
         self._encrypted_token, self._key = self._encrypt(token_)
 
     def checkConnection(self):
+        """测试到 GitHub 的网络延迟（不消耗 API 次数）。"""
         try:
             start = time.perf_counter()
-            _tkn = self._get_token()
             resp = requests.get(
-                "https://api.github.com/",
-                headers={"Authorization": f"token {_tkn}"},
+                "https://github.com/",
                 timeout=5
             )
-            _tkn = None
-            self._refresh(resp)
             latency = int((time.perf_counter() - start) * 1000)
 
             if resp.status_code == 200:
@@ -139,27 +140,68 @@ class GithubAPI(QObject):
         except:
             return -99
 
-    def checkToken(self, token_= None):
+    def checkToken(self, token_=None):
+        """使用 rate_limit 端点轻量检测 token 有效性。"""
         if token_ is None:
             if self._encrypted_token is None:
-                return False, None
+                return False, "No token set"
             token_ = self._get_token()
+        url = "https://api.github.com/rate_limit"
+        headers = {
+            "Authorization": f"token {token_}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        try:
+            rest = requests.get(url, headers=headers, timeout=10)
+            if rest.status_code == 200:
+                self._refresh(rest)
+                # /rate_limit body 同时含 core + search，补全 header 拿不到的
+                body = rest.json()
+                resources = body.get("resources", {})
+                for name in ("core", "search"):
+                    info = resources.get(name, {})
+                    if info:
+                        entry = self.rate.get(name)
+                        if entry is not None:
+                            entry["remaining"] = info.get("remaining", entry["remaining"])
+                            reset_ts = info.get("reset", 0)
+                            if reset_ts:
+                                entry["reset_ts"] = reset_ts
+                                lt = time.localtime(reset_ts)
+                                entry["reset"] = [lt.tm_year, lt.tm_mon, lt.tm_mday,
+                                                  lt.tm_hour, lt.tm_min, lt.tm_sec]
+                self.refreshed.emit()
+                return True, body
+            elif rest.status_code == 401:
+                return False, "Invalid token"
+            elif rest.status_code == 403:
+                return False, "Token refused"
+            else:
+                return False, rest.status_code
+        except requests.ConnectionError:
+            return False, "ConnectionError"
+        except Exception as e:
+            return False, e
+
+    def getUser(self):
+        """获取当前已认证用户信息。"""
+        if self._encrypted_token is None:
+            return False, None
+        token_ = self._get_token()
         url = "https://api.github.com/user"
         headers = {
             "Authorization": f"token {token_}",
             "Accept": "application/vnd.github.v3+json",
         }
-        
         try:
             rest = requests.get(url, headers=headers, timeout=10)
-
             if rest.status_code == 200:
                 self._refresh(rest)
-                return True, {"body":rest.json(),"head":rest.headers}
+                return True, {"body": rest.json(), "head": rest.headers}
             elif rest.status_code == 401:
                 return False, "Invalid token"
             elif rest.status_code == 403:
-                return False, "Tonen Refused"
+                return False, "Token refused"
             else:
                 return False, rest.status_code
         except requests.ConnectionError:

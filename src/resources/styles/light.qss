@@ -50,6 +50,10 @@ QPushButton[wid="btn"]:pressed {
     background: rgba(124, 124, 124, 0.1);
     border: 1px solid rgb(124, 124, 124);
 }
+QPushButton[wid="btn"]:disabled{
+    color:#888;
+    background:rgba(0, 0, 0, 0.171);
+}
 QPushButton[wid="lbtn"] {
     background: transparent;
     border: none;
@@ -73,6 +77,25 @@ QPushButton[wid="tbtn"]:hover {
 QPushButton[wid="tbtn"]:checked {
     background: rgba(124, 124, 124, 0.5);
     border: none;
+}
+QLineEdit[wid="input"] {
+    background: rgb(255, 255, 255);
+    border: 1px solid rgb(179, 179, 179);
+    border-radius: 5px;
+    color: rgb(0, 0, 0);
+    font-size: 12px;
+    padding: 2px 8px;
+}
+QLineEdit[wid="input"]:focus {
+    border: 1px solid rgb(110, 65, 151);
+}
+QLabel[wid="badge"] {
+    background: rgba(110, 65, 151, 0.15);
+    border: 1px solid rgba(110, 65, 151, 0.4);
+    border-radius: 4px;
+    color: rgb(90, 45, 130);
+    font-size: 11px;
+    padding: 2px 8px;
 }
 QPushButton[wid="check"] {
     background: transparent;

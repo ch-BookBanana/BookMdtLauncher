@@ -47,7 +47,39 @@
     "wid.pages.setting.launcher.java.select.none": "利用可能なJavaなし",
     "wid.pages.setting.launcher.java.select.auto": "自動選択",
 
-    "tray.menu.close": "閉じる"
+    "tray.menu.close": "閉じる",
+
+    "github.token":       "GitHub\n\n--コアAPI--\n残り回数:$1\nリセット:$2\n--検索API--\n残り回数:$3\nリセット:$4",
+    "github.token.none":  "GitHub\nトークン未設定。設定するとより多く\nの検索回数を取得できます\n\n--コアAPI--\n残り回数:$1\nリセット:$2\n--検索API--\n残り回数:$3\nリセット:$4",
+    "github.token.error": "GitHub\n無効なトークンです。有効期限を\n確認してください\n\n--コアAPI--\n残り回数:$1\nリセット:$2\n--検索API--\n残り回数:$3\nリセット:$4",
+
+    "github.settings.tokenEdit": "トークンを編集",
+    "github.settings.tokenSave": "保存",
+    "github.settings.tokenClear": "クリア",
+    "github.settings.testToken": "トークン検証",
+    "github.settings.testLatency": "遅延テスト",
+    "github.settings.tokenTitle": "トークン",
+    "github.settings.tokenEmpty": "トークンを入力してください",
+    "github.settings.tokenChecking": "検証中...",
+    "github.settings.tokenStatus.valid": "トークン有効",
+    "github.settings.tokenStatus.invalid": "トークン無効",
+    "github.settings.tokenStatus.none": "トークン未設定",
+    "github.settings.rateTitle": "API レート制限",
+    "github.settings.rateCore": "コア API",
+    "github.settings.rateSearch": "検索 API",
+    "github.settings.rateRemaining": "残り",
+    "github.settings.rateReset": "リセット時間",
+    "github.settings.userLoading": "読み込み中...",
+    "github.settings.notLoggedIn": "未ログイン",
+    "github.settings.latencyChecking": "遅延テスト中...",
+    "github.settings.latencyResult": "遅延: $1ms",
+    "github.settings.latencyTimeout": "接続タイムアウト",
+    "github.settings.latencyConnError": "ネットワーク接続失敗",
+    "github.settings.latencyError": "リクエスト失敗: $1",
 
 
+    "text.cancel": "キャンセル",
+    "text.yes": "確認",
+    "text.return": "戻る",
+    "text.default": "デフォルト"
 }

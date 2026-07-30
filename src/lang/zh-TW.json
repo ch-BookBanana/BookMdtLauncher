@@ -47,7 +47,39 @@
     "wid.pages.setting.launcher.java.select.none": "無可用 Java",
     "wid.pages.setting.launcher.java.select.auto": "自動選擇",
 
-    "tray.menu.close": "關閉"
+    "tray.menu.close": "關閉",
+
+    "github.token":       "GitHub\n\n--核心API--\n剩餘次數:$1\n重置時間:$2\n--搜尋API--\n剩餘次數:$3\n重置時間:$4",
+    "github.token.none":  "GitHub\n未填寫 token，填寫後可取得更多\n搜尋次數\n\n--核心API--\n剩餘次數:$1\n重置時間:$2\n--搜尋API--\n剩餘次數:$3\n重置時間:$4",
+    "github.token.error": "GitHub\ntoken 無效，請檢查你的 token 有\n效期限\n\n--核心API--\n剩餘次數:$1\n重置時間:$2\n--搜尋API--\n剩餘次數:$3\n重置時間:$4",
+
+    "github.settings.tokenEdit": "編輯 Token",
+    "github.settings.tokenSave": "儲存",
+    "github.settings.tokenClear": "清除",
+    "github.settings.testToken": "驗證Token",
+    "github.settings.testLatency": "測試延遲",
+    "github.settings.tokenTitle": "Token",
+    "github.settings.tokenEmpty": "請輸入 Token",
+    "github.settings.tokenChecking": "正在驗證...",
+    "github.settings.tokenStatus.valid": "Token 有效",
+    "github.settings.tokenStatus.invalid": "Token 無效",
+    "github.settings.tokenStatus.none": "未設定 Token",
+    "github.settings.rateTitle": "API 速率限制",
+    "github.settings.rateCore": "核心 API",
+    "github.settings.rateSearch": "搜尋 API",
+    "github.settings.rateRemaining": "剩餘",
+    "github.settings.rateReset": "重置時間",
+    "github.settings.userLoading": "載入中...",
+    "github.settings.notLoggedIn": "未登入",
+    "github.settings.latencyChecking": "正在測試延遲...",
+    "github.settings.latencyResult": "延遲: $1ms",
+    "github.settings.latencyTimeout": "連線逾時",
+    "github.settings.latencyConnError": "網路連線失敗",
+    "github.settings.latencyError": "請求失敗: $1",
 
 
+    "text.cancel": "取消",
+    "text.yes": "確定",
+    "text.return": "返回",
+    "text.default": "預設"
 }

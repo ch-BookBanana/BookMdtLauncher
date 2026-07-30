@@ -47,7 +47,39 @@
     "wid.pages.setting.launcher.java.select.none": "사용 가능한 Java 없음",
     "wid.pages.setting.launcher.java.select.auto": "자동 선택",
 
-    "tray.menu.close": "닫기"
+    "tray.menu.close": "닫기",
+
+    "github.token":       "GitHub\n\n--코어 API--\n남은 횟수:$1\n리셋:$2\n--검색 API--\n남은 횟수:$3\n리셋:$4",
+    "github.token.none":  "GitHub\n토큰이 설정되지 않았습니다. 설정하면\n더 많은 검색 횟수를 얻을 수 있습니다\n\n--코어 API--\n남은 횟수:$1\n리셋:$2\n--검색 API--\n남은 횟수:$3\n리셋:$4",
+    "github.token.error": "GitHub\n유효하지 않은 토큰입니다. 토큰의\n유효 기간을 확인하세요\n\n--코어 API--\n남은 횟수:$1\n리셋:$2\n--검색 API--\n남은 횟수:$3\n리셋:$4",
+
+    "github.settings.tokenEdit": "토큰 편집",
+    "github.settings.tokenSave": "저장",
+    "github.settings.tokenClear": "삭제",
+    "github.settings.testToken": "토큰 확인",
+    "github.settings.testLatency": "지연 테스트",
+    "github.settings.tokenTitle": "토큰",
+    "github.settings.tokenEmpty": "토큰을 입력하세요",
+    "github.settings.tokenChecking": "확인 중...",
+    "github.settings.tokenStatus.valid": "토큰 유효함",
+    "github.settings.tokenStatus.invalid": "토큰 유효하지 않음",
+    "github.settings.tokenStatus.none": "토큰 미설정",
+    "github.settings.rateTitle": "API 속도 제한",
+    "github.settings.rateCore": "코어 API",
+    "github.settings.rateSearch": "검색 API",
+    "github.settings.rateRemaining": "남음",
+    "github.settings.rateReset": "리셋 시간",
+    "github.settings.userLoading": "로딩 중...",
+    "github.settings.notLoggedIn": "로그인 안 됨",
+    "github.settings.latencyChecking": "지연 테스트 중...",
+    "github.settings.latencyResult": "지연: $1ms",
+    "github.settings.latencyTimeout": "연결 시간 초과",
+    "github.settings.latencyConnError": "네트워크 연결 실패",
+    "github.settings.latencyError": "요청 실패: $1",
 
 
+    "text.cancel": "취소",
+    "text.yes": "확인",
+    "text.return": "뒤로",
+    "text.default": "기본값"
 }

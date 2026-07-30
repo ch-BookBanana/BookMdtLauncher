@@ -47,7 +47,39 @@
     "wid.pages.setting.launcher.java.select.none": "No Java Available",
     "wid.pages.setting.launcher.java.select.auto": "Auto Select",
 
-    "tray.menu.close": "Close"
+    "tray.menu.close": "Close",
+
+    "github.token":       "GitHub\n\n--Core API--\nRemaining:$1\nReset:$2\n--Search API--\nRemaining:$3\nReset:$4",
+    "github.token.none":  "GitHub\nNo token set. Set one to get more\nsearch requests\n\n--Core API--\nRemaining:$1\nReset:$2\n--Search API--\nRemaining:$3\nReset:$4",
+    "github.token.error": "GitHub\nInvalid token, please check your\ntoken validity\n\n--Core API--\nRemaining:$1\nReset:$2\n--Search API--\nRemaining:$3\nReset:$4",
+
+    "github.settings.tokenEdit": "Edit Token",
+    "github.settings.tokenSave": "Save",
+    "github.settings.tokenClear": "Clear",
+    "github.settings.testToken": "Verify Token",
+    "github.settings.testLatency": "Test Latency",
+    "github.settings.tokenTitle": "Token",
+    "github.settings.tokenEmpty": "Please enter a token",
+    "github.settings.tokenChecking": "Verifying...",
+    "github.settings.tokenStatus.valid": "Token valid",
+    "github.settings.tokenStatus.invalid": "Token invalid",
+    "github.settings.tokenStatus.none": "No token set",
+    "github.settings.rateTitle": "API Rate Limit",
+    "github.settings.rateCore": "Core API",
+    "github.settings.rateSearch": "Search API",
+    "github.settings.rateRemaining": "Remaining",
+    "github.settings.rateReset": "Reset",
+    "github.settings.userLoading": "Loading...",
+    "github.settings.notLoggedIn": "Not logged in",
+    "github.settings.latencyChecking": "Testing latency...",
+    "github.settings.latencyResult": "Latency: $1ms",
+    "github.settings.latencyTimeout": "Connection timeout",
+    "github.settings.latencyConnError": "Connection failed",
+    "github.settings.latencyError": "Request failed: $1",
 
 
+    "text.cancel": "Cancel",
+    "text.yes": "OK",
+    "text.return": "Back",
+    "text.default": "Default"
 }

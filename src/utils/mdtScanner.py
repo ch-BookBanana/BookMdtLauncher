@@ -160,7 +160,7 @@ class mdtScanner:
     def _retrieve_mdt_data(cls, subdir_name):
         """读取 data.json，与默认值深度合并后写回。"""
         default_data = {
-            "javaPath": None
+            "javaPath": "<:|follow|:>"
         }
         data_path = os.path.join(cls.base_dir, subdir_name, "BML.json")
         file_data = {}
@@ -210,4 +210,6 @@ class mdtScanner:
                     max_vers = 17
                     break
             data["javaPath"] = max_path
+        elif data["javaPath"] == "<:|follow|:>":
+            data["javaPath"] = settings["javaPath"]
         return data   

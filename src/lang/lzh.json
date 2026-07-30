@@ -47,8 +47,40 @@
     "wid.pages.setting.launcher.java.select.none": "爪哇無覓處",
     "wid.pages.setting.launcher.java.select.auto": "自擇",
 
-    "tray.menu.close": "闔"
+    "tray.menu.close": "闔",
+
+    "github.token":       "GitHub\n\n--常道API--\n餘次:$1\n復時:$2\n--搜檢API--\n餘次:$3\n復時:$4",
+    "github.token.none":  "GitHub\n未書符契，書之可得\n多搜檢之數\n\n--常道API--\n餘次:$1\n復時:$2\n--搜檢API--\n餘次:$3\n復時:$4",
+    "github.token.error": "GitHub\n符契無驗，請察其期\n\n--常道API--\n餘次:$1\n復時:$2\n--搜檢API--\n餘次:$3\n復時:$4",
+
+    "github.settings.tokenEdit": "修符契",
+    "github.settings.tokenSave": "存之",
+    "github.settings.tokenClear": "清之",
+    "github.settings.testToken": "驗符契",
+    "github.settings.testLatency": "測遲速",
+    "github.settings.tokenTitle": "符契",
+    "github.settings.tokenEmpty": "請入符契",
+    "github.settings.tokenChecking": "驗證中...",
+    "github.settings.tokenStatus.valid": "符契有效",
+    "github.settings.tokenStatus.invalid": "符契無效",
+    "github.settings.tokenStatus.none": "未設符契",
+    "github.settings.rateTitle": "API 限數",
+    "github.settings.rateCore": "常道 API",
+    "github.settings.rateSearch": "搜檢 API",
+    "github.settings.rateRemaining": "所餘",
+    "github.settings.rateReset": "復時",
+    "github.settings.userLoading": "載入中...",
+    "github.settings.notLoggedIn": "未登",
+    "github.settings.latencyChecking": "測遲速中...",
+    "github.settings.latencyResult": "遲速: $1ms",
+    "github.settings.latencyTimeout": "逾時未應",
+    "github.settings.latencyConnError": "網絡不通",
+    "github.settings.latencyError": "請求有誤: $1",
 
 
+    "text.cancel": "罷",
+    "text.yes": "諾",
+    "text.return": "歸",
+    "text.default": "本設"
 }
 
