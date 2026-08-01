@@ -53,12 +53,11 @@
     "github.token.none":  "GitHub\nNo token set. Set one to get more\nsearch requests\n\n--Core API--\nRemaining:$1\nReset:$2\n--Search API--\nRemaining:$3\nReset:$4",
     "github.token.error": "GitHub\nInvalid token, please check your\ntoken validity\n\n--Core API--\nRemaining:$1\nReset:$2\n--Search API--\nRemaining:$3\nReset:$4",
 
-    "github.settings.tokenEdit": "Edit Token",
-    "github.settings.tokenSave": "Save",
-    "github.settings.tokenClear": "Clear",
+    "text.edit": "Edit",
     "github.settings.testToken": "Verify Token",
     "github.settings.testLatency": "Test Latency",
     "github.settings.tokenTitle": "Token",
+    "github.settings.tokenTips": "This launcher uses the token solely for searching public repositories and fetching release lists.\nToken storage uses basic obfuscation and is not cryptographically secure. Do not use a highly-privileged token.",
     "github.settings.tokenEmpty": "Please enter a token",
     "github.settings.tokenChecking": "Verifying...",
     "github.settings.tokenStatus.valid": "Token valid",
@@ -69,7 +68,6 @@
     "github.settings.rateSearch": "Search API",
     "github.settings.rateRemaining": "Remaining",
     "github.settings.rateReset": "Reset",
-    "github.settings.userLoading": "Loading...",
     "github.settings.notLoggedIn": "Not logged in",
     "github.settings.latencyChecking": "Testing latency...",
     "github.settings.latencyResult": "Latency: $1ms",
@@ -81,5 +79,8 @@
     "text.cancel": "Cancel",
     "text.yes": "OK",
     "text.return": "Back",
-    "text.default": "Default"
+    "text.default": "Default",
+    "text.save": "Save",
+    "text.clear": "Clear",
+    "text.loading": "Loading..."
 }

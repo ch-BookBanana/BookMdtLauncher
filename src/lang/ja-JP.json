@@ -53,12 +53,11 @@
     "github.token.none":  "GitHub\nトークン未設定。設定するとより多く\nの検索回数を取得できます\n\n--コアAPI--\n残り回数:$1\nリセット:$2\n--検索API--\n残り回数:$3\nリセット:$4",
     "github.token.error": "GitHub\n無効なトークンです。有効期限を\n確認してください\n\n--コアAPI--\n残り回数:$1\nリセット:$2\n--検索API--\n残り回数:$3\nリセット:$4",
 
-    "github.settings.tokenEdit": "トークンを編集",
-    "github.settings.tokenSave": "保存",
-    "github.settings.tokenClear": "クリア",
+    "text.edit": "編集",
     "github.settings.testToken": "トークン検証",
     "github.settings.testLatency": "遅延テスト",
     "github.settings.tokenTitle": "トークン",
+    "github.settings.tokenTips": "本ランチャーは公開リポジトリの検索とリリース一覧の取得にのみトークンを使用します。\nトークン保存は簡易難読化のみであり、安全は保証されません。高権限トークンを使用しないでください。",
     "github.settings.tokenEmpty": "トークンを入力してください",
     "github.settings.tokenChecking": "検証中...",
     "github.settings.tokenStatus.valid": "トークン有効",
@@ -69,7 +68,6 @@
     "github.settings.rateSearch": "検索 API",
     "github.settings.rateRemaining": "残り",
     "github.settings.rateReset": "リセット時間",
-    "github.settings.userLoading": "読み込み中...",
     "github.settings.notLoggedIn": "未ログイン",
     "github.settings.latencyChecking": "遅延テスト中...",
     "github.settings.latencyResult": "遅延: $1ms",
@@ -81,5 +79,8 @@
     "text.cancel": "キャンセル",
     "text.yes": "確認",
     "text.return": "戻る",
-    "text.default": "デフォルト"
+    "text.default": "デフォルト",
+    "text.save": "保存",
+    "text.clear": "クリア",
+    "text.loading": "読み込み中..."
 }

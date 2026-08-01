@@ -32,8 +32,14 @@
     "wid.pages.start.modbtn": "管理模组",
     "wid.pages.start.gamebtn": "选择游戏",
 
+
     "wid.pages.download": "下载",
+    "wid.pages.download.game": "游戏本体",
+
+
     "wid.pages.game": "游戏",
+
+
     "wid.pages.setting": "设置",
     "wid.pages.setting.launcher": "启动器",
     "wid.pages.setting.launcher.preferences": "外观",
@@ -55,12 +61,11 @@
     "github.token.none":  "GitHub\n未填写token，填写后可获取更多\n搜索次数\n\n--通用API--\n剩余次数:$1\n刷新时间:$2\n--搜索API--\n剩余次数:$3\n刷新时间:$4",
     "github.token.error": "GitHub\ntoken无效，请检查你的token有\n效期限\n\n--通用API--\n剩余次数:$1\n刷新时间:$2\n--搜索API--\n剩余次数:$3\n刷新时间:$4",
     
-    "github.settings.tokenEdit": "编辑Token",
-    "github.settings.tokenSave": "保存",
-    "github.settings.tokenClear": "清除",
+    "text.edit": "编辑",
     "github.settings.testToken": "验证Token",
     "github.settings.testLatency": "测试延迟",
     "github.settings.tokenTitle": "Token",
+    "github.settings.tokenTips": "本启动器于搜索公开仓库及获取发布列表时使用 Token，不涉及其他操作。\nToken 存储采用简易混淆方案，无法保证安全性，请勿配置高权限 Token。",
     "github.settings.tokenEmpty": "请输入 Token",
     "github.settings.tokenChecking": "正在验证...",
     "github.settings.tokenStatus.valid": "Token 有效",
@@ -71,7 +76,6 @@
     "github.settings.rateSearch": "搜索 API",
     "github.settings.rateRemaining": "剩余",
     "github.settings.rateReset": "重置时间",
-    "github.settings.userLoading": "加载中...",
     "github.settings.notLoggedIn": "未登录",
     "github.settings.latencyChecking": "正在测试延迟...",
     "github.settings.latencyResult": "延迟: $1ms",
@@ -83,5 +87,8 @@
     "text.cancel": "取消",
     "text.yes": "确定",
     "text.return": "返回",
-    "text.default": "默认"
+    "text.default": "默认",
+    "text.save": "保存",
+    "text.clear": "清除",
+    "text.loading": "加载中..."
   }

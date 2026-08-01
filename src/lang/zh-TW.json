@@ -53,12 +53,11 @@
     "github.token.none":  "GitHub\n未填寫 token，填寫後可取得更多\n搜尋次數\n\n--核心API--\n剩餘次數:$1\n重置時間:$2\n--搜尋API--\n剩餘次數:$3\n重置時間:$4",
     "github.token.error": "GitHub\ntoken 無效，請檢查你的 token 有\n效期限\n\n--核心API--\n剩餘次數:$1\n重置時間:$2\n--搜尋API--\n剩餘次數:$3\n重置時間:$4",
 
-    "github.settings.tokenEdit": "編輯 Token",
-    "github.settings.tokenSave": "儲存",
-    "github.settings.tokenClear": "清除",
+    "text.edit": "編輯",
     "github.settings.testToken": "驗證Token",
     "github.settings.testLatency": "測試延遲",
     "github.settings.tokenTitle": "Token",
+    "github.settings.tokenTips": "本啟動器於搜尋公開倉庫及取得發布列表時使用 Token，不涉及其他操作。\nToken 儲存採用簡易混淆方案，無法保證安全性，請勿設定高權限 Token。",
     "github.settings.tokenEmpty": "請輸入 Token",
     "github.settings.tokenChecking": "正在驗證...",
     "github.settings.tokenStatus.valid": "Token 有效",
@@ -69,7 +68,6 @@
     "github.settings.rateSearch": "搜尋 API",
     "github.settings.rateRemaining": "剩餘",
     "github.settings.rateReset": "重置時間",
-    "github.settings.userLoading": "載入中...",
     "github.settings.notLoggedIn": "未登入",
     "github.settings.latencyChecking": "正在測試延遲...",
     "github.settings.latencyResult": "延遲: $1ms",
@@ -81,5 +79,8 @@
     "text.cancel": "取消",
     "text.yes": "確定",
     "text.return": "返回",
-    "text.default": "預設"
+    "text.default": "預設",
+    "text.save": "儲存",
+    "text.clear": "清除",
+    "text.loading": "載入中..."
 }

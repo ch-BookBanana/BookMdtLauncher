@@ -53,12 +53,11 @@
     "github.token.none":  "GitHub\n未書符契，書之可得\n多搜檢之數\n\n--常道API--\n餘次:$1\n復時:$2\n--搜檢API--\n餘次:$3\n復時:$4",
     "github.token.error": "GitHub\n符契無驗，請察其期\n\n--常道API--\n餘次:$1\n復時:$2\n--搜檢API--\n餘次:$3\n復時:$4",
 
-    "github.settings.tokenEdit": "修符契",
-    "github.settings.tokenSave": "存之",
-    "github.settings.tokenClear": "清之",
+    "text.edit": "修",
     "github.settings.testToken": "驗符契",
     "github.settings.testLatency": "測遲速",
     "github.settings.tokenTitle": "符契",
+    "github.settings.tokenTips": "本器於搜檢公庫取發行表時用符契，無涉他務。\n符契儲存僅作簡易混淆，未足保安，勿賦高權。",
     "github.settings.tokenEmpty": "請入符契",
     "github.settings.tokenChecking": "驗證中...",
     "github.settings.tokenStatus.valid": "符契有效",
@@ -69,7 +68,6 @@
     "github.settings.rateSearch": "搜檢 API",
     "github.settings.rateRemaining": "所餘",
     "github.settings.rateReset": "復時",
-    "github.settings.userLoading": "載入中...",
     "github.settings.notLoggedIn": "未登",
     "github.settings.latencyChecking": "測遲速中...",
     "github.settings.latencyResult": "遲速: $1ms",
@@ -81,6 +79,9 @@
     "text.cancel": "罷",
     "text.yes": "諾",
     "text.return": "歸",
-    "text.default": "本設"
+    "text.default": "本設",
+    "text.save": "存之",
+    "text.clear": "清之",
+    "text.loading": "載入中..."
 }
 

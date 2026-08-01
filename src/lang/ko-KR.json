@@ -53,12 +53,11 @@
     "github.token.none":  "GitHub\n토큰이 설정되지 않았습니다. 설정하면\n더 많은 검색 횟수를 얻을 수 있습니다\n\n--코어 API--\n남은 횟수:$1\n리셋:$2\n--검색 API--\n남은 횟수:$3\n리셋:$4",
     "github.token.error": "GitHub\n유효하지 않은 토큰입니다. 토큰의\n유효 기간을 확인하세요\n\n--코어 API--\n남은 횟수:$1\n리셋:$2\n--검색 API--\n남은 횟수:$3\n리셋:$4",
 
-    "github.settings.tokenEdit": "토큰 편집",
-    "github.settings.tokenSave": "저장",
-    "github.settings.tokenClear": "삭제",
+    "text.edit": "편집",
     "github.settings.testToken": "토큰 확인",
     "github.settings.testLatency": "지연 테스트",
     "github.settings.tokenTitle": "토큰",
+    "github.settings.tokenTips": "이 런처는 공개 저장소 검색 및 릴리스 목록 조회 시에만 토큰을 사용합니다.\n토큰 저장은 간단한 난독화만 적용되어 안전하지 않습니다. 높은 권한의 토큰을 사용하지 마십시오.",
     "github.settings.tokenEmpty": "토큰을 입력하세요",
     "github.settings.tokenChecking": "확인 중...",
     "github.settings.tokenStatus.valid": "토큰 유효함",
@@ -69,7 +68,6 @@
     "github.settings.rateSearch": "검색 API",
     "github.settings.rateRemaining": "남음",
     "github.settings.rateReset": "리셋 시간",
-    "github.settings.userLoading": "로딩 중...",
     "github.settings.notLoggedIn": "로그인 안 됨",
     "github.settings.latencyChecking": "지연 테스트 중...",
     "github.settings.latencyResult": "지연: $1ms",
@@ -81,5 +79,8 @@
     "text.cancel": "취소",
     "text.yes": "확인",
     "text.return": "뒤로",
-    "text.default": "기본값"
+    "text.default": "기본값",
+    "text.save": "저장",
+    "text.clear": "삭제",
+    "text.loading": "로딩 중..."
 }

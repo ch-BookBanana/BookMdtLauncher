@@ -286,7 +286,12 @@ class Main():
             }
             self.settings["github"]["useful"] = True
         else:
-            self.settings["github"]["useful"] = False
+            # token 无效，清除所有 token 相关数据
+            self.githubAPI.setToken(None)
+            self.settings["github"]["token_enc"] = None
+            self.settings["github"]["token_key"] = None
+            self.settings["github"]["useful"] = None
+            self.settings["github"]["user"] = {"name": None, "headurl": None}
         self.saveSettings()
 
     def setTheme(self,theme):
@@ -540,7 +545,7 @@ class Main():
                     
 
                 def init_ui(self):
-                    self.setFixedSize(500,350)
+                    self.setFixedSize(520,365)
                     self.setAttribute(Qt.WA_StyledBackground, True)
 
                 def _on_rate_refreshed(self):
@@ -659,7 +664,7 @@ class Main():
 
 
                             self.l1w = QWidget()
-                            self.l1w.setFixedHeight(100)
+                            self.l1w.setFixedHeight(84)
                             self.layout.addWidget(self.l1w,0)
 
                             self.l1 = QHBoxLayout(self.l1w)
@@ -668,8 +673,8 @@ class Main():
 
                             self.headIcon = QLabel()
                             self.headIcon.setProperty("wid","png")
-                            self.headIcon.setFixedSize(100,100)
-                            self.headIcon.setStyleSheet("border-radius:50px;")
+                            self.headIcon.setFixedSize(84,84)
+                            self.headIcon.setStyleSheet("border-radius:42px;")
                             self.l1.addWidget(self.headIcon,0)
 
                             self.l1_l1w = QWidget()
@@ -682,16 +687,16 @@ class Main():
 
                             self.userName = QLabel("User-Name")
                             self.userName.setProperty("wid","text")
-                            self.userName.setStyleSheet("font-size: 25px;")
+                            self.userName.setStyleSheet("font-size: 22px;")
                             self.userName.setAlignment(Qt.AlignLeft)
-                            self.userName.setFixedHeight(28)
+                            self.userName.setFixedHeight(24)
                             self.l1_l1.addWidget(self.userName,0)
 
                             self.tokenStatus = QLabel("")
                             self.tokenStatus.setProperty("wid","title")
-                            self.tokenStatus.setStyleSheet("font-size: 12px;")
+                            self.tokenStatus.setStyleSheet("font-size: 11px;")
                             self.tokenStatus.setAlignment(Qt.AlignLeft)
-                            self.tokenStatus.setFixedHeight(16)
+                            self.tokenStatus.setFixedHeight(14)
                             self.l1_l1.addWidget(self.tokenStatus,0)
 
                             self.l1_l1_l1w = QWidget()
@@ -703,26 +708,54 @@ class Main():
 
                             self.coreBadge = QLabel()
                             self.coreBadge.setProperty("wid","badge")
-                            self.coreBadge.setFixedHeight(22)
+                            self.coreBadge.setFixedHeight(20)
                             self.l1_l1_l1.addWidget(self.coreBadge,0)
 
                             self.searchBadge = QLabel()
                             self.searchBadge.setProperty("wid","badge")
-                            self.searchBadge.setFixedHeight(22)
+                            self.searchBadge.setFixedHeight(20)
                             self.l1_l1_l1.addWidget(self.searchBadge,0)
 
                             self.l1_l1_l1.addStretch(1)
 
-                            self.layout.addSpacing(20)
+                            self.layout.addSpacing(14)
+
+                            self.tokenTips = QWidget()
+                            self.tokenTips.setStyleSheet(
+                                "QWidget#tokenTips{"
+                                "background-color: rgba(255, 255, 0, 50);"
+                                "border: 1px solid orange;"
+                                "border-radius: 4px;"
+                                "}"
+                            )
+                            self.tokenTips.setObjectName("tokenTips")
+                            tips_l = QHBoxLayout(self.tokenTips)
+                            tips_l.setContentsMargins(6, 5, 6, 5)
+                            tips_l.setSpacing(6)
+
+                            self.tokenTipsIcon = QLabel()
+                            self.tokenTipsIcon.setFixedSize(18, 18)
+                            self.tokenTipsIcon.setScaledContents(True)
+                            tips_l.addWidget(self.tokenTipsIcon, 0, Qt.AlignTop)
+
+                            self.tokenTipsText = QLabel()
+                            self.tokenTipsText.setProperty("wid", "title")
+                            self.tokenTipsText.setStyleSheet("font-size: 10px;")
+                            self.tokenTipsText.setWordWrap(True)
+                            tips_l.addWidget(self.tokenTipsText, 1)
+
+                            self.layout.addWidget(self.tokenTips, 0)
+
+                            self.layout.addSpacing(8)
 
                             self.tokenTitle = QLabel()
                             self.tokenTitle.setProperty("wid","text")
-                            self.tokenTitle.setStyleSheet("font-size: 14px;font-weight:bold;")
-                            self.tokenTitle.setFixedHeight(20)
+                            self.tokenTitle.setStyleSheet("font-size: 13px;font-weight:bold;")
+                            self.tokenTitle.setFixedHeight(18)
                             self.layout.addWidget(self.tokenTitle,0)
 
                             self.tokenStack = QStackedWidget()
-                            self.tokenStack.setFixedHeight(35)
+                            self.tokenStack.setFixedHeight(32)
                             self.layout.addWidget(self.tokenStack,0)
 
                             self.tokenInputW = QWidget()
@@ -732,18 +765,18 @@ class Main():
 
                             self.tokenInput = QLineEdit()
                             self.tokenInput.setProperty("wid","input")
-                            self.tokenInput.setFixedHeight(30)
+                            self.tokenInput.setFixedHeight(28)
                             self.tokenInputL.addWidget(self.tokenInput,1)
 
                             self.tokenSaveBtn = QPushButton()
                             self.tokenSaveBtn.setProperty("wid","btn")
-                            self.tokenSaveBtn.setFixedSize(60,30)
+                            self.tokenSaveBtn.setFixedSize(44,28)
                             self.tokenSaveBtn.clicked.connect(self._save_token)
                             self.tokenInputL.addWidget(self.tokenSaveBtn,0)
 
                             self.tokenCancelBtn = QPushButton()
                             self.tokenCancelBtn.setProperty("wid","btn")
-                            self.tokenCancelBtn.setFixedSize(60,30)
+                            self.tokenCancelBtn.setFixedSize(54,28)
                             self.tokenCancelBtn.clicked.connect(self._cancel_edit)
                             self.tokenCancelBtn.setVisible(False)
                             self.tokenInputL.addWidget(self.tokenCancelBtn,0)
@@ -757,19 +790,19 @@ class Main():
 
                             self.tokenMaskedLabel = QLabel()
                             self.tokenMaskedLabel.setProperty("wid","title")
-                            self.tokenMaskedLabel.setStyleSheet("font-size: 13px;")
-                            self.tokenMaskedLabel.setFixedHeight(30)
+                            self.tokenMaskedLabel.setStyleSheet("font-size: 12px;")
+                            self.tokenMaskedLabel.setFixedHeight(28)
                             self.tokenDisplayL.addWidget(self.tokenMaskedLabel,1)
 
                             self.tokenEditBtn = QPushButton()
                             self.tokenEditBtn.setProperty("wid","btn")
-                            self.tokenEditBtn.setFixedSize(60,30)
+                            self.tokenEditBtn.setFixedSize(60,28)
                             self.tokenEditBtn.clicked.connect(self._start_edit)
                             self.tokenDisplayL.addWidget(self.tokenEditBtn,0)
 
                             self.tokenClearBtn = QPushButton()
                             self.tokenClearBtn.setProperty("wid","btn")
-                            self.tokenClearBtn.setFixedSize(60,30)
+                            self.tokenClearBtn.setFixedSize(60,28)
                             self.tokenClearBtn.clicked.connect(self._clear_token)
                             self.tokenDisplayL.addWidget(self.tokenClearBtn,0)
 
@@ -777,8 +810,8 @@ class Main():
 
                             self.tokenMsg = QLabel()
                             self.tokenMsg.setProperty("wid","title")
-                            self.tokenMsg.setStyleSheet("font-size: 11px;")
-                            self.tokenMsg.setFixedHeight(16)
+                            self.tokenMsg.setStyleSheet("font-size: 10px;")
+                            self.tokenMsg.setFixedHeight(14)
                             self.layout.addWidget(self.tokenMsg,0)
 
                             self.tokenTestBtnW = QWidget()
@@ -788,25 +821,25 @@ class Main():
 
                             self.tokenTestBtn = QPushButton()
                             self.tokenTestBtn.setProperty("wid","btn")
-                            self.tokenTestBtn.setFixedSize(80,28)
+                            self.tokenTestBtn.setFixedSize(90,26)
                             self.tokenTestBtn.clicked.connect(self._test_token)
                             self.tokenTestBtnL.addWidget(self.tokenTestBtn,0)
 
                             self.tokenLatencyBtn = QPushButton()
                             self.tokenLatencyBtn.setProperty("wid","btn")
-                            self.tokenLatencyBtn.setFixedSize(80,28)
+                            self.tokenLatencyBtn.setFixedSize(90,26)
                             self.tokenLatencyBtn.clicked.connect(self._test_latency)
                             self.tokenTestBtnL.addWidget(self.tokenLatencyBtn,0)
 
                             self.tokenTestBtnL.addStretch(1)
                             self.layout.addWidget(self.tokenTestBtnW,0)
 
-                            self.layout.addSpacing(10)
+                            self.layout.addSpacing(8)
 
                             self.rateTitle = QLabel()
                             self.rateTitle.setProperty("wid","text")
-                            self.rateTitle.setStyleSheet("font-size: 14px;font-weight:bold;")
-                            self.rateTitle.setFixedHeight(20)
+                            self.rateTitle.setStyleSheet("font-size: 13px;font-weight:bold;")
+                            self.rateTitle.setFixedHeight(18)
                             self.layout.addWidget(self.rateTitle,0)
 
                             self.rateCoreW = QWidget()
@@ -816,14 +849,14 @@ class Main():
 
                             self.rateCoreLabel = QLabel()
                             self.rateCoreLabel.setProperty("wid","text")
-                            self.rateCoreLabel.setStyleSheet("font-size: 12px;")
-                            self.rateCoreLabel.setFixedHeight(20)
+                            self.rateCoreLabel.setStyleSheet("font-size: 11px;")
+                            self.rateCoreLabel.setFixedHeight(16)
                             self.rateCoreL.addWidget(self.rateCoreLabel,0)
 
                             self.rateCoreValue = QLabel()
                             self.rateCoreValue.setProperty("wid","title")
-                            self.rateCoreValue.setStyleSheet("font-size: 12px;")
-                            self.rateCoreValue.setFixedHeight(20)
+                            self.rateCoreValue.setStyleSheet("font-size: 11px;")
+                            self.rateCoreValue.setFixedHeight(16)
                             self.rateCoreL.addWidget(self.rateCoreValue,1)
 
                             self.layout.addWidget(self.rateCoreW,0)
@@ -835,14 +868,14 @@ class Main():
 
                             self.rateSearchLabel = QLabel()
                             self.rateSearchLabel.setProperty("wid","text")
-                            self.rateSearchLabel.setStyleSheet("font-size: 12px;")
-                            self.rateSearchLabel.setFixedHeight(20)
+                            self.rateSearchLabel.setStyleSheet("font-size: 11px;")
+                            self.rateSearchLabel.setFixedHeight(16)
                             self.rateSearchL.addWidget(self.rateSearchLabel,0)
 
                             self.rateSearchValue = QLabel()
                             self.rateSearchValue.setProperty("wid","title")
-                            self.rateSearchValue.setStyleSheet("font-size: 12px;")
-                            self.rateSearchValue.setFixedHeight(20)
+                            self.rateSearchValue.setStyleSheet("font-size: 11px;")
+                            self.rateSearchValue.setFixedHeight(16)
                             self.rateSearchL.addWidget(self.rateSearchValue,1)
 
                             self.layout.addWidget(self.rateSearchW,0)
@@ -850,11 +883,13 @@ class Main():
                             self.layout.addStretch(1)
 
                         def langing(self):
+                            self.tokenTipsIcon.setPixmap(change_color(getPath("src/assets/actions/tips.png"), QColor(255, 165, 0)).pixmap(QSize(18, 18)))
+                            self.tokenTipsText.setText(self.root.langer.get("github.settings.tokenTips"))
                             self.tokenTitle.setText(self.root.langer.get("github.settings.tokenTitle"))
-                            self.tokenSaveBtn.setText(self.root.langer.get("github.settings.tokenSave"))
+                            self.tokenSaveBtn.setText(self.root.langer.get("text.save"))
                             self.tokenCancelBtn.setText(self.root.langer.get("text.cancel"))
-                            self.tokenEditBtn.setText(self.root.langer.get("github.settings.tokenEdit"))
-                            self.tokenClearBtn.setText(self.root.langer.get("github.settings.tokenClear"))
+                            self.tokenEditBtn.setText(self.root.langer.get("text.edit"))
+                            self.tokenClearBtn.setText(self.root.langer.get("text.clear"))
                             self.tokenTestBtn.setText(self.root.langer.get("github.settings.testToken"))
                             self.tokenLatencyBtn.setText(self.root.langer.get("github.settings.testLatency"))
                             self.rateTitle.setText(self.root.langer.get("github.settings.rateTitle"))
@@ -880,19 +915,21 @@ class Main():
                             if name:
                                 self.userName.setText(name)
                                 self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
+                                if headurl:
+                                    self._load_avatar(headurl)
+                                else:
+                                    self.headIcon.clear()
                             elif self.root.settings["github"]["token_enc"] and self.root.settings["github"]["useful"] is False:
                                 self.userName.setText(self.root.langer.get("github.settings.notLoggedIn"))
                                 self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.invalid"))
+                                self.headIcon.clear()
                             elif self.root.settings["github"]["token_enc"]:
-                                self.userName.setText(self.root.langer.get("github.settings.userLoading"))
+                                self.userName.setText(self.root.langer.get("text.loading"))
                                 self.tokenStatus.setText("")
+                                self.headIcon.clear()
                             else:
                                 self.userName.setText(self.root.langer.get("github.settings.notLoggedIn"))
                                 self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.none"))
-
-                            if headurl:
-                                self._load_avatar(headurl)
-                            else:
                                 self.headIcon.clear()
 
                         def _load_avatar(self, url):
@@ -911,16 +948,16 @@ class Main():
                                 if not pix or pix.isNull():
                                     return
                                 size = min(pix.width(), pix.height())
-                                scaled = pix.scaled(94, 94, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                                round_pix = QPixmap(94, 94)
+                                scaled = pix.scaled(78, 78, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                                round_pix = QPixmap(78, 78)
                                 round_pix.fill(Qt.transparent)
                                 painter = QPainter(round_pix)
                                 painter.setRenderHint(QPainter.Antialiasing)
                                 path = QPainterPath()
-                                path.addEllipse(0, 0, 94, 94)
+                                path.addEllipse(0, 0, 78, 78)
                                 painter.setClipPath(path)
-                                offset_x = (94 - scaled.width()) // 2
-                                offset_y = (94 - scaled.height()) // 2
+                                offset_x = (78 - scaled.width()) // 2
+                                offset_y = (78 - scaled.height()) // 2
                                 painter.drawPixmap(offset_x, offset_y, scaled)
                                 painter.end()
                                 self.headIcon.setPixmap(round_pix)
@@ -1052,8 +1089,27 @@ class Main():
                                 self.tokenTestBtn.setEnabled(True)
                                 ok, data = result
                                 if ok:
+                                    rate = self.root.githubAPI.rate
+                                    self.root.settings["github"]["rate"]["core"] = {
+                                        "remaining": rate["core"]["remaining"],
+                                        "reset": rate["core"]["reset"]
+                                    }
+                                    self.root.settings["github"]["rate"]["search"] = {
+                                        "remaining": rate["search"]["remaining"],
+                                        "reset": rate["search"]["reset"]
+                                    }
+                                    self.root.settings["github"]["useful"] = True
+                                    self.root.saveSettings()
                                     self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
                                 else:
+                                    # token 无效，清除所有 token 相关数据
+                                    self.root.githubAPI.setToken(None)
+                                    self.root.settings["github"]["token_enc"] = None
+                                    self.root.settings["github"]["token_key"] = None
+                                    self.root.settings["github"]["useful"] = None
+                                    self.root.settings["github"]["user"] = {"name": None, "headurl": None}
+                                    self.root.saveSettings()
+                                    self._refresh_ui()
                                     self.tokenMsg.setText(
                                         f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
                                     )
@@ -2272,9 +2328,193 @@ class Main():
                     def __init__(self, parent=None, root=None, text=None, logo=None):
                         super().__init__(parent, root, text, logo)
 
+                    class Left(Leftw):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent, root)
+                            self.resize_(120)
+                            self.init_wid()
+
+                        def init_wid(self):
+                            self.layout = QVBoxLayout(self)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setSpacing(0)
+
+                            self.scroll = QScrollArea(self)
+                            self.scroll.setWidgetResizable(True)
+                            self.scroll.setFrameShape(QFrame.NoFrame)
+                            self.layout.addWidget(self.scroll)
+
+                            self.main = QWidget()
+                            self.scroll_layout = QVBoxLayout(self.main)
+                            self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+                            self.scroll_layout.setSpacing(0)
+                            self.scroll_layout.setAlignment(Qt.AlignTop)
+                            self.scroll.setWidget(self.main)
+                            self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+                            self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+
+                            self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                            self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                            self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                            self.bthGroup = QButtonGroup(self)
+
+                        def add_btn(self, text=None, icon=None):
+                            btn = self.Btns(text, icon, self, self.root)
+                            self.scroll_layout.addWidget(btn)
+                            self.bthGroup.addButton(btn)
+                            self.barShow()
+                            return btn
+
+                        def barShow(self):
+                            self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
+
+                        def resizeEvent(self, event):
+                            self.scroll_slider.setGeometry(self.scroll.width() - 5, 0, 5, self.scroll.height())
+                            self.barShow()
+                            super().resizeEvent(event)
+
+                        def showEvent(self, event):
+                            super().showEvent(event)
+                            self.barShow()
+
+                        class Btns(QPushButton):
+                            def __init__(self, text=None, icon=None, parent=None, root=None):
+                                super().__init__()
+                                self.parent = parent
+                                self.root = root
+                                self.text_ = text
+                                self.icon_ = icon
+                                self.init_ui()
+                                self.init_wid()
+
+                            def init_ui(self):
+                                self.setFixedSize(120, 30)
+                                self.setAttribute(Qt.WA_StyledBackground, False)
+                                self.setProperty("wid", "lbtn")
+                                self.setCheckable(True)
+
+                            def init_wid(self):
+                                self.layout = QHBoxLayout(self)
+                                self.layout.setContentsMargins(0, 0, 0, 0)
+                                self.layout.setSpacing(5)
+
+                                self.icon = QLabel()
+                                self.icon.setAttribute(Qt.WA_StyledBackground, False)
+                                self.icon.setFixedSize(30, 30)
+                                self.icon.setScaledContents(False)
+                                self.layout.addWidget(self.icon)
+                                self.icon.setAlignment(Qt.AlignCenter)
+
+                                self.text = QLabel()
+                                self.text.setAttribute(Qt.WA_StyledBackground, False)
+                                self.text.setFixedSize(90, 30)
+                                self.text.setProperty("wid", "lbtn")
+                                self.langing()
+                                self.layout.addWidget(self.text)
+
+                            def langing(self):
+                                if self.text_ is not None:
+                                    self.text.setText(self.root.langer.get(self.text_))
+                                    self.setToolTip(self.root.langer.get(self.text_))
+
+                            def lighting(self, light: bool):
+                                if self.icon_ is not None:
+                                    color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                                    logo = change_color(self.icon_, color)
+                                    pixmap = logo.pixmap(30, 30)
+
+                                    if not pixmap.isNull():
+                                        smooth_pixmap = pixmap.scaled(
+                                            22, 22,
+                                            Qt.KeepAspectRatio,
+                                            Qt.FastTransformation
+                                        )
+                                        self.icon.setPixmap(smooth_pixmap)
+                                    else:
+                                        self.root.logger.warning(f"Failed to load pixmap for {self.icon_}")
+
+                            def setText(self, _text):
+                                self.text_ = _text
+                                self.langing()
+
+                            def setIcon(self, _icon):
+                                self.icon_ = _icon
+                                self.lighting(self.root.settings["theme"])
+
+                    class Main(Mainw):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent)
+                            self.root = root
+                            self.init_wid()
+
+                        def init_wid(self):
+                            self.layout = QHBoxLayout(self)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setSpacing(0)
+                            self.layout.setAlignment(Qt.AlignLeft)
+
+                            self.line = QWidget()
+                            self.line.setProperty("wid", "line")
+                            self.line.setAttribute(Qt.WA_StyledBackground, True)
+                            self.line.setFixedWidth(1)
+                            self.layout.addWidget(self.line, 0)
+
+                            self.stack = QStackedWidget()
+                            self.layout.addWidget(self.stack, 1)
+
+                            self.pages_ = []
+                            self.btns_ = []
+
+
+                            self.game = self.add_page(self.Game,"wid.pages.download.game", "src/assets/nav/menu.png")
+
+                        def add_page(self, page_cls, text=None, icon=None):
+                            btn = self.parent.left.add_btn(text, icon)
+                            page_ = page_cls(self, self.root, text, icon)
+                            self.pages_.append(page_)
+                            self.btns_.append(btn)
+                            self.stack.addWidget(page_)
+                            page_.btn = btn
+                            btn.clicked.connect(lambda: self.stack.setCurrentWidget(page_))
+                            if len(self.btns_) == 1:
+                                btn.click()
+                            return page_
+
+                        class Game(QWidget):
+                            def __init__(self, parent=None, root=None, text=None, icon=None):
+                                super().__init__()
+                                self.parent = parent
+                                self.root = root
+                                self.text = text
+                                self.icon = icon
+                                self.init_wid()
+
+                            def init_wid(self):
+                                ...
+
+                #TODO: 游戏管理界面
                 class Game(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
                         super().__init__(parent, root, text, logo)
+
+                    class Main(Mainw):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__(parent, root)
+                            self.init_wid()
+
+                        def init_wid(self):
+                            self.layout = QVBoxLayout(self)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setSpacing(0)
+
+                            self.todoText = QLabel("UNFINISHED")
+                            self.todoText.setProperty("wid", "text")
+                            self.todoText.setAlignment(Qt.AlignCenter)
+                            self.todoText.setStyleSheet("font-size: 20px;")
+                            self.layout.addWidget(self.todoText,1)
+
 
                 class Setting(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
@@ -2495,7 +2735,7 @@ class Main():
                                     self.text_ = text
                                     self.intro_ = ""
                                     self.tips_ = ""
-                                    self.btnpix = [QPixmap()]*2
+                                    self.btnpix = [QPixmap(),QPixmap()]
                                     self.introable = False
                                     self.tipsable = False
                                     self.init_wid()
