@@ -249,7 +249,7 @@ class GithubAPI(QObject):
         except Exception:
             return False, None
 
-    def getRelease(self, repo, page=1):
+    def getRelease(self, repo, page=1,per_page=50):
         _tkn = self._get_token()
         url = f"https://api.github.com/repos/{repo}/releases"
         headers = {
@@ -259,7 +259,7 @@ class GithubAPI(QObject):
         try:
             params = {
                 "page": page,
-                "per_page": 50
+                "per_page": per_page
             }
 
             rest = requests.get(url, headers=headers, params=params)

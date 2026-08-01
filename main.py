@@ -2417,7 +2417,6 @@ class Main():
                             def langing(self):
                                 if self.text_ is not None:
                                     self.text.setText(self.root.langer.get(self.text_))
-                                    self.setToolTip(self.root.langer.get(self.text_))
 
                             def lighting(self, light: bool):
                                 if self.icon_ is not None:
@@ -2492,7 +2491,255 @@ class Main():
                                 self.init_wid()
 
                             def init_wid(self):
-                                ...
+                                self.layout = QVBoxLayout(self)
+                                self.layout.setContentsMargins(10, 10, 10, 10)
+                                self.layout.setSpacing(0)
+
+                                self.top = self.Top(self, self.root)
+                                self.layout.addWidget(self.top,0)
+
+                                self.line = QWidget()
+                                self.line.setFixedHeight(1)
+                                self.line.setProperty("wid", "line")
+                                self.line.setAttribute(Qt.WA_StyledBackground, True)
+                                self.layout.addWidget(self.line,0)
+
+                                self.main = self.Main(self, self.root)
+                                self.layout.addWidget(self.main, 1)
+                            
+                            class Top(QWidget):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.setFixedHeight(35)  # 30 按钮 + 5 底部横向滑块
+                                    self.init_wid()
+
+                                def init_wid(self):
+                                    self.layout = QHBoxLayout(self)
+                                    self.layout.setContentsMargins(0, 0, 0, 0)
+                                    self.layout.setSpacing(0)
+
+                                    self.scroll = self.HScrollArea(self)
+                                    self.scroll.setWidgetResizable(True)
+                                    self.scroll.setFrameShape(QFrame.NoFrame)
+                                    self.layout.addWidget(self.scroll)
+
+                                    self.main = QWidget()
+                                    self.scroll_layout = QHBoxLayout(self.main)
+                                    self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+                                    self.scroll_layout.setSpacing(0)
+                                    self.scroll_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+                                    self.scroll.setWidget(self.main)
+
+                                    # 自定义横向滚动条：浮在底部 5px，内容超宽才显示
+                                    self.scroll_slider = QScrollBar(Qt.Horizontal, self.scroll)
+                                    self.scroll_slider.valueChanged.connect(self.scroll.horizontalScrollBar().setValue)
+                                    self.scroll.horizontalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                                    self.scroll.horizontalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                                    self.bthGroup = QButtonGroup(self)
+
+                                def add_btn(self, text=None, icon=None, color=True):
+                                    btn = self.Btns(text, icon, self, self.root, color)
+                                    self.scroll_layout.addWidget(btn)
+                                    self.bthGroup.addButton(btn)
+                                    self.barShow()
+                                    return btn
+
+                                def barShow(self):
+                                    self.scroll_slider.setVisible(
+                                        self.scroll.horizontalScrollBar().maximum() > self.scroll.horizontalScrollBar().minimum()
+                                    )
+
+                                def resizeEvent(self, event):
+                                    self.scroll_slider.setGeometry(0, self.height() - 5, self.width(), 5)
+                                    self.barShow()
+                                    super().resizeEvent(event)
+
+                                def showEvent(self, event):
+                                    super().showEvent(event)
+                                    self.barShow()
+
+                                class HScrollArea(QScrollArea):
+                                    """横向滚动区域：隐藏原生滚动条，滚轮转为横向，空白处可拖拽"""
+                                    def __init__(self, parent=None):
+                                        super().__init__(parent)
+                                        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                        self._drag_pos = None
+                                        self.viewport().installEventFilter(self)
+
+                                    def wheelEvent(self, event):
+                                        delta = event.angleDelta().y()
+                                        if delta == 0:
+                                            delta = event.angleDelta().x()
+                                        bar = self.horizontalScrollBar()
+                                        bar.setValue(bar.value() - delta)
+                                        event.accept()
+
+                                    def eventFilter(self, obj, event):
+                                        if obj is self.viewport():
+                                            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                                                self._drag_pos = event.pos()
+                                            elif event.type() == QEvent.MouseMove and self._drag_pos is not None:
+                                                bar = self.horizontalScrollBar()
+                                                bar.setValue(bar.value() - (event.pos().x() - self._drag_pos.x()))
+                                                self._drag_pos = event.pos()
+                                                return True
+                                            elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                                                self._drag_pos = None
+                                        return super().eventFilter(obj, event)
+
+                                class Btns(QPushButton):
+                                    def __init__(self, text=None, icon=None, parent=None, root=None, color=True):
+                                        super().__init__()
+                                        self.parent = parent
+                                        self.root = root
+                                        self.text_ = text
+                                        self.icon_ = icon
+                                        self.colorable = color
+                                        self.init_ui()
+                                        self.init_wid()
+
+                                    def init_ui(self):
+                                        self.setFixedHeight(30)
+                                        self.setMinimumWidth(100)
+                                        self.setAttribute(Qt.WA_StyledBackground, False)
+                                        self.setProperty("wid", "lbtn")
+                                        self.setCheckable(True)
+
+                                    def init_wid(self):
+                                        self.layout = QHBoxLayout(self)
+                                        self.layout.setContentsMargins(5, 0, 5, 0)
+                                        self.layout.setSpacing(5)
+
+                                        self.icon = QLabel()
+                                        self.icon.setAttribute(Qt.WA_StyledBackground, False)
+                                        self.icon.setFixedSize(20, 20)
+                                        self.icon.setScaledContents(False)
+                                        self.layout.addWidget(self.icon)
+                                        self.icon.setAlignment(Qt.AlignCenter)
+
+                                        self.text = QLabel()
+                                        self.text.setAttribute(Qt.WA_StyledBackground, False)
+                                        self.text.setProperty("wid", "lbtn")
+                                        self.langing()
+                                        self.layout.addWidget(self.text)
+
+                                    def langing(self):
+                                        if self.text_ is not None:
+                                            self.text.setText(self.root.langer.get(self.text_))
+                                            self.setToolTip(self.root.langer.get(self.text_))
+
+                                    def lighting(self, light: bool):
+                                        if self.icon_ is not None:
+                                            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                                            logo = change_color(self.icon_, color) if self.colorable else QIcon(self.icon_)
+                                            pixmap = logo.pixmap(20, 20)
+
+                                            if not pixmap.isNull():
+                                                smooth_pixmap = pixmap.scaled(
+                                                    16, 16,
+                                                    Qt.KeepAspectRatio,
+                                                    Qt.FastTransformation
+                                                )
+                                                self.icon.setPixmap(smooth_pixmap)
+                                            else:
+                                                self.root.logger.warning(f"Failed to load pixmap for {self.icon_}")
+
+                                    def setText(self, _text):
+                                        self.text_ = _text
+                                        self.langing()
+
+                                    def setIcon(self, _icon):
+                                        self.icon_ = _icon
+                                        self.lighting(self.root.settings["theme"])
+
+                            class Main(QWidget):
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__()
+                                    self.parent = parent
+                                    self.root = root
+                                    self.init_wid()
+                                    self.btns_[0].click()
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(0, 0, 0, 0)
+                                    self.layout.setSpacing(0)
+                                    self.layout.setAlignment(Qt.AlignHCenter)
+
+                                    self.scroll = QScrollArea(self)
+                                    self.scroll.setStyleSheet("max-width: 600px;")
+                                    self.scroll.setWidgetResizable(True)
+                                    self.scroll.setFrameShape(QFrame.NoFrame)
+                                    self.layout.addWidget(self.scroll)
+
+                                    self.main = QWidget()
+                                    self.scroll_layout = QVBoxLayout(self.main)
+                                    self.scroll_layout.setContentsMargins(30, 0, 30, 0)
+                                    self.scroll_layout.setSpacing(0)
+                                    self.scroll_layout.setAlignment(Qt.AlignTop)
+                                    self.scroll.setWidget(self.main)
+                                    self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+                                    self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+                                    self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                                    self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                                    self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                                    self.stack = QStackedWidget()
+                                    self.scroll_layout.addWidget(self.stack)
+
+                                    self.pages_ = []
+                                    self.btns_ = []
+
+                                    self.add_page(self.Origin, "wid.pages.download.origin","src/assets/icons/mdt/mdt.png" ,color=False)
+
+                                def add_page(self, page_cls, text=None, icon=None, color=True):
+                                    btn = self.parent.top.add_btn(text, icon, color=color)
+                                    page_ = page_cls(self, self.root, text, icon)
+                                    self.pages_.append(page_)
+                                    self.btns_.append(btn)
+                                    self.stack.addWidget(page_)
+                                    page_.btn = btn
+                                    btn.clicked.connect(lambda: self.stack.setCurrentWidget(page_))
+                                    if len(self.btns_) == 1:
+                                        btn.click()
+                                    return page_
+
+                                def barShow(self):
+                                    self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
+
+                                def resizeEvent(self, event):
+                                    self.scroll_slider.setGeometry(self.scroll.width() - 5, 0, 5, self.scroll.height())
+                                    self.barShow()
+                                    super().resizeEvent(event)
+
+                                def showEvent(self, event):
+                                    super().showEvent(event)
+                                    self.barShow()
+
+                                class Template(QWidget):
+                                    def __init__(self, parent=None, root=None, text=None, icon=None):
+                                        super().__init__()
+                                        self.parent = parent
+                                        self.root = root
+                                        self.text = text
+                                        self.icon = icon
+                                        self.init_wid()
+
+                                    def init_wid(self):
+                                        self.layout = QVBoxLayout(self)
+                                        self.layout.setContentsMargins(0, 0, 0, 0)
+                                        self.layout.setSpacing(0)
+
+
+                                class Origin(Template):
+                                    def __init__(self, parent=None, root=None, text=None, icon=None):
+                                        super().__init__(parent, root, text, icon)
+
 
                 #TODO: 游戏管理界面
                 class Game(Page):
