@@ -3288,6 +3288,12 @@ class Main():
                                             for a in assets_raw
                                             if a.get("name") and a.get("browser_download_url")
                                         }
+                                        # 如果没有任何可下载的编译包（早期 release），则跳过该 release（不显示、不缓存）
+                                        if not assets:
+                                            return {
+                                                "class": None,
+                                                "name": None,
+                                            }
                                         m = re.search(r'v?([\d.]+)\s+Build\s+([\d.]+)', name_raw)
                                         return {
                                             "class": "v" + str(int(float(m.group(1)))) if m else None,
