@@ -73,6 +73,7 @@ from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, Qt
 
 _qthtimer_thread = None
 _active_timers = set()
+_dedicated_threads = set()
 
 
 def _get_qthtimer_thread():
@@ -208,12 +209,19 @@ class QThTimer(QObject):
     _request_single_shot = pyqtSignal(bool)
     _request_job = pyqtSignal(object)
 
-    def __init__(self, interval=0, parent=None):
+    def __init__(self, interval=0, parent=None, dedicated=False):
         super().__init__(parent)
         self._interval = int(interval)
         self._single_shot = False
         self._job = None
-        self._thread = _get_qthtimer_thread()
+        self._dedicated = dedicated
+        if dedicated:
+            self._thread = QThread()
+            self._thread.setObjectName("QThTimerDedicated")
+            self._thread.start()
+            _dedicated_threads.add(self._thread)
+        else:
+            self._thread = _get_qthtimer_thread()
         self._worker = _QThTimerWorker(self._interval, self._single_shot, self._job)
         self._worker.moveToThread(self._thread)
         # 注册实例，便于全局管理与销毁
@@ -288,6 +296,19 @@ class QThTimer(QObject):
             except Exception:
                 pass
 
+        # 专用线程：退出并等待
+        if self._dedicated and self._thread is not None:
+            thr = self._thread
+            self._thread = None
+            _dedicated_threads.discard(thr)
+            try:
+                thr.quit()
+                if not thr.wait(5000):
+                    thr.terminate()
+                    thr.wait(1000)
+            except Exception:
+                pass
+
         try:
             if getattr(self, '_parent_obj', None) is not None:
                 self._parent_obj.destroyed.disconnect(self.destroy)
@@ -332,7 +353,7 @@ class QThTimer(QObject):
         return timer
 
     @classmethod
-    def task(cls, job, events=None, result_callback=None, interval=0):
+    def task(cls, job, events=None, result_callback=None, interval=0, dedicated=False):
         """
         在子线程执行 `job(event)`（事件模式）。
 
@@ -345,6 +366,7 @@ class QThTimer(QObject):
             仅支持回调列表或单个回调，不支持元组或名称对。
           - result_callback：可选，job 返回值的回调（在主线程中调用）。
           - interval：延迟毫秒（0 表示立即）。
+          - dedicated：True 时使用独立线程（适合 >1s 长任务），避免阻塞共享线程队列。
 
         返回：已启动的 `QThTimer` 实例。
         """
@@ -385,7 +407,7 @@ class QThTimer(QObject):
             except Exception as e:
                 return e
 
-        timer = cls(interval)
+        timer = cls(interval, dedicated=dedicated)
         timer._event = event
         timer.setJob(_wrapped_job)
         if result_callback is not None:
@@ -396,7 +418,7 @@ class QThTimer(QObject):
 
 
     @classmethod
-    def taskP(cls, interval, job, events=None, result_callback=None):
+    def taskP(cls, interval, job, events=None, result_callback=None, dedicated=False):
         """
         周期性后台任务，每隔 `interval` 毫秒在子线程执行一次 `job(event)`。
 
@@ -406,6 +428,7 @@ class QThTimer(QObject):
           - interval: 周期（毫秒）。
           - events: 可选，接收 job 中 emit 的回调（主线程执行）。
           - result_callback: 可选，每次 job 返回值的回调（主线程执行）。
+          - dedicated：True 时使用独立线程（适合 >1s 长任务），避免阻塞共享线程队列。
 
         返回：已启动的 QThTimer 实例。
         用法：返回值的 destroy() 可停止该周期性任务。
@@ -446,7 +469,7 @@ class QThTimer(QObject):
             except Exception as e:
                 return e
 
-        timer = cls(interval)
+        timer = cls(interval, dedicated=dedicated)
         timer._event = event
         timer.setJob(_wrapped_job)
         timer.setSingleShot(False)
@@ -457,10 +480,19 @@ class QThTimer(QObject):
 
 
 def shutdown():
-    """销毁所有活动计时器并关闭共享子线程。"""
+    """销毁所有活动计时器并关闭共享/专用子线程。"""
     for t in list(_active_timers):
         try:
             t.destroy()
         except Exception:
             pass
+    for thr in list(_dedicated_threads):
+        try:
+            thr.quit()
+            if not thr.wait(3000):
+                thr.terminate()
+                thr.wait(1000)
+        except Exception:
+            pass
+    _dedicated_threads.clear()
     _shutdown_qthtimer_thread()

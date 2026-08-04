@@ -27,6 +27,9 @@ class GithubAPI(QObject):
         super().__init__()
         self._encrypted_token = None
         self._key = None
+        self._checking = False
+        self._session = requests.Session()
+        self._session.trust_env = True  # honor system proxy (VPN/accelerator)
         self.setToken(token)
         self.default_rate = {
             "core":   {"remaining": None, "reset": [], "reset_ts": 0},
@@ -116,11 +119,15 @@ class GithubAPI(QObject):
         """加密存储 token，内存中仅保留密文。"""
         self._encrypted_token, self._key = self._encrypt(token_)
 
+    def hasToken(self):
+        """是否已设置 token。"""
+        return self._encrypted_token is not None
+
     def checkConnection(self):
         """测试到 GitHub 的网络延迟（不消耗 API 次数）。"""
         try:
             start = time.perf_counter()
-            resp = requests.get(
+            resp = self._session.get(
                 "https://github.com/",
                 timeout=5
             )
@@ -141,18 +148,29 @@ class GithubAPI(QObject):
             return -99
 
     def checkToken(self, token_=None):
-        """使用 rate_limit 端点轻量检测 token 有效性。"""
+        """使用 rate_limit 端点轻量检测 token 有效性。
+        Returns: (ok, error_type, data)
+          ok=True,  error_type=None:    token 有效，data 为 response body
+          ok=False, error_type="auth":  认证失败 (401/403)，应清除 token
+          ok=False, error_type="network": 网络不通，保留 token 等待重试
+          ok=False, error_type="http":   非预期 HTTP 状态码
+          ok=False, error_type="busy":   已有检查在进行中
+          ok=False, error_type="empty":  未设置 token
+        """
+        if self._checking:
+            return False, "busy", "A check is already in progress"
         if token_ is None:
             if self._encrypted_token is None:
-                return False, "No token set"
+                return False, "empty", "No token set"
             token_ = self._get_token()
-        url = "https://api.github.com/rate_limit"
-        headers = {
-            "Authorization": f"token {token_}",
-            "Accept": "application/vnd.github.v3+json",
-        }
+        self._checking = True
         try:
-            rest = requests.get(url, headers=headers, timeout=10)
+            url = "https://api.github.com/rate_limit"
+            headers = {
+                "Authorization": f"token {token_}",
+                "Accept": "application/vnd.github.v3+json",
+            }
+            rest = self._session.get(url, headers=headers, timeout=10)
             if rest.status_code == 200:
                 self._refresh(rest)
                 # /rate_limit body 同时含 core + search，补全 header 拿不到的
@@ -171,17 +189,21 @@ class GithubAPI(QObject):
                                 entry["reset"] = [lt.tm_year, lt.tm_mon, lt.tm_mday,
                                                   lt.tm_hour, lt.tm_min, lt.tm_sec]
                 self.refreshed.emit()
-                return True, body
+                return True, None, body
             elif rest.status_code == 401:
-                return False, "Invalid token"
+                return False, "auth", "Invalid token"
             elif rest.status_code == 403:
-                return False, "Token refused"
+                return False, "auth", "Token refused"
             else:
-                return False, rest.status_code
+                return False, "http", rest.status_code
         except requests.ConnectionError:
-            return False, "ConnectionError"
+            return False, "network", "ConnectionError"
+        except requests.Timeout:
+            return False, "network", "Timeout"
         except Exception as e:
-            return False, e
+            return False, "unknown", str(e)
+        finally:
+            self._checking = False
 
     def getUser(self):
         """获取当前已认证用户信息。"""
@@ -194,7 +216,7 @@ class GithubAPI(QObject):
             "Accept": "application/vnd.github.v3+json",
         }
         try:
-            rest = requests.get(url, headers=headers, timeout=10)
+            rest = self._session.get(url, headers=headers, timeout=10)
             if rest.status_code == 200:
                 self._refresh(rest)
                 return True, {"body": rest.json(), "head": rest.headers}
@@ -211,10 +233,9 @@ class GithubAPI(QObject):
 
     def search(self, query, page=1):
         _tkn = self._get_token()
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "Authorization": f"token {_tkn}"
-        }
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if _tkn:
+            headers["Authorization"] = f"token {_tkn}"
         _tkn = None
         url = "https://api.github.com/search/repositories"
         try:
@@ -226,7 +247,7 @@ class GithubAPI(QObject):
                 "order": "desc"
             }
 
-            rest = requests.get(url, headers=headers, params=params)
+            rest = self._session.get(url, headers=headers, params=params, timeout=30)
             self._refresh(rest)
             return True, rest.json()
         except Exception:
@@ -235,12 +256,12 @@ class GithubAPI(QObject):
     def getRepo(self, repo):
         _tkn = self._get_token()
         url = f"https://api.github.com/repos/{repo}"
-        headers = {
-            "Authorization": f"token {_tkn}"
-        }
+        headers = {}
+        if _tkn:
+            headers["Authorization"] = f"token {_tkn}"
         _tkn = None
         try:
-            rest = requests.get(url, headers=headers)
+            rest = self._session.get(url, headers=headers, timeout=30)
             self._refresh(rest)
             if rest.status_code == 200:
                 return True, rest.json()
@@ -252,9 +273,9 @@ class GithubAPI(QObject):
     def getRelease(self, repo, page=1,per_page=50):
         _tkn = self._get_token()
         url = f"https://api.github.com/repos/{repo}/releases"
-        headers = {
-            "Authorization": f"token {_tkn}"
-        }
+        headers = {}
+        if _tkn:
+            headers["Authorization"] = f"token {_tkn}"
         _tkn = None
         try:
             params = {
@@ -262,7 +283,7 @@ class GithubAPI(QObject):
                 "per_page": per_page
             }
 
-            rest = requests.get(url, headers=headers, params=params)
+            rest = self._session.get(url, headers=headers, params=params, timeout=30)
             self._refresh(rest)
             if rest.status_code == 200:
                 return True, rest.json()

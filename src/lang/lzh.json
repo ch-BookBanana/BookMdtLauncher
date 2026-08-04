@@ -33,6 +33,16 @@
     "wid.pages.start.gamebtn": "擇戲",
 
     "wid.pages.download": "納戲",
+
+    "wid.pages.download.origin": "原版",
+    "wid.pages.download.origin.search": "增搜",
+    "wid.pages.download.origin.searchAll": "盡搜",
+    "wid.pages.download.mindustryx": "MindustryX",
+    "wid.pages.download.mindustryx.search": "增搜",
+    "wid.pages.download.mindustryx.searchAll": "盡搜",
+    "wid.pages.download.alpha": "Alpha",
+    "wid.pages.download.beta": "Beta",
+
     "wid.pages.game": "藏戲",
     "wid.pages.setting": "機杼",
     "wid.pages.setting.launcher": "啟闔之器",

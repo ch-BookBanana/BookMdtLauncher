@@ -91,6 +91,8 @@ if sys.platform == "win32":
 _TASK_REGISTRY = {}          # {task_id: QDownloader实例}
 _REGISTRY_LOCK = Lock()
 
+TMP_PATH = os.path.join(os.getcwd(), "BML", ".tmp", "QDownloader")
+
 def get_active_task(task_id):
     with _REGISTRY_LOCK:
         return _TASK_REGISTRY.get(task_id)
@@ -166,7 +168,7 @@ class QDownloader(QObject):
         if not self.dest_path:
             return
         self.task_id = hashlib.md5(self.dest_path.encode()).hexdigest()
-        self.temp_root = os.path.join(os.getcwd(), "BML", ".tmp", "Download", self.task_id)
+        self.temp_root = os.path.join(TMP_PATH, self.task_id)
         self.temp_dir = self.temp_root
         self.state_file = os.path.join(self.temp_root, "state.json")
         self.merged_temp = os.path.join(self.temp_root, os.path.basename(self.dest_path))
@@ -465,7 +467,7 @@ class QDownloader(QObject):
                         completed_blocks, done_bytes, progress_percent, state_file}}
         """
         pending = {}
-        temp_root_dir = os.path.join(os.getcwd(), "BML", ".tmp", "Download")
+        temp_root_dir = TMP_PATH
         if not os.path.exists(temp_root_dir):
             return pending
 
@@ -514,7 +516,7 @@ class QDownloader(QObject):
         if get_active_task(task_id):
             raise RuntimeError(f"任务 {task_id} 已在运行中，无法重复接管")
 
-        temp_root = os.path.join(os.getcwd(), "BML", ".tmp", "Download", task_id)
+        temp_root = os.path.join(TMP_PATH, task_id)
         state_file = os.path.join(temp_root, "state.json")
         if not os.path.exists(state_file):
             raise FileNotFoundError(f"未找到任务 {task_id} 的状态文件")
@@ -548,7 +550,7 @@ class QDownloader(QObject):
         pending = cls.get_pending_tasks()
         count = 0
         for task_id in pending.keys():
-            task_dir = os.path.join(os.getcwd(), "BML", ".tmp", "Download", task_id)
+            task_dir = os.path.join(TMP_PATH, task_id)
             try:
                 shutil.rmtree(task_dir, ignore_errors=True)
                 count += 1

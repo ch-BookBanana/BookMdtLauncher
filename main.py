@@ -28,8 +28,10 @@ init = {
 
 
 from PyQt5.Qt import *
-import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re
+import requests
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import ctypes
 import ctypes.wintypes
 from src.utils.path_utils import getPath
@@ -215,7 +217,8 @@ class Main():
             )
 
 
-        self.signals.register("gameRenovated")
+        self.signals.register("tokenVerified", pyqtSignal(bool, str, object))
+        self.signals.register("gameRenovated", pyqtSignal())
         QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
         QThTimer.task(self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
 
@@ -273,26 +276,22 @@ class Main():
         )
 
     def _on_startup_rate_check(self, result):
-        ok, data = result
+        ok, error_type, data = result
         if ok:
             rate = self.githubAPI.rate
-            self.settings["github"]["rate"]["core"] = {
-                "remaining": rate["core"]["remaining"],
-                "reset": rate["core"]["reset"]
-            }
-            self.settings["github"]["rate"]["search"] = {
-                "remaining": rate["search"]["remaining"],
-                "reset": rate["search"]["reset"]
-            }
-            self.settings["github"]["useful"] = True
-        else:
-            # token 无效，清除所有 token 相关数据
+            s = self.settings["github"]
+            s["rate"]["core"] = {"remaining": rate["core"]["remaining"], "reset": rate["core"]["reset"]}
+            s["rate"]["search"] = {"remaining": rate["search"]["remaining"], "reset": rate["search"]["reset"]}
+            s["useful"] = True
+        elif error_type == "auth":
             self.githubAPI.setToken(None)
-            self.settings["github"]["token_enc"] = None
-            self.settings["github"]["token_key"] = None
-            self.settings["github"]["useful"] = None
-            self.settings["github"]["user"] = {"name": None, "headurl": None}
+            s = self.settings["github"]
+            s["token_enc"] = None
+            s["token_key"] = None
+            s["useful"] = None
+            s["user"] = {"name": None, "headurl": None}
         self.saveSettings()
+        self.signals.emit("tokenVerified", ok, error_type, data)
 
     def setTheme(self,theme):
         self.settings["theme"] = 1 if theme else 0
@@ -530,10 +529,42 @@ class Main():
                 self.l.setSpacing(0)
                 self.l.setAlignment(Qt.AlignCenter)
 
-                self.main = self.Main(self, self.root)
-                self.l.addWidget(self.main,0)
+                self.panel = self.Panel(self, self.root)
+                self.l.addWidget(self.panel,0)
 
-            class Main(QWidget):
+            def _sync_rate_from_api(self):
+                """将 GithubAPI 中的实时 rate 同步到 settings 内存（不写盘）。"""
+                rate = self.root.githubAPI.rate
+                s = self.root.settings["github"]
+                s["rate"]["core"] = {
+                    "remaining": rate["core"]["remaining"],
+                    "reset": rate["core"]["reset"]
+                }
+                s["rate"]["search"] = {
+                    "remaining": rate["search"]["remaining"],
+                    "reset": rate["search"]["reset"]
+                }
+
+            def _clear_token_data(self):
+                """清除 settings 中所有 token 相关数据（仅当 token 确认无效时调用）。"""
+                self.root.githubAPI.setToken(None)
+                s = self.root.settings["github"]
+                s["token_enc"] = None
+                s["token_key"] = None
+                s["useful"] = None
+                s["user"] = {"name": None, "headurl": None}
+
+            def _debounce_save_settings(self):
+                """延迟 500ms 写盘，合并高频写入。"""
+                if hasattr(self, '_save_timer'):
+                    self._save_timer.stop()
+                else:
+                    self._save_timer = QTimer(self)
+                    self._save_timer.setSingleShot(True)
+                    self._save_timer.timeout.connect(self.root.saveSettings)
+                self._save_timer.start(500)
+
+            class Panel(QWidget):
                 def __init__(self, parent=None, root=None):
                     super().__init__()
                     self.parent = parent
@@ -549,17 +580,9 @@ class Main():
                     self.setAttribute(Qt.WA_StyledBackground, True)
 
                 def _on_rate_refreshed(self):
-                    rate = self.githubAPI.rate
-                    self.root.settings["github"]["rate"]["core"] = {
-                        "remaining": rate["core"]["remaining"],
-                        "reset": rate["core"]["reset"]
-                    }
-                    self.root.settings["github"]["rate"]["search"] = {
-                        "remaining": rate["search"]["remaining"],
-                        "reset": rate["search"]["reset"]
-                    }
+                    self.parent._sync_rate_from_api()
                     if self.isVisible():
-                        self.main.main._update_rate_section()
+                        self.body.content._update_rate_section()
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -575,8 +598,8 @@ class Main():
                     self.line.setProperty("wid","line")
                     self.layout.addWidget(self.line,0)
 
-                    self.main = self.Main(self, self.root)
-                    self.layout.addWidget(self.main,1)
+                    self.body = self.Body(self, self.root)
+                    self.layout.addWidget(self.body,1)
 
 
                 class Top(QWidget):
@@ -627,7 +650,7 @@ class Main():
 
                             self.setIcon(icon)
 
-                class Main(QWidget):
+                class Body(QWidget):
                     def __init__(self, parent=None, root=None):
                         super().__init__(parent)
                         self.parent = parent
@@ -644,14 +667,15 @@ class Main():
                         self.scroll.setFrameShape(QFrame.NoFrame)
                         self.layout.addWidget(self.scroll)
 
-                        self.main = self.Main(self, self.root)
-                        self.scroll.setWidget(self.main)
+                        self.content = self.Content(self, self.root)
+                        self.scroll.setWidget(self.content)
 
-                    class Main(QWidget):
+                    class Content(QWidget):
                         def __init__(self, parent=None, root=None):
                             super().__init__(parent)
                             self.parent = parent
                             self.root = root
+                            self._gs = parent.parent.parent
                             self._editing = False
                             self.init_wid()
                             self.langing()
@@ -666,8 +690,8 @@ class Main():
                             self.l1w = QWidget()
                             self.l1w.setFixedHeight(84)
                             self.layout.addWidget(self.l1w,0)
-
-                            self.l1 = QHBoxLayout(self.l1w)
+                            
+                            self.l1 =QHBoxLayout(self.l1w)
                             self.l1.setContentsMargins(0, 0, 0, 0)
                             self.l1.setSpacing(0)
 
@@ -1041,28 +1065,26 @@ class Main():
                             self.tokenMsg.setText(self.root.langer.get("github.settings.tokenChecking"))
 
                             def _on_checked(result):
-                                ok, data = result
+                                ok, error_type, data = result
                                 self.tokenSaveBtn.setEnabled(True)
                                 if ok:
+                                    self._gs._sync_rate_from_api()
                                     self.root.settings["github"]["useful"] = True
-                                    rate = self.root.githubAPI.rate
-                                    self.root.settings["github"]["rate"]["core"] = {
-                                        "remaining": rate["core"]["remaining"],
-                                        "reset": rate["core"]["reset"]
-                                    }
-                                    self.root.settings["github"]["rate"]["search"] = {
-                                        "remaining": rate["search"]["remaining"],
-                                        "reset": rate["search"]["reset"]
-                                    }
                                     self.root.saveSettings()
                                     self._editing = False
                                     self._refresh_ui()
                                     self._fetch_user()
-                                else:
+                                elif error_type == "auth":
                                     self.root.settings["github"]["useful"] = False
                                     self.tokenMsg.setText(
                                         f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
                                     )
+                                elif error_type == "network":
+                                    self.tokenMsg.setText(
+                                        f"{self.root.langer.get('github.settings.latencyConnError')}，{self.root.langer.get('github.settings.tokenChecking')}"
+                                    )
+                                else:
+                                    self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
 
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.checkToken(),
@@ -1070,11 +1092,7 @@ class Main():
                             )
 
                         def _clear_token(self):
-                            self.root.githubAPI.setToken(None)
-                            self.root.settings["github"]["token_enc"] = None
-                            self.root.settings["github"]["token_key"] = None
-                            self.root.settings["github"]["useful"] = None
-                            self.root.settings["github"]["user"] = {"name": None, "headurl": None}
+                            self._gs._clear_token_data()
                             self.root.saveSettings()
                             self._editing = False
                             self._refresh_ui()
@@ -1087,32 +1105,25 @@ class Main():
                             self.tokenMsg.setText(self.root.langer.get("github.settings.tokenChecking"))
                             def _done(result):
                                 self.tokenTestBtn.setEnabled(True)
-                                ok, data = result
+                                ok, error_type, data = result
                                 if ok:
-                                    rate = self.root.githubAPI.rate
-                                    self.root.settings["github"]["rate"]["core"] = {
-                                        "remaining": rate["core"]["remaining"],
-                                        "reset": rate["core"]["reset"]
-                                    }
-                                    self.root.settings["github"]["rate"]["search"] = {
-                                        "remaining": rate["search"]["remaining"],
-                                        "reset": rate["search"]["reset"]
-                                    }
+                                    self._gs._sync_rate_from_api()
                                     self.root.settings["github"]["useful"] = True
-                                    self.root.saveSettings()
                                     self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
-                                else:
-                                    # token 无效，清除所有 token 相关数据
-                                    self.root.githubAPI.setToken(None)
-                                    self.root.settings["github"]["token_enc"] = None
-                                    self.root.settings["github"]["token_key"] = None
-                                    self.root.settings["github"]["useful"] = None
-                                    self.root.settings["github"]["user"] = {"name": None, "headurl": None}
+                                    self._refresh_ui()
+                                elif error_type == "auth":
+                                    # 仅明确的认证失败才清除 token
+                                    self._gs._clear_token_data()
                                     self.root.saveSettings()
                                     self._refresh_ui()
                                     self.tokenMsg.setText(
                                         f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
                                     )
+                                elif error_type == "network":
+                                    # 网络不通，保留 token
+                                    self.tokenMsg.setText(self.root.langer.get("github.settings.latencyConnError"))
+                                else:
+                                    self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.checkToken(),
                                 result_callback=_done
@@ -1134,6 +1145,8 @@ class Main():
                                     self.tokenMsg.setText(self.root.langer.get("github.settings.latencyTimeout"))
                                 elif latency == -3:
                                     self.tokenMsg.setText(self.root.langer.get("github.settings.latencyConnError"))
+                                elif latency == -4:
+                                    self.tokenMsg.setText("SSL 连接错误")
                                 else:
                                     self.tokenMsg.setText(
                                         self.root.langer.get("github.settings.latencyError").replace("$1", str(latency))
@@ -1153,6 +1166,10 @@ class Main():
                                         "headurl": body.get("avatar_url")
                                     }
                                     self.root.saveSettings()
+                                    self._refresh_ui()
+                                else:
+                                    # 获取用户信息失败，但不影响 token 有效性
+                                    self.root.settings["github"]["user"] = {"name": None, "headurl": None}
                                     self._refresh_ui()
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.getUser(),
@@ -1531,9 +1548,11 @@ class Main():
                         super().__init__()
                         self.parent = parent
                         self.root = root
+                        self._hover_pending = False
                         self.init_ui()
                         self.clicked.connect(lambda: self.root.window.githubSetting.show())
-                        self.root.githubAPI.refreshed.connect(lambda:self.enterEvent(None))
+                        # refreshed 仅更新 tooltip，不触发后台请求
+                        self.root.githubAPI.refreshed.connect(self._update_tooltip)
 
                     def init_ui(self):
                         self.setFixedSize(28, 28)
@@ -1544,10 +1563,9 @@ class Main():
                         self.setIcon(QIcon(change_color(getPath("src/assets/brands/github.png"),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
                         self.setIconSize(QSize(28, 28))
 
-                    def enterEvent(self, event):
-                        super().enterEvent(event)
+                    def _update_tooltip(self):
+                        """仅更新 tooltip 文本，不触发网络请求。"""
                         token = self.root.settings["github"]["token_enc"]
-                        # 优先用实时 rate，缺失则回退 settings
                         live_rate = self.root.githubAPI.rate
                         rate = self.root.settings["github"]["rate"]
 
@@ -1576,14 +1594,6 @@ class Main():
                             rate["search"] if rate["search"].get("reset") else live_rate["search"]
                         )
 
-                        # 如果 live 也没有数据且有 token，触发 checkToken 获取
-                        if token is not None and (
-                            core_rem is None or search_rem is None
-                        ):
-                            QThTimer.task(
-                                self.root.githubAPI.checkToken
-                            )
-
                         if token is None:
                             key = "github.token.none"
                         elif self.root.settings["github"]["useful"] is False:
@@ -1593,12 +1603,30 @@ class Main():
 
                         # t() 内部 reversed(args)，所以传参也反向：
                         #   $1=剩余次数 $2=刷新时间 $3=剩余次数 $4=刷新时间
-                        #   需要 reversed 后得到 core_rem, core_reset, search_rem, search_reset
-                        #   故传入: search_reset, search_rem, core_reset, core_rem
                         self.setToolTip(str(t(
                             self.root.langer.get(key),
                             search_reset, search_rem, core_reset, core_rem
                         )))
+
+                    def _maybe_fetch_rate(self):
+                        """hover 时数据缺失才触发一次 checkToken（防抖 2s）。"""
+                        if self._hover_pending:
+                            return
+                        live = self.root.githubAPI.rate
+                        core_rem = live["core"].get("remaining")
+                        search_rem = live["search"].get("remaining")
+                        if core_rem is not None and search_rem is not None:
+                            return
+                        self._hover_pending = True
+                        QThTimer.task(self.root.githubAPI.checkToken)
+                        # 2 秒后允许下次 hover 触发
+                        QTimer.singleShot(2000, lambda: setattr(self, '_hover_pending', False))
+
+                    def enterEvent(self, event):
+                        super().enterEvent(event)
+                        self._update_tooltip()
+                        if self.root.settings["github"]["token_enc"] is not None:
+                            self._maybe_fetch_rate()
 
 
                 class TriBtn(QPushButton):
@@ -1726,7 +1754,7 @@ class Main():
 
                 class Start(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
-                        root.signals.register("start_gameChanged")
+                        root.signals.register("start_gameChanged", pyqtSignal(object))
                         super().__init__(parent, root, text, logo)
                         QThTimer.taskP(1000, self.left.changeTimer, [self.left.sets])
                         QThTimer.task(self.left.changeTimer, [self.left.sets], None ,0)
@@ -1952,12 +1980,6 @@ class Main():
                             class Suspend(Pages):
                                 def __init__(self, parent=None, root=None):
                                     super().__init__(parent,root)
-
-
-
-                            
-
-
 
                     class Main(Mainw):
                         def __init__(self,parent=None,root=None):
@@ -2670,32 +2692,15 @@ class Main():
                                     self.layout.setSpacing(0)
                                     self.layout.setAlignment(Qt.AlignHCenter)
 
-                                    self.scroll = QScrollArea(self)
-                                    self.scroll.setStyleSheet("max-width: 600px;")
-                                    self.scroll.setWidgetResizable(True)
-                                    self.scroll.setFrameShape(QFrame.NoFrame)
-                                    self.layout.addWidget(self.scroll)
-
-                                    self.main = QWidget()
-                                    self.scroll_layout = QVBoxLayout(self.main)
-                                    self.scroll_layout.setContentsMargins(30, 0, 30, 0)
-                                    self.scroll_layout.setSpacing(0)
-                                    self.scroll_layout.setAlignment(Qt.AlignTop)
-                                    self.scroll.setWidget(self.main)
-                                    self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-                                    self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                                    self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-                                    self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-                                    self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
-
+                                    # 页面栈（每个 Template 自带滚动 + 按钮栏）
                                     self.stack = QStackedWidget()
-                                    self.scroll_layout.addWidget(self.stack)
+                                    self.layout.addWidget(self.stack, 1)
 
                                     self.pages_ = []
                                     self.btns_ = []
 
                                     self.add_page(self.Origin, "wid.pages.download.origin","src/assets/icons/mdt/mdt.png" ,color=False)
+                                    self.add_page(self.MindustryX, "wid.pages.download.mindustryx","src/assets/icons/mdt/mdtx.png" ,color=False)
 
                                 def add_page(self, page_cls, text=None, icon=None, color=True):
                                     btn = self.parent.top.add_btn(text, icon, color=color)
@@ -2709,38 +2714,690 @@ class Main():
                                         btn.click()
                                     return page_
 
-                                def barShow(self):
-                                    self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
-
-                                def resizeEvent(self, event):
-                                    self.scroll_slider.setGeometry(self.scroll.width() - 5, 0, 5, self.scroll.height())
-                                    self.barShow()
-                                    super().resizeEvent(event)
-
-                                def showEvent(self, event):
-                                    super().showEvent(event)
-                                    self.barShow()
-
                                 class Template(QWidget):
                                     def __init__(self, parent=None, root=None, text=None, icon=None):
                                         super().__init__()
                                         self.parent = parent
                                         self.root = root
                                         self.text = text
+                                        self.data = self._read_cache()
                                         self.icon = icon
-                                        self.init_wid()
+                                        self._searching = False
+                                        self._action_btns = []
+                                        self._init_wid()
 
-                                    def init_wid(self):
+                                    def _init_wid(self):
                                         self.layout = QVBoxLayout(self)
                                         self.layout.setContentsMargins(0, 0, 0, 0)
                                         self.layout.setSpacing(0)
 
+                                        # 按钮栏：子类通过 add_action_btn 注册
+                                        self.action_bar = QWidget()
+                                        self.action_bar.setFixedHeight(40)
+                                        self.action_bar_layout = QHBoxLayout(self.action_bar)
+                                        self.action_bar_layout.setContentsMargins(10, 5, 10, 5)
+                                        self.action_bar_layout.setSpacing(5)
+                                        self.action_bar_layout.setAlignment(Qt.AlignLeft)
+                                        self.layout.addWidget(self.action_bar)
+
+                                        self.scroll = QScrollArea(self)
+                                        self.scroll.setWidgetResizable(True)
+                                        self.scroll.setFrameShape(QFrame.NoFrame)
+                                        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                        self.layout.addWidget(self.scroll)
+
+                                        self.main = QWidget()
+                                        self.main.setProperty("wid", "color2")
+                                        self.main.setAttribute(Qt.WA_StyledBackground, True)
+                                        self.scroll_layout = QVBoxLayout(self.main)
+                                        self.scroll_layout.setContentsMargins(30, 20, 30, 20)
+                                        self.scroll_layout.setSpacing(10)
+                                        self.scroll_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+                                        self.scroll.setWidget(self.main)
+
+                                        self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+                                        self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                                        self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                                        self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                                    def _set_searching(self, disabled):
+                                        self._searching = disabled
+                                        for btn in self._action_btns:
+                                            btn.setDisabled(disabled)
+
+                                    def add_action_btn(self, text_key, callback):
+                                        btn = QPushButton(self.root.langer.get(text_key))
+                                        btn.setFixedSize(100, 30)
+                                        btn.setProperty("wid", "btn")
+                                        btn.setAttribute(Qt.WA_StyledBackground, False)
+                                        btn._text_key = text_key
+                                        btn.clicked.connect(callback)
+                                        self._action_btns.append(btn)
+                                        self.action_bar_layout.addWidget(btn)
+                                        return btn
+
+                                    def langing(self):
+                                        for btn in self._action_btns:
+                                            if hasattr(btn, '_text_key'):
+                                                btn.setText(self.root.langer.get(btn._text_key))
+
+                                    def barShow(self):
+                                        self.scroll_slider.setVisible(
+                                            self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
+                                        )
+
+                                    def resizeEvent(self, event):
+                                        self.scroll_slider.setGeometry(
+                                            self.scroll.width() - 5, 0, 5, self.scroll.height()
+                                        )
+                                        self.barShow()
+                                        super().resizeEvent(event)
+
+                                    def showEvent(self, event):
+                                        super().showEvent(event)
+                                        self.barShow()
+
+                                    def _read_cache(self):
+                                        if not hasattr(self, 'tmpPath') or self.tmpPath is None:
+                                            return {"intro": "", "versions": {}}
+                                        if os.path.exists(self.tmpPath):
+                                            try:
+                                                with open(self.tmpPath, "r", encoding="utf-8") as f:
+                                                    data = json.load(f)
+                                                    if isinstance(data, dict):
+                                                        data.setdefault("intro", "")
+                                                        data.setdefault("versions", {})
+                                                        return data
+                                            except (json.JSONDecodeError, OSError):
+                                                pass
+                                        return {"intro": "", "versions": {}}
+
+                                    def _write_cache(self, data):
+                                        if not hasattr(self, 'tmpPath') or self.tmpPath is None:
+                                            return
+                                        os.makedirs(os.path.dirname(self.tmpPath), exist_ok=True)
+                                        with open(self.tmpPath, "w", encoding="utf-8") as f:
+                                            json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
+
+                                    @staticmethod
+                                    def _normalize_class(category):
+                                        if category is None:
+                                            return None
+                                        if isinstance(category, str):
+                                            category = category.strip()
+                                            if category.startswith('v') and len(category) > 1:
+                                                return category
+                                            try:
+                                                return 'v' + str(int(float(category)))
+                                            except Exception:
+                                                return category
+                                        try:
+                                            return 'v' + str(int(float(category)))
+                                        except Exception:
+                                            return None
+
+                                    @staticmethod
+                                    def _sort_versions(versions):
+                                        def _key(k):
+                                            if not isinstance(k, str):
+                                                return float(k) if isinstance(k, (int, float)) else 0.0
+                                            m = re.match(r'v?(\d+(?:\.\d+)*)', k)
+                                            if m:
+                                                try:
+                                                    return float(m.group(1))
+                                                except Exception:
+                                                    return 0.0
+                                            return 0.0
+                                        out = {}
+                                        for cls_key in sorted(versions.keys(), key=_key, reverse=True):
+                                            out[cls_key] = {
+                                                n: versions[cls_key][n]
+                                                for n in sorted(versions[cls_key].keys(), key=lambda k: float(k) if re.match(r'^\d+(?:\.\d+)*$', str(k)) else 0.0, reverse=True)
+                                            }
+                                        return out
+
+                                    def _fetch_and_merge(self, pages, per_page, cache):
+                                        api = self.root.githubAPI
+                                        releases_all = []
+                                        max_workers = min(len(pages) + 1, 8)
+
+                                        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                                            futures = {
+                                                pool.submit(api.getRelease, self.releaseRepo, p, per_page): p
+                                                for p in pages
+                                            }
+                                            f_intro = pool.submit(self.root.githubAPI._session.get, self.introUrl, timeout=15) if self.introUrl else None
+
+                                            for f in as_completed(futures):
+                                                try:
+                                                    ok, data = f.result()
+                                                    if ok and isinstance(data, list):
+                                                        releases_all.extend(data)
+                                                    else:
+                                                        self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
+                                                except Exception as e:
+                                                    self.root.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
+
+                                            intro_resp = None
+                                            if f_intro is not None:
+                                                try:
+                                                    intro_resp = f_intro.result()
+                                                except Exception as e:
+                                                    self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] intro fetch failed: {e}")
+
+                                        for r in releases_all:
+                                            try:
+                                                d = self.classify(r)
+                                            except Exception as e:
+                                                self.root.logger.error(f"[{type(self).__name__}.classify] {e}")
+                                                continue
+                                            category = self._normalize_class(d.get('class'))
+                                            if category is None or d.get('name') is None:
+                                                continue
+                                            cache["versions"].setdefault(category, {})[d["name"]] = d
+
+                                        cache["intro"] = cache.get("intro", "")
+                                        if intro_resp is not None and getattr(intro_resp, 'status_code', None) == 200:
+                                            cache["intro"] = intro_resp.text
+
+                                        cache["versions"] = self._sort_versions(cache["versions"])
+                                        self._write_cache(cache)
+                                        return cache
+
+                                    def _before_search(self):
+                                        pass
+
+                                    def _on_data_changed(self):
+                                        pass
+
+                                    def _search(self, job, on_done):
+                                        if self._searching:
+                                            return
+                                        self._before_search()
+                                        self._set_searching(True)
+                                        safety = QTimer(self)
+                                        safety.setSingleShot(True)
+                                        safety.timeout.connect(lambda: self._set_searching(False))
+                                        safety.start(30000)
+
+                                        def _on_done(result):
+                                            if safety.isActive():
+                                                safety.stop()
+                                            on_done(result)
+
+                                        QThTimer.task(job, result_callback=_on_done, dedicated=True)
+
+                                    def search(self):
+                                        def job(event):
+                                            cache = self._read_cache()
+                                            return self._fetch_and_merge([1], 50, cache)
+
+                                        def on_done(result):
+                                            self._set_searching(False)
+                                            if not isinstance(result, Exception) and isinstance(result, dict):
+                                                self.data = result
+                                                self._on_data_changed()
+                                            elif isinstance(result, Exception):
+                                                self.root.logger.error(f"[{type(self).__name__}.search] {result}")
+
+                                        self._search(job, on_done)
+
+                                    def searchAll(self):
+                                        def job(event):
+                                            api = self.root.githubAPI
+                                            cache = self._read_cache()
+                                            per_page = 100
+                                            pages = [1]
+
+                                            ok, first_page = api.getRelease(self.releaseRepo, 1, per_page)
+                                            if not ok or not isinstance(first_page, list):
+                                                return cache
+
+                                            releases = first_page
+                                            if len(first_page) == per_page:
+                                                current_page = 2
+                                                while current_page <= 10:
+                                                    ok, next_page = api.getRelease(self.releaseRepo, current_page, per_page)
+                                                    if not ok or not isinstance(next_page, list) or len(next_page) == 0:
+                                                        break
+                                                    releases.extend(next_page)
+                                                    pages.append(current_page)
+                                                    if len(next_page) < per_page:
+                                                        break
+                                                    current_page += 1
+                                            return self._fetch_and_merge(pages, per_page, cache)
+
+                                        def on_done(result):
+                                            self._set_searching(False)
+                                            if not isinstance(result, Exception) and isinstance(result, dict):
+                                                self.data = result
+                                                self._on_data_changed()
+                                            elif isinstance(result, Exception):
+                                                self.root.logger.error(f"[{type(self).__name__}.searchAll] {result}")
+
+                                        self._search(job, on_done)
+
+                                    def classify(self, back):
+                                        raise NotImplementedError("Subclass must implement classify()")
+
+                                    class Classs(QWidget):
+                                        def __init__(self,parent=None,root=None):
+                                            super().__init__()
+                                            self.parent = parent
+                                            self.root = root
+                                            self.light = None
+                                            self.data = {}
+                                            self.btnPix = [QPixmap(),QPixmap()]
+                                            self.setAttribute(Qt.WA_StyledBackground, True)
+                                            self.setStyleSheet("border-radius:10px;max-width:600px;")
+                                            self.init_wid()
+
+                                        def init_wid(self):
+                                            self.layout = QVBoxLayout(self)
+                                            self.layout.setContentsMargins(10,10,10,10)
+                                            self.layout.setSpacing(5)
+
+                                            self.top = QWidget()
+                                            self.top.setFixedHeight(40)
+                                            self.layout.addWidget(self.top)
+
+                                            self.topL = QHBoxLayout(self.top)
+                                            self.topL.setContentsMargins(15,0,0,0)
+                                            self.topL.setSpacing(5)
+                                            self.topL.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+
+                                            self.label = QLabel()
+                                            self.label.setProperty("wid","text")
+                                            self.label.setStyleSheet("font-size:16px;")
+                                            self.topL.addWidget(self.label,0)
+
+                                            self.label2 = QLabel()
+                                            self.label2.setProperty("wid","lbtn")
+                                            self.label2.setStyleSheet("font-size:14px;")
+                                            self.topL.addWidget(self.label2,0)
+
+                                            self.topL.addStretch(1)
+
+                                            self.button = QPushButton()
+                                            self.button.setFixedSize(40,40)
+                                            self.button.setProperty("wid","lbtn")
+                                            self.button.setStyleSheet("border-radius:20px;")
+                                            self.topL.addWidget(self.button)
+
+                                            class VisiWidget(QWidget):
+                                                visibled = pyqtSignal(bool)
+
+                                                def showEvent(self,event):
+                                                    self.visibled.emit(True)
+                                                    super().showEvent(event)
+
+                                                def hideEvent(self,event):
+                                                    self.visibled.emit(False)
+                                                    super().hideEvent(event)
+
+                                            self.contentW = VisiWidget()
+                                            self.contentW.visibled.connect(lambda i:self.button.setIcon(QIcon(self.btnPix[int(i)])))
+                                            self.layout.addWidget(self.contentW)
+                                            self.contentW.hide()
+
+                                            self.contentL = QVBoxLayout(self.contentW)
+                                            self.contentL.setContentsMargins(0,0,0,0)
+                                            self.contentL.setSpacing(5)
+
+                                            self.line = QWidget()
+                                            self.line.setFixedHeight(1)
+                                            self.line.setProperty("wid","line")
+                                            self.contentL.addWidget(self.line)
+
+                                            self.scroll = self.parent.Scroll(self,self.root)
+                                            self.contentL.addWidget(self.scroll,0)
+                                            self.lighting(self.root.settings["theme"])
+
+                                            self.button.clicked.connect(lambda:self.contentW.setVisible(not self.contentW.isVisible()))
+                                        
+                                        def setData(self,name,data,icon_pixmap=None):
+                                            self.data = copy.deepcopy(data)
+                                            self.label.setText(name+" ("+str(len(self.data))+")")
+                                            self.scroll.setFixedHeight(min(400, len(self.data)*60-10))
+                                            self.scroll.setData(self.data, icon_pixmap)
+
+                                        def langing(self):
+                                            pass
+
+                                        def lighting(self,light):
+                                            if self.light != light:
+                                                self.light = light
+                                                self.btnPix[1] = change_color(getPath("src/assets/actions/eye.png"),QColor(25,25,25) if light else QColor(220,220,220))
+                                                self.btnPix[0] = change_color(getPath("src/assets/actions/eye-off.png"),QColor(25,25,25) if light else QColor(220,220,220))
+                                            self.button.setIcon(QIcon(self.btnPix[int(self.contentW.isVisible())]))
+
+                                        def showEvent(self,event):
+                                            super().showEvent(event)
+                                            self.scroll.setFixedHeight(min(400, len(self.data)*60-10))
+
+                                    class Scroll(QWidget):
+                                        def __init__(self,parent=None,root=None):
+                                            super().__init__()
+                                            self.parent = parent
+                                            self.root = root
+                                            self.itemd = {}   # data list: index -> data
+                                            self.itemw = []   # pool of visible Item widgets
+                                            self.item_h = 50
+                                            self.viewport_h = 0
+                                            self.total_count = 0
+                                            self.start_index = 0
+                                            self.init_wid()
+                                            self._update_visible()
+
+                                        def init_wid(self):
+                                            self.layout = QVBoxLayout(self)
+                                            self.layout.setContentsMargins(0, 0, 0, 0)
+                                            self.layout.setSpacing(10)
+
+                                            self.scroll = QScrollArea(self)
+                                            self.scroll.setWidgetResizable(True)
+                                            self.scroll.setFrameShape(QFrame.NoFrame)
+                                            self.scroll.verticalScrollBar().valueChanged.connect(self._update_visible)
+                                            self.layout.addWidget(self.scroll)
+
+                                            self.main = QWidget()
+                                            self.main.setMinimumWidth(0)
+                                            self.main.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+                                            self.scroll.setWidget(self.main)
+
+                                            self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+                                            self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                                            self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                                            self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                                        def setData(self, data: dict, icon_pixmap=None):
+                                            self.itemd.clear()
+                                            self.item_icon_pixmap = icon_pixmap
+                                            for idx, (name, item) in enumerate(data.items()):
+                                                item["name"] = name
+                                                self.itemd[idx] = item
+                                            self.total_count = len(data)
+                                            self.main.setMinimumHeight(self.total_count * self.item_h)
+                                            self._update_visible()
+
+                                        def resizeEvent(self, event):
+                                            self.scroll_slider.setGeometry(
+                                                self.scroll.width() - 5, 0, 5, self.scroll.height()
+                                            )
+                                            super().resizeEvent(event)
+                                            self.viewport_h = self.height()
+                                            visible = int((self.viewport_h + self.item_h - 1) / self.item_h) + 2
+                                            while len(self.itemw) < visible:
+                                                it = self.Item(self.main, self.root)
+                                                it.setParent(self.main)
+                                                it.hide()
+                                                self.itemw.append(it)
+                                            while len(self.itemw) > visible:
+                                                it = self.itemw.pop()
+                                                it.setParent(None)
+                                                it.deleteLater()
+                                            self.main.setMinimumHeight(self.total_count * self.item_h)
+                                            self._update_visible()
+
+                                        def showEvent(self, event):
+                                            super().showEvent(event)
+                                            self.scroll_slider.setVisible(
+                                                self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
+                                            )
+                                            self._update_visible()
+                                            
+                                        def scrollEvent(self):
+                                            self._update_visible()
+
+                                        def _update_visible(self):
+                                            if self.total_count == 0:
+                                                for w in self.itemw:
+                                                    w.hide()
+                                                return
+                                            # ensure pool populated even before first resize
+                                            if not self.itemw:
+                                                self.viewport_h = self.scroll.viewport().height()
+                                                if self.viewport_h <= 0:
+                                                    self.viewport_h = 400
+                                                visible = max(1, int(self.viewport_h / self.item_h)) + 1
+                                                for _ in range(visible):
+                                                    it = self.Item(self.main, self.root)
+                                                    it.setParent(self.main)
+                                                    it.hide()
+                                                    self.itemw.append(it)
+                                            vbar = self.scroll.verticalScrollBar()
+                                            scroll_y = vbar.value()
+                                            first = int(scroll_y / self.item_h)
+                                            if first < 0:
+                                                first = 0
+                                            self.start_index = first
+                                            # populate pool
+                                            for i, widget in enumerate(self.itemw):
+                                                idx = self.start_index + i
+                                                if idx >= self.total_count:
+                                                    widget.hide()
+                                                    continue
+                                                data = self.itemd.get(idx)
+                                                if data is None:
+                                                    widget.hide()
+                                                    continue
+                                                widget.set_data(data, getattr(self, 'item_icon_pixmap', None))
+                                                y = idx * self.item_h
+                                                widget.setGeometry(0, y, self.scroll.viewport().width(), self.item_h)
+                                                widget.show()
+
+                                        class Item(QWidget):
+                                            def __init__(self,parent=None,root=None):
+                                                super().__init__(parent)
+                                                self.parent = parent
+                                                self.root = root
+                                                self.data={}
+                                                self.setFixedHeight(50)
+                                                self.init_wid()
+
+                                            def set_data(self, data: dict, icon_pixmap=None):
+                                                self.data = data or {}
+                                                title = self.data.get("title") or self.data.get("name") or ""
+                                                time = self.data.get("time") or ""
+                                                self.title.setText(title)
+                                                self.time.setText(time)
+                                                # pre-computed pixmap passed from outside
+                                                if icon_pixmap and not icon_pixmap.isNull():
+                                                    self.icon.setPixmap(icon_pixmap.scaled(30,30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                                                else:
+                                                    self.icon.clear()
+
+                                            def init_wid(self):
+                                                self.layout = QHBoxLayout(self)
+                                                self.layout.setContentsMargins(0, 0, 0, 0)
+                                                self.layout.setSpacing(10)
+                                                self.layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+                                                self.icon = QLabel()
+                                                self.icon.setFixedSize(30,30)
+                                                self.layout.addWidget(self.icon,0)
+
+                                                self.l1w = QWidget()
+                                                self.layout.addWidget(self.l1w,1)
+                                                self.l1 = QVBoxLayout(self.l1w)
+                                                self.l1.setContentsMargins(0, 0, 0, 0)
+                                                self.l1.setSpacing(0)
+
+                                                self.title = QLabel()
+                                                self.title.setProperty("wid","text")
+                                                self.title.setStyleSheet("font-size:16px;")
+                                                self.title.setFixedHeight(30)
+                                                self.l1.addWidget(self.title,0)
+
+                                                self.time = QLabel()
+                                                self.time.setProperty("wid","title")
+                                                self.time.setFixedHeight(20)
+                                                self.l1.addWidget(self.time,0)
 
                                 class Origin(Template):
                                     def __init__(self, parent=None, root=None, text=None, icon=None):
+                                        self.introUrl = "https://raw.githubusercontent.com/Anuken/Mindustry/master/README.md"
+                                        self.releaseRepo = "Anuken/Mindustry"
+                                        self.iconPath = getPath("src/assets/icons/mdt/mdt.png")
+                                        self.tmpPath = getPath("BML/.tmp/search/games/.origin.json")
+                                        self.classs = {}
                                         super().__init__(parent, root, text, icon)
+                                        self.init_wid()
+                                        self.setClasss()
+
+                                    def init_wid(self):
+                                        self.add_action_btn("wid.pages.download.origin.search", lambda: self.search())
+                                        self.add_action_btn("wid.pages.download.origin.searchAll", lambda: self.searchAll())
+                                        self.action_bar_layout.addStretch()
+
+                                    def _before_search(self):
+                                        for w in self.classs.values():
+                                            w.deleteLater()
+                                        self.classs.clear()
+
+                                    def _on_data_changed(self):
+                                        self.setClasss()
+
+                                    def setClasss(self):
+                                        for w in self.classs.values():
+                                            w.deleteLater()
+                                        self.classs.clear()
+                                        # pre-compute icon pixmap once
+                                        icon_pixmap = QPixmap()
+                                        if os.path.exists(self.iconPath):
+                                            icon_pixmap.load(self.iconPath)
+                                        for i, j in self.data["versions"].items():
+                                            clss = self.Classs(self, self.root)
+                                            clss.setData(i, j, icon_pixmap)
+                                            self.classs[i] = clss
+                                            self.scroll_layout.addWidget(clss)
 
 
+                                    def classify(self, back):
+                                        name_raw = back.get("name") or ""
+                                        time_raw = back.get("published_at")
+                                        assets_raw = back.get("assets", [])
+                                        game_link = next(
+                                            (a.get("browser_download_url")
+                                             for a in assets_raw
+                                             if any(k in a.get("name", "") for k in ("Mindustry", "desktop"))),
+                                            None
+                                        )
+                                        assets = {
+                                            a["name"]: {"name": a["name"], "linear": a.get("browser_download_url")}
+                                            for a in assets_raw
+                                            if a.get("name") and a.get("browser_download_url")
+                                        }
+                                        m = re.search(r'v?([\d.]+)\s+Build\s+([\d.]+)', name_raw)
+                                        return {
+                                            "class": "v" + str(int(float(m.group(1)))) if m else None,
+                                            "name": re.sub(r'\.0+$', '', m.group(2)) if m else None,
+                                            "title": name_raw or None,
+                                            "intro": back.get("body"),
+                                            "time": time_raw.replace("T", " ").replace("Z", "") if time_raw else None,
+                                            "releaseUrl": back.get("html_url"),
+                                            "gameLinear": game_link,
+                                            "assets": assets,
+                                        }
+
+                                class MindustryX(Template):
+                                    def __init__(self, parent=None, root=None, text=None, icon=None):
+                                        self.introUrl = None
+                                        self.releaseRepo = "TinyLake/MindustryX"
+                                        self.iconPath = getPath("src/assets/icons/mdt/mdtx.png")
+                                        self.tmpPath = getPath("BML/.tmp/search/games/mindustryx.json")
+                                        self.classs = {}
+                                        super().__init__(parent, root, text, icon)
+                                        self.init_wid()
+                                        self.setClasss()
+
+                                    def init_wid(self):
+                                        self.add_action_btn("wid.pages.download.mindustryx.search", lambda: self.search())
+                                        self.add_action_btn("wid.pages.download.mindustryx.searchAll", lambda: self.searchAll())
+                                        self.action_bar_layout.addStretch()
+
+                                    def _before_search(self):
+                                        for w in self.classs.values():
+                                            w.deleteLater()
+                                        self.classs.clear()
+
+                                    def _on_data_changed(self):
+                                        self.setClasss()
+
+                                    def search(self):
+                                        def job(event):
+                                            cache = self._read_cache()
+                                            return self._fetch_and_merge([1], 100, cache)
+
+                                        def on_done(result):
+                                            self._set_searching(False)
+                                            if not isinstance(result, Exception) and isinstance(result, dict):
+                                                self.data = result
+                                                self._on_data_changed()
+                                            elif isinstance(result, Exception):
+                                                self.root.logger.error(f"[{type(self).__name__}.search] {result}")
+
+                                        self._search(job, on_done)
+
+                                    @staticmethod
+                                    def _sort_versions(versions):
+                                        order = {"alpha": 0, "beta": 1}
+                                        out = {}
+                                        for cls_key in sorted(versions.keys(), key=lambda k: order.get(k, 99)):
+                                            out[cls_key] = dict(sorted(
+                                                versions[cls_key].items(),
+                                                key=lambda kv: kv[0],
+                                                reverse=True
+                                            ))
+                                        return out
+
+                                    def setClasss(self):
+                                        for w in self.classs.values():
+                                            w.deleteLater()
+                                        self.classs.clear()
+                                        icon_pixmap = QPixmap()
+                                        if os.path.exists(self.iconPath):
+                                            icon_pixmap.load(self.iconPath)
+                                        for i, j in self.data["versions"].items():
+                                            clss = self.Classs(self, self.root)
+                                            display_name = self.root.langer.get(f"wid.pages.download.{i}")
+                                            clss.setData(display_name, j, icon_pixmap)
+                                            self.classs[i] = clss
+                                            self.scroll_layout.addWidget(clss)
+
+                                    def classify(self, back):
+                                        name_raw = back.get("name") or ""
+                                        time_raw = back.get("published_at")
+                                        assets_raw = back.get("assets", [])
+                                        game_link = next(
+                                            (a.get("browser_download_url")
+                                             for a in assets_raw
+                                             if "Desktop" in a.get("name", "")),
+                                            None
+                                        )
+                                        assets = {
+                                            a["name"]: {"name": a["name"], "linear": a.get("browser_download_url")}
+                                            for a in assets_raw
+                                            if a.get("name") and a.get("browser_download_url")
+                                        }
+                                        if "X" in name_raw:
+                                            clss = "alpha"
+                                        elif "B" in name_raw:
+                                            clss = "beta"
+                                        else:
+                                            clss = None
+                                        return {
+                                            "class": clss,
+                                            "name": name_raw,
+                                            "title": name_raw or None,
+                                            "intro": back.get("body"),
+                                            "time": time_raw.replace("T", " ").replace("Z", "") if time_raw else None,
+                                            "releaseUrl": back.get("html_url"),
+                                            "gameLinear": game_link,
+                                            "assets": assets,
+                                        }
+                                        
+                                    
                 #TODO: 游戏管理界面
                 class Game(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
@@ -3751,54 +4408,99 @@ class Main():
             return info
 
     class Signals(QObject):
-        _internal = pyqtSignal(str, tuple)
+        """
+        动态信号管理器 —— 所有信号都是真正的 PyQtSignal。
+
+        用法:
+            signals = Signals()
+            signals.register("dataReady", pyqtSignal(str, int))
+            signals.connect("dataReady", lambda s, i: print(s, i))
+            signals.emit("dataReady", "hello", 42)
+            signals.disconnect("dataReady", callback)
+            signals.cancel("dataReady")  # 完全移除
+        """
 
         def __init__(self, parent=None, root=None):
             super().__init__()
             self.parent = parent
             self.root = root
-            self._callbacks = {}
-            self._internal.connect(self._dispatch)
+            # name → _SignalHolder 实例
+            self._holders = {}
 
-        def _dispatch(self, name, args):
-            """pyqtSignal 驱动的内部分发"""
-            if name in self._callbacks:
-                for callback in self._callbacks[name]:
-                    try:
-                        callback(*args)
-                    except Exception as e:
-                        self.root.logger.error(f"Error in signal '{name}' callback: {e}")
+        @staticmethod
+        def _make_holder_cls(sig):
+            """根据 pyqtSignal 签名动态创建一个 QObject 子类，携带一个 signal 属性。"""
+            return type('_SigHolder', (QObject,), {'signal': sig})
 
-        def register(self, name):
-            """注册一个新的信号"""
-            if name not in self._callbacks:
-                self._callbacks[name] = []
+        def register(self, name, sig=None):
+            """
+            注册一个信号。
+            sig: pyqtSignal 实例，如 pyqtSignal(), pyqtSignal(str), pyqtSignal(int, bool)
+            返回该 pyqtSignal，可直接 connect。
+            若同名已存在则返回已有信号。
+            """
+            if sig is None:
+                sig = pyqtSignal()
+            if name in self._holders:
+                return self._holders[name].signal
+            HolderCls = self._make_holder_cls(sig)
+            holder = HolderCls(self)
+            self._holders[name] = holder
+            return holder.signal
 
         def connect(self, name, callback):
-            """连接一个回调函数到指定信号"""
-            if name not in self._callbacks:
+            """连接到已注册信号。若未注册则自动以无参信号注册。"""
+            if name not in self._holders:
                 self.register(name)
-            self._callbacks[name].append(callback)
+            self._holders[name].signal.connect(callback)
 
-        def emit(self, name, *args, **kwargs):
-            """触发指定信号，通过 pyqtSignal 驱动调用所有回调"""
-            if name in self._callbacks:
-                self._internal.emit(name, args)
+        def emit(self, name, *args):
+            """触发指定信号。"""
+            if name in self._holders:
+                self._holders[name].signal.emit(*args)
 
-        def disconnect(self, name, callback):
-            """断开指定信号的回调函数"""
-            if name in self._callbacks and callback in self._callbacks[name]:
-                self._callbacks[name].remove(callback)
+        def disconnect(self, name=None, callback=None):
+            """
+            断开连接。
+            - disconnect(name, callback): 断开指定回调
+            - disconnect(name): 断开该信号所有连接
+            - disconnect(): 断开所有信号所有连接
+            """
+            if name is None:
+                for h in self._holders.values():
+                    try:
+                        h.signal.disconnect()
+                    except TypeError:
+                        pass
+                return
+            if name not in self._holders:
+                return
+            sig = self._holders[name].signal
+            if callback is not None:
+                try:
+                    sig.disconnect(callback)
+                except TypeError:
+                    pass
+            else:
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass
 
         def cancel(self, name):
-            """取消注册指定信号"""
-            if name in self._callbacks:
-                del self._callbacks[name]
+            """完全移除指定信号及其所有连接。"""
+            if name in self._holders:
+                self._holders[name].signal.disconnect()
+                self._holders[name].deleteLater()
+                del self._holders[name]
 
         def clear(self, name):
-            """清除指定信号的所有回调函数"""
-            if name in self._callbacks:
-                self._callbacks[name] = []
+            """清除指定信号的所有回调（不删除信号本身）。"""
+            if name in self._holders:
+                try:
+                    self._holders[name].signal.disconnect()
+                except TypeError:
+                    pass
 
     class Winreg():
         def __init__(self, parent=None, root=None):

@@ -33,6 +33,16 @@
     "wid.pages.start.gamebtn": "게임 선택",
 
     "wid.pages.download": "다운로드",
+
+    "wid.pages.download.origin": "원본",
+    "wid.pages.download.origin.search": "증분 검색",
+    "wid.pages.download.origin.searchAll": "전체 검색",
+    "wid.pages.download.mindustryx": "MindustryX",
+    "wid.pages.download.mindustryx.search": "증분 검색",
+    "wid.pages.download.mindustryx.searchAll": "전체 검색",
+    "wid.pages.download.alpha": "Alpha",
+    "wid.pages.download.beta": "Beta",
+
     "wid.pages.game": "게임",
     "wid.pages.setting": "설정",
     "wid.pages.setting.launcher": "런처",

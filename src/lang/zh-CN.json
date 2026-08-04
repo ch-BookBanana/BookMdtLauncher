@@ -37,7 +37,14 @@
 
     "wid.pages.download.game": "游戏本体",
     "wid.pages.download.origin": "原版",
+    "wid.pages.download.origin.search": "增量搜索",
+    "wid.pages.download.origin.searchAll": "全量搜索",
 
+    "wid.pages.download.mindustryx": "MindustryX",
+    "wid.pages.download.mindustryx.search": "增量搜索",
+    "wid.pages.download.mindustryx.searchAll": "全量搜索",
+    "wid.pages.download.alpha": "Alpha",
+    "wid.pages.download.beta": "Beta",
 
     "wid.pages.game": "游戏",
 

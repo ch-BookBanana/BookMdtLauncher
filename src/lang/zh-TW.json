@@ -33,6 +33,16 @@
     "wid.pages.start.gamebtn": "選擇遊戲",
 
     "wid.pages.download": "下載",
+
+    "wid.pages.download.origin": "原版",
+    "wid.pages.download.origin.search": "增量搜尋",
+    "wid.pages.download.origin.searchAll": "全量搜尋",
+    "wid.pages.download.mindustryx": "MindustryX",
+    "wid.pages.download.mindustryx.search": "增量搜尋",
+    "wid.pages.download.mindustryx.searchAll": "全量搜尋",
+    "wid.pages.download.alpha": "Alpha",
+    "wid.pages.download.beta": "Beta",
+
     "wid.pages.game": "遊戲",
     "wid.pages.setting": "設定",
     "wid.pages.setting.launcher": "啟動器",
