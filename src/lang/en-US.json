@@ -33,15 +33,17 @@
     "wid.pages.start.gamebtn": "Select Game",
 
     "wid.pages.download": "Download",
+    "wid.pages.download.game": "Game Files",
 
     "wid.pages.download.origin": "Original",
-    "wid.pages.download.origin.search": "Incremental Search",
+    "wid.pages.download.origin.search": "Quick Search",
     "wid.pages.download.origin.searchAll": "Full Search",
     "wid.pages.download.mindustryx": "MindustryX",
-    "wid.pages.download.mindustryx.search": "Incremental Search",
+    "wid.pages.download.mindustryx.search": "Quick Search",
     "wid.pages.download.mindustryx.searchAll": "Full Search",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.mindustryx.betaTips": "Note: MindustryX beta releases are short-lived and will not be saved to the launcher's cache. Betas will appear after a search but are only loaded on demand, not persisted.",
 
     "wid.pages.game": "Game",
     "wid.pages.setting": "Settings",

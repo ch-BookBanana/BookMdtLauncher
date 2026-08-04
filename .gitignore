@@ -8,3 +8,4 @@ __pycache__/
 /installer.cmd
 /main.spec
 /.vscode/
+/scripts

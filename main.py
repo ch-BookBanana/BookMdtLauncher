@@ -763,7 +763,7 @@ class Main():
                             tips_l.addWidget(self.tokenTipsIcon, 0, Qt.AlignTop)
 
                             self.tokenTipsText = QLabel()
-                            self.tokenTipsText.setProperty("wid", "title")
+                            self.tokenTipsText.setProperty("wid", "text")
                             self.tokenTipsText.setStyleSheet("font-size: 10px;")
                             self.tokenTipsText.setWordWrap(True)
                             tips_l.addWidget(self.tokenTipsText, 1)
@@ -3316,6 +3316,43 @@ class Main():
                                         self.add_action_btn("wid.pages.download.mindustryx.searchAll", lambda: self.searchAll())
                                         self.action_bar_layout.addStretch()
 
+                                        # beta 提示：mindustryX 的 beta 为时效性版本，不写入缓存
+                                        self.betaTips = QWidget()
+                                        self.betaTips.setStyleSheet(
+                                            "QWidget#betaTips{"
+                                            "background-color: rgba(255, 255, 0, 50);"
+                                            "border: 1px solid orange;"
+                                            "border-radius: 4px;"
+                                            "}"
+                                        )
+                                        self.betaTips.setObjectName("betaTips")
+                                        bt_l = QHBoxLayout(self.betaTips)
+                                        bt_l.setContentsMargins(8, 6, 8, 6)
+                                        bt_l.setSpacing(8)
+
+                                        self.betaTipsIcon = QLabel()
+                                        self.betaTipsIcon.setFixedSize(20, 20)
+                                        self.betaTipsIcon.setScaledContents(True)
+                                        bt_l.addWidget(self.betaTipsIcon, 0, Qt.AlignTop)
+
+                                        self.betaTipsText = QLabel()
+                                        self.betaTipsText.setProperty("wid", "text")
+                                        self.betaTipsText.setStyleSheet("font-size: 12px;")
+                                        self.betaTipsText.setWordWrap(True)
+                                        bt_l.addWidget(self.betaTipsText, 1)
+
+                                        # let height follow text (minimum height), place later above first Classs
+                                        self.betaTips.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+                                        try:
+                                            self.betaTipsIcon.setPixmap(change_color(getPath("src/assets/actions/tips.png"), QColor(255,165,0)).pixmap(QSize(18,18)))
+                                        except Exception:
+                                            pass
+                                        self.betaTipsText.setText(self.root.langer.get("wid.pages.download.mindustryx.betaTips"))
+
+                                    def langing(self):
+                                        super().langing()
+                                        self.betaTipsText.setText(self.root.langer.get("wid.pages.download.mindustryx.betaTips"))
+
                                     def _before_search(self):
                                         for w in self.classs.values():
                                             w.deleteLater()
@@ -3358,6 +3395,19 @@ class Main():
                                         icon_pixmap = QPixmap()
                                         if os.path.exists(self.iconPath):
                                             icon_pixmap.load(self.iconPath)
+                                        # insert beta tip above the first class panel
+                                        try:
+                                            # remove existing if present
+                                            if getattr(self, 'betaTips', None) and self.betaTips.parent() is not None:
+                                                try:
+                                                    self.scroll_layout.removeWidget(self.betaTips)
+                                                except Exception:
+                                                    pass
+                                            if getattr(self, 'betaTips', None):
+                                                self.scroll_layout.insertWidget(0, self.betaTips, 0)
+                                        except Exception:
+                                            pass
+
                                         for i, j in self.data["versions"].items():
                                             clss = self.Classs(self, self.root)
                                             display_name = self.root.langer.get(f"wid.pages.download.{i}")
@@ -3396,6 +3446,55 @@ class Main():
                                             "gameLinear": game_link,
                                             "assets": assets,
                                         }
+
+                                    def _fetch_and_merge(self, pages, per_page, cache):
+                                        # Custom fetch: keep beta results in-memory for rendering,
+                                        # but only persist alpha versions to disk because beta is time-sensitive.
+                                        api = self.root.githubAPI
+                                        releases_all = []
+                                        max_workers = min(len(pages) + 1, 8)
+
+                                        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                                            futures = {
+                                                pool.submit(api.getRelease, self.releaseRepo, p, per_page): p
+                                                for p in pages
+                                            }
+                                            f_intro = None
+
+                                            for f in as_completed(futures):
+                                                try:
+                                                    ok, data = f.result()
+                                                    if ok and isinstance(data, list):
+                                                        releases_all.extend(data)
+                                                    else:
+                                                        self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
+                                                except Exception as e:
+                                                    self.root.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
+
+                                        # Build full cache (including beta) for rendering
+                                        full_cache = cache or {"intro": "", "versions": {}}
+                                        for r in releases_all:
+                                            try:
+                                                d = self.classify(r)
+                                            except Exception as e:
+                                                self.root.logger.error(f"[{type(self).__name__}.classify] {e}")
+                                                continue
+                                            category = self._normalize_class(d.get('class'))
+                                            if category is None or d.get('name') is None:
+                                                continue
+                                            full_cache.setdefault("versions", {}).setdefault(category, {})[d["name"]] = d
+
+                                        # intro is not used for MindustryX (introUrl None)
+                                        full_cache["versions"] = self._sort_versions(full_cache.get("versions", {}))
+
+                                        # Persist only alpha classes
+                                        write_cache = {"intro": full_cache.get("intro", ""), "versions": {}}
+                                        for k, v in full_cache.get("versions", {}).items():
+                                            if k == 'alpha':
+                                                write_cache["versions"][k] = v
+
+                                        self._write_cache(write_cache)
+                                        return full_cache
                                         
                                     
                 #TODO: 游戏管理界面

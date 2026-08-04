@@ -33,6 +33,7 @@
     "wid.pages.start.gamebtn": "擇戲",
 
     "wid.pages.download": "納戲",
+    "wid.pages.download.game": "戲本",
 
     "wid.pages.download.origin": "原版",
     "wid.pages.download.origin.search": "增搜",
@@ -42,6 +43,7 @@
     "wid.pages.download.mindustryx.searchAll": "盡搜",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.mindustryx.betaTips": "示：MindustryX 之 Beta 多為短暫放送，器不留其於本地；雖於搜得時見之，然僅當場載入，不存為常。",
 
     "wid.pages.game": "藏戲",
     "wid.pages.setting": "機杼",

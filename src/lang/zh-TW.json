@@ -33,6 +33,7 @@
     "wid.pages.start.gamebtn": "選擇遊戲",
 
     "wid.pages.download": "下載",
+    "wid.pages.download.game": "遊戲本體",
 
     "wid.pages.download.origin": "原版",
     "wid.pages.download.origin.search": "增量搜尋",
@@ -42,6 +43,7 @@
     "wid.pages.download.mindustryx.searchAll": "全量搜尋",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.mindustryx.betaTips": "提醒：MindustryX 的 Beta 版本通常短暫發布，啟動器不會將 Beta 快取於本機；搜尋後會顯示 Beta，但僅作即時載入，並不會儲存。",
 
     "wid.pages.game": "遊戲",
     "wid.pages.setting": "設定",
