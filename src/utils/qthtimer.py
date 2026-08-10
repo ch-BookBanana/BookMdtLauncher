@@ -74,6 +74,8 @@ from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, Qt
 _qthtimer_thread = None
 _active_timers = set()
 _dedicated_threads = set()
+_zombie_threads = []      # 未能及时停止的线程：保留引用，交给进程退出兜底
+_shutting_down = False    # 全局退出标志（shutdown 时置位）
 
 
 def _get_qthtimer_thread():
@@ -92,20 +94,21 @@ def _get_qthtimer_thread():
     return _qthtimer_thread
 
 
-def _shutdown_qthtimer_thread():
-    """安全停止共享子线程。"""
+def _shutdown_qthtimer_thread(timeout=10000):
+    """安全停止共享子线程。
+
+    注意：绝不调用 QThread.terminate()——它会在线程仍持有 Python 对象时
+    强制终止，导致解释器状态损坏，从而弹出 “Python 已停止运行” 崩溃框。
+    若超时仍未退出（如 job 卡在网络请求），保留引用交给进程退出兜底。
+    """
     global _qthtimer_thread
     thread = _qthtimer_thread
     _qthtimer_thread = None
     if thread is None or not thread.isRunning():
         return
     thread.quit()
-    if not thread.wait(5000):
-        try:
-            thread.terminate()
-            thread.wait(1000)
-        except Exception:
-            pass
+    if not thread.wait(timeout):
+        _zombie_threads.append(thread)
 
 
 def _get_callback_arg_count(callback):
@@ -287,25 +290,27 @@ class QThTimer(QObject):
         self._worker = None
         if worker is not None:
             worker._destroyed = True
-            try:
-                worker.requestCleanup.emit()
-            except Exception:
-                pass
-            try:
-                worker.deleteLater()
-            except Exception:
-                pass
+            if not _shutting_down:
+                # 正常运行期：请求工作线程停止计时器并延迟销毁
+                try:
+                    worker.requestCleanup.emit()
+                except Exception:
+                    pass
+                try:
+                    worker.deleteLater()
+                except Exception:
+                    pass
+            # 退出阶段：线程即将整体停止，跳过跨线程清理，避免 deferred-delete 崩溃
 
-        # 专用线程：退出并等待
+        # 专用线程：退出并等待（绝不 terminate，超时保留引用兜底）
         if self._dedicated and self._thread is not None:
             thr = self._thread
             self._thread = None
             _dedicated_threads.discard(thr)
             try:
                 thr.quit()
-                if not thr.wait(5000):
-                    thr.terminate()
-                    thr.wait(1000)
+                if not thr.wait(3000):
+                    _zombie_threads.append(thr)
             except Exception:
                 pass
 
@@ -480,7 +485,13 @@ class QThTimer(QObject):
 
 
 def shutdown():
-    """销毁所有活动计时器并关闭共享/专用子线程。"""
+    """销毁所有活动计时器并关闭共享/专用子线程（退出时调用）。
+
+    全程不调用 terminate()，避免线程被强杀导致解释器崩溃；
+    无法及时停止的线程保留引用，由进程退出（os._exit 兜底）统一处理。
+    """
+    global _shutting_down
+    _shutting_down = True
     for t in list(_active_timers):
         try:
             t.destroy()
@@ -490,8 +501,7 @@ def shutdown():
         try:
             thr.quit()
             if not thr.wait(3000):
-                thr.terminate()
-                thr.wait(1000)
+                _zombie_threads.append(thr)
         except Exception:
             pass
     _dedicated_threads.clear()

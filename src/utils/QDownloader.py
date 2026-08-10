@@ -25,9 +25,9 @@ QDownloader 模块文档说明
 主要特性:
 1. **多线程下载**: 支持将文件分块，使用线程池并行下载，提高大文件下载速度。
 2. **断点续传**: 自动保存下载状态到本地 JSON 文件，意外中断后可从上次进度恢复。
-3. **网络优化**: 内置 Windows 平台下的 DNS 解析补丁，针对 GitHub Assets 域名进行 IP 强制解析，以应对可能的 DNS 污染或连接问题。
+3. **代理支持**: 未手动指定代理时，自动检测系统代理（加速器/VPN），也兼容环境变量代理（HTTP_PROXY / HTTPS_PROXY）。
 4. **原子性写入**: 下载完成后先合并到临时文件，再原子性移动到目标路径，避免产生损坏的目标文件。
-5. **暂停/恢复/取消**: 提供完整的生命周期控制接口。
+5. **暂停/恢复/取消**: 提供完整的生命周期控制接口（暂停后可随时恢复，取消则清理并放弃）。
 
 使用示例:
     downloader = QDownloader(
@@ -47,7 +47,7 @@ QDownloader 模块文档说明
 
 注意事项:
 - 请确保目标路径所在的目录具有写入权限。
-- 在 Windows 平台上，DNS 补丁会自动生效；其他平台使用系统默认解析。
+- 未手动指定代理时，会自动检测系统代理（环境变量或 Windows 系统代理设置），加速器开启后即可自动生效。
 - 如果服务器不支持 'Accept-Ranges: bytes'，下载将失败。
 
 最后，感谢d老师！
@@ -58,40 +58,101 @@ import os
 import sys
 import json
 import time
-import socket
 import hashlib
 import shutil
+import threading
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
+from .path_utils import getPath
 
-# ==================== 1. 全局网络补丁（Windows 专用） ====================
-_original_getaddrinfo = socket.getaddrinfo
 
-def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    # 将 GitHub Assets 域名强制解析到真实 IP（基于 nslookup 结果）
-    if host in ("release-assets.githubusercontent.com"):
-        # 轮询三个可用 IP，避免单点故障
-        import random
-        fake_host = random.choice(["185.199.108.133", "185.199.109.133", "185.199.110.133"])
-        # 强制走 IPv4，避免 IPv6 超时
-        if family == socket.AF_INET6:
-            family = socket.AF_INET
-        return _original_getaddrinfo(fake_host, port, family, type, proto, flags)
-    return _original_getaddrinfo(host, port, family, type, proto, flags)
+# ==================== 1. 系统代理检测（支持加速器/VPN） ====================
+def _detect_system_proxy():
+    """
+    自动检测系统代理，用于支持加速器（Clash、v2rayN 等）。
+    优先级: 环境变量 (HTTPS_PROXY/HTTP_PROXY) > Windows 系统代理设置（注册表）。
+    返回代理字符串（如 http://127.0.0.1:7890），未检测到时返回 None。
+    """
+    # 1. 环境变量（requests 的 trust_env 也会读取，这里优先显式获取）
+    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        val = os.environ.get(var)
+        if val:
+            return val
 
-if sys.platform == "win32":
-    socket.getaddrinfo = _patched_getaddrinfo
+    # 2. Windows 系统代理（加速器开启后通常会自动写入注册表）
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+            )
+            try:
+                proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
+            except OSError:
+                return None
+            if not proxy_enable:
+                return None
+            proxy_server, _ = winreg.QueryValueEx(key, "ProxyServer")
+            if not proxy_server:
+                return None
+            # 可能包含多协议配置，如 "http=127.0.0.1:7890;https=127.0.0.1:7890"
+            if "=" in proxy_server:
+                for part in proxy_server.split(";"):
+                    if part.lower().startswith("https="):
+                        return part.split("=", 1)[1]
+                return proxy_server.split(";")[0].split("=", 1)[-1]
+            return proxy_server
+        except Exception:
+            return None
+
+    return None
 
 
 # ==================== 2. 全局任务注册表（防重复） ====================
-_TASK_REGISTRY = {}          # {task_id: QDownloader实例}
+_TASK_REGISTRY = {}
 _REGISTRY_LOCK = Lock()
 
-TMP_PATH = os.path.join(os.getcwd(), "BML", ".tmp", "QDownloader")
+TMP_PATH = getPath(os.path.join("BML", ".tmp", "QDownloader"))
+
+# 全局退出标志：应用退出时置位，工作线程据此快速结束网络请求
+_ABORT_EVENT = threading.Event()
+
+
+def _interruptible_sleep(seconds):
+    """可被全局退出打断的休眠（替代 time.sleep，避免退出时被重试等待卡住）。"""
+    end = time.time() + seconds
+    while time.time() < end:
+        if _ABORT_EVENT.is_set():
+            return
+        time.sleep(0.1)
+
+
+def shutdown_all(timeout=5):
+    """停止所有活动下载任务（应用退出时调用）。
+
+    置位全局退出标志 → 逐个取消任务（有界等待）→ 等待注册表清空。
+    若有线程仍在网络请求中未能及时退出，由进程退出兜底处理。
+    """
+    _ABORT_EVENT.set()
+    with _REGISTRY_LOCK:
+        tasks = list(_TASK_REGISTRY.values())
+    deadline = time.time() + timeout
+    for task in tasks:
+        try:
+            task.cancel(timeout=3)
+        except Exception:
+            pass
+    while time.time() < deadline:
+        with _REGISTRY_LOCK:
+            alive = bool(_TASK_REGISTRY)
+        if not alive:
+            break
+        time.sleep(0.05)
 
 def get_active_task(task_id):
     with _REGISTRY_LOCK:
@@ -114,13 +175,15 @@ class QDownloader(QObject):
     多线程断点续传下载器
     信号：
         started()                    - 下载开始
-        finished(bool)               - 下载完成（成功/失败）
+        finished(bool)               - 下载完成（True 成功 / False 失败）
+        cancelled()                  - 下载被取消（与失败区分，不再发射 finished）
         progress(done, total)        - 总体进度（字节）
         thread_progress(id, idx, %)  - 单块进度
         error(str)                   - 错误信息
     """
     started = pyqtSignal()
     finished = pyqtSignal(bool)
+    cancelled = pyqtSignal()
     progress = pyqtSignal(int, int)
     thread_progress = pyqtSignal(int, int, int)
     error = pyqtSignal(str)
@@ -133,7 +196,8 @@ class QDownloader(QObject):
         self.num_threads = max(1, min(num_threads, 8))
         self.chunk_size = chunk_size_mb * 1024 * 1024
         self.headers = headers or {}
-        self.proxy = proxy
+        # 未显式指定代理时，自动检测系统代理（加速器/VPN）
+        self.proxy = proxy if proxy else _detect_system_proxy()
 
         # 内部状态
         self.total_size = 0
@@ -145,6 +209,8 @@ class QDownloader(QObject):
         self._is_paused = False
         self._is_cancelled = False
         self._is_running = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()   # 默认未暂停
 
         # 任务ID（由目标路径哈希生成）
         self.task_id = None
@@ -160,8 +226,11 @@ class QDownloader(QObject):
         self._thread = QThread()
         self.moveToThread(self._thread)
         self._thread.started.connect(self._run)
+        # finished / cancelled 均需退出线程并注销任务
         self.finished.connect(self._thread.quit)
         self.finished.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
+        self.cancelled.connect(self._thread.quit)
+        self.cancelled.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
 
     def _init_task_id(self):
         """根据目标路径生成任务ID，并创建对应的临时目录结构"""
@@ -193,7 +262,7 @@ class QDownloader(QObject):
         if 'headers' in kwargs:
             self.headers = kwargs['headers']
         if 'proxy' in kwargs:
-            self.proxy = kwargs['proxy']
+            self.proxy = kwargs['proxy'] if kwargs['proxy'] else _detect_system_proxy()
         return self
 
     def start(self):
@@ -207,14 +276,28 @@ class QDownloader(QObject):
             self._thread.start()
 
     def pause(self):
+        """暂停下载（线程在安全点等待，可 resume 恢复）"""
         self._is_paused = True
+        self._pause_event.clear()
 
     def resume(self):
+        """恢复暂停的下载"""
         self._is_paused = False
+        self._pause_event.set()
 
-    def cancel(self):
+    def cancel(self, timeout=None):
+        """取消下载并清理临时文件（不可恢复）。
+
+        timeout: 等待工作线程退出的秒数；None 表示无限等待（默认）。
+        线程未能及时退出时保留临时文件（下次可断点续传），不强行删除。
+        """
         self._is_cancelled = True
-        self._cleanup(keep_state=False)
+        self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
+        stopped = True
+        if self._thread.isRunning():
+            stopped = self._thread.wait(timeout)
+        if stopped:
+            self._cleanup(keep_state=False)
 
     def get_progress(self):
         done = len(self.completed_blocks) * self.block_size if self.block_size else 0
@@ -232,6 +315,9 @@ class QDownloader(QObject):
             if not self._prepare():
                 self.finished.emit(False)
                 return
+            if self._is_cancelled:
+                self.cancelled.emit()
+                return
 
             # 创建临时目录，加载断点状态
             self._prepare_temp_files()
@@ -244,23 +330,20 @@ class QDownloader(QObject):
                 self.finished.emit(True)
                 return
 
-            # 创建带代理的 Session
+            # 创建带代理的 Session（trust_env 兜底读取环境变量代理）
             sess = requests.Session()
+            sess.trust_env = True
             if self.proxy:
                 sess.proxies.update({"http": self.proxy, "https": self.proxy})
 
-            # 多线程执行
-            with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
+            # 多线程执行（不用 with：__exit__ 会 shutdown(wait=True)，取消时会被网络超时阻塞）
+            executor = ThreadPoolExecutor(max_workers=self.num_threads)
+            try:
                 futures = {executor.submit(self._download_block, sess, idx): idx for idx in pending}
 
                 for future in as_completed(futures):
                     if self._is_cancelled:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        self.finished.emit(False)
-                        return
-                    if self._is_paused:
-                        self._save_state()
-                        self.finished.emit(False)
+                        self.cancelled.emit()
                         return
 
                     idx = futures[future]
@@ -271,16 +354,22 @@ class QDownloader(QObject):
                                 self.completed_blocks.add(idx)
                                 self._save_state_if_needed()
                         else:
-                            self.error.emit(f"块 {idx} 下载失败（重试耗尽）")
-                            self.finished.emit(False)
+                            if self._is_cancelled:
+                                self.cancelled.emit()
+                            else:
+                                self.error.emit(f"块 {idx} 下载失败（重试耗尽）")
+                                self.finished.emit(False)
                             return
                     except Exception as e:
                         self.error.emit(str(e))
                         self.finished.emit(False)
                         return
+            finally:
+                # wait=False：不阻塞等待正在进行的网络请求，工作线程自然结束
+                executor.shutdown(wait=False, cancel_futures=True)
 
-            # 完成所有块
-            if not self._is_cancelled and not self._is_paused:
+            # 完成所有块（暂停只作用于块下载阶段，合并阶段不再阻塞，避免静默结束）
+            if not self._is_cancelled:
                 self._merge_files()
                 self._cleanup(keep_state=False)
                 self.finished.emit(True)
@@ -293,20 +382,57 @@ class QDownloader(QObject):
             unregister_task(self.task_id)
 
     def _prepare(self):
-        """获取文件大小，跟随重定向"""
+        """
+        获取文件大小并探测断点续传支持。
+        HEAD 失败时用 GET + Range 探测兜底；部分服务器不返回 accept-ranges
+        头但仍支持 Range，此时以 Range 探测（206）为准，避免误判失败。
+        """
+        resp = None
         try:
             sess = requests.Session()
+            sess.trust_env = True  # 兜底读取环境变量代理（加速器）
             if self.proxy:
                 sess.proxies.update({"http": self.proxy, "https": self.proxy})
-            resp = sess.head(self.url, allow_redirects=True, timeout=30)
-            resp.raise_for_status()
 
-            self.total_size = int(resp.headers.get('content-length', 0))
+            # 优先 HEAD；部分服务器（如某些 CDN）禁用 HEAD，退化为 GET + Range 探测
+            supports_range = False
+            try:
+                resp = sess.head(self.url, allow_redirects=True, timeout=30)
+                resp.raise_for_status()
+            except requests.exceptions.RequestException:
+                resp = sess.get(self.url, headers={"Range": "bytes=0-0"},
+                                stream=True, timeout=30)
+                resp.raise_for_status()
+                # GET + Range 探测返回 206 说明服务器支持断点续传
+                supports_range = resp.status_code == 206
+
+            # 解析文件大小（GET 探测返回 206 时从 Content-Range 头取总大小）
+            if resp.status_code == 206:
+                content_range = resp.headers.get('content-range', '')
+                total_str = content_range.rsplit('/', 1)[-1] if content_range else '0'
+                self.total_size = int(total_str) if total_str.isdigit() else 0
+                supports_range = True
+            else:
+                self.total_size = int(resp.headers.get('content-length', 0))
+                # HEAD 成功且显式声明支持 Range
+                if resp.headers.get('accept-ranges') == 'bytes':
+                    supports_range = True
+
             if self.total_size <= 0:
                 self.error.emit("无法获取文件大小")
                 return False
 
-            if resp.headers.get('accept-ranges') != 'bytes':
+            # HEAD 成功但未确认支持 Range 时，用 GET + Range 探测二次确认
+            if not supports_range:
+                try:
+                    probe = sess.get(self.url, headers={"Range": "bytes=0-0"},
+                                     stream=True, timeout=30)
+                    supports_range = probe.status_code == 206
+                    probe.close()
+                except requests.exceptions.RequestException:
+                    supports_range = False
+
+            if not supports_range:
                 self.error.emit("服务器不支持断点续传")
                 return False
 
@@ -317,12 +443,25 @@ class QDownloader(QObject):
         except Exception as e:
             self.error.emit(f"准备失败: {e}")
             return False
+        finally:
+            if resp is not None:
+                resp.close()
 
     def _prepare_temp_files(self):
         os.makedirs(self.temp_root, exist_ok=True)
 
+    def _block_size_of(self, idx):
+        """计算第 idx 块的预期字节数"""
+        start = idx * self.block_size
+        end = min(start + self.block_size - 1, self.total_size - 1)
+        return end - start + 1
+
     def _load_state(self):
-        """从状态文件恢复已下载块"""
+        """
+        从状态文件恢复已下载块（校验块文件完整性）。
+        状态记录为完成但临时文件缺失/不完整的块会被移除，重新下载；
+        完整的块保留临时文件，供后续合并使用（合并时统一消费并删除）。
+        """
         if not os.path.exists(self.state_file):
             return
         try:
@@ -330,11 +469,13 @@ class QDownloader(QObject):
                 data = json.load(f)
             if data.get('total_size') == self.total_size:
                 self.completed_blocks = set(data.get('completed_blocks', []))
-                # 删除已完成块的临时文件，释放空间
-                for idx in list(self.completed_blocks):
+                # 仅保留临时文件完整可用的块，其余重新下载
+                valid = set()
+                for idx in self.completed_blocks:
                     tmp = os.path.join(self.temp_dir, f"block_{idx}.tmp")
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
+                    if os.path.isfile(tmp) and os.path.getsize(tmp) >= self._block_size_of(idx):
+                        valid.add(idx)
+                self.completed_blocks = valid
         except Exception:
             pass
 
@@ -355,16 +496,18 @@ class QDownloader(QObject):
             pass
 
     def _save_state_if_needed(self):
+        # 状态文件节流保存（每 10 块一次，避免频繁磁盘写入）
         self._save_counter += 1
         if self._save_counter >= 10:
             self._save_counter = 0
             self._save_state()
-            done = len(self.completed_blocks) * self.block_size
-            self.progress.emit(min(done, self.total_size), self.total_size)
+        # 总体进度：每完成一个块就发射一次，保证 UI 平滑
+        done = len(self.completed_blocks) * self.block_size
+        self.progress.emit(min(done, self.total_size), self.total_size)
 
     def _download_block(self, session, block_idx, max_retries=5):
         """下载单个块，带指数退避重试"""
-        if self._is_cancelled:
+        if self._is_cancelled or _ABORT_EVENT.is_set():
             return False
 
         start = block_idx * self.block_size
@@ -385,8 +528,10 @@ class QDownloader(QObject):
             mode = 'wb'
 
         for attempt in range(max_retries):
-            if self._is_cancelled or self._is_paused:
+            if self._is_cancelled or _ABORT_EVENT.is_set():
                 return False
+            # 暂停时阻塞等待（resume 或 cancel 时唤醒），不返回失败
+            self._pause_event.wait()
 
             try:
                 local_headers = self.headers.copy()
@@ -398,7 +543,9 @@ class QDownloader(QObject):
                 with open(tmp_path, mode) as f:
                     downloaded = cur
                     for chunk in resp.iter_content(chunk_size=8192):
-                        if self._is_cancelled or self._is_paused:
+                        # 暂停时阻塞等待（线程不退出，resume 后继续）
+                        self._pause_event.wait()
+                        if self._is_cancelled or _ABORT_EVENT.is_set():
                             return False
                         if chunk:
                             f.write(chunk)
@@ -412,11 +559,12 @@ class QDownloader(QObject):
                                 )
                 return True
 
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            except (requests.exceptions.Timeout,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.ChunkedEncodingError) as e:
+                # 网络抖动/断流：指数退避重试，并从断点位置继续
                 if attempt < max_retries - 1:
-                    wait = 2 ** attempt
-                    time.sleep(wait)
-                    # 更新断点位置
+                    _interruptible_sleep(2 ** attempt)
                     if os.path.exists(tmp_path):
                         cur = os.path.getsize(tmp_path)
                         resume_from = start + cur
@@ -424,21 +572,38 @@ class QDownloader(QObject):
                 else:
                     raise  # 最后一次失败，抛出异常
 
+            except requests.exceptions.HTTPError as e:
+                # 服务器 5xx / 429 限流可重试，其余（4xx）直接失败
+                status = e.response.status_code if e.response is not None else 0
+                if status in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                    _interruptible_sleep(2 ** attempt)
+                    continue
+                raise
+
         return False
 
     def _merge_files(self):
-        """合并所有分块到目标文件（先合到临时目录，再原子性移动）"""
+        """
+        合并所有分块到目标文件（先合到临时目录，再原子性移动）。
+        合并前校验所有块完整性，缺失/不完整的块直接抛异常，避免产生损坏文件。
+        """
+        # 合并前校验所有块完整性
+        for i in range(self.block_count):
+            tmp = os.path.join(self.temp_dir, f"block_{i}.tmp")
+            expected = self._block_size_of(i)
+            if not os.path.isfile(tmp) or os.path.getsize(tmp) < expected:
+                raise RuntimeError(f"块 {i} 不完整或缺失（预期 {expected} 字节），无法合并")
+
         self._save_state()
         self.progress.emit(self.total_size, self.total_size)
 
-        # 在临时目录合并
+        # 在临时目录合并（分块复制，避免大文件一次性读入内存）
         with open(self.merged_temp, 'wb') as outfile:
             for i in range(self.block_count):
                 tmp = os.path.join(self.temp_dir, f"block_{i}.tmp")
-                if os.path.exists(tmp):
-                    with open(tmp, 'rb') as infile:
-                        outfile.write(infile.read())
-                    os.remove(tmp)
+                with open(tmp, 'rb') as infile:
+                    shutil.copyfileobj(infile, outfile, length=1024 * 1024)
+                os.remove(tmp)
 
         # 确保目标文件夹存在
         os.makedirs(os.path.dirname(self.dest_path), exist_ok=True)

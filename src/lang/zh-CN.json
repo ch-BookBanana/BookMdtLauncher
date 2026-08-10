@@ -47,6 +47,11 @@
     "wid.pages.download.beta": "Beta",
     "wid.pages.download.mindustryx.betaTips": "注意：MindustryX 的 Beta 通常为短期发布，启动器不会将 Beta 版本写入本地缓存；搜索后可以看到 Beta，但仅做即时加载，不会永久保存。",
 
+    "wid.pages.download.item.download": "下载",
+    "wid.pages.download.item.repoInfo": "仓库信息",
+    "wid.pages.download.item.repoInfo.publish": "发布时间:$1",
+    "wid.pages.download.item.link": "链接",
+
     "wid.pages.game": "游戏",
 
 

@@ -45,6 +45,11 @@
     "wid.pages.download.beta": "Beta",
     "wid.pages.download.mindustryx.betaTips": "Note: MindustryX beta releases are short-lived and will not be saved to the launcher's cache. Betas will appear after a search but are only loaded on demand, not persisted.",
 
+    "wid.pages.download.item.download": "Download",
+    "wid.pages.download.item.repoInfo": "Repo Info",
+    "wid.pages.download.item.repoInfo.publish": "Release Time:$1",
+    "wid.pages.download.item.link": "Link",
+
     "wid.pages.game": "Game",
     "wid.pages.setting": "Settings",
     "wid.pages.setting.launcher": "Launcher",

@@ -45,6 +45,11 @@
     "wid.pages.download.beta": "Beta",
     "wid.pages.download.mindustryx.betaTips": "注意：MindustryX の Beta は短期間で配布されることが多く、ランチャーは Beta をローカルにキャッシュしません。検索時には表示されますが、保存されず必要に応じて読み込まれます。",
 
+    "wid.pages.download.item.download": "ダウンロード",
+    "wid.pages.download.item.repoInfo": "リポジトリ情報",
+    "wid.pages.download.item.repoInfo.publish": "公開時間:$1",
+    "wid.pages.download.item.link": "リンク",
+
     "wid.pages.game": "ゲーム",
     "wid.pages.setting": "設定",
     "wid.pages.setting.launcher": "ランチャー",

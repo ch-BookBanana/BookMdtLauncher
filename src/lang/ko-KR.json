@@ -45,6 +45,11 @@
     "wid.pages.download.beta": "Beta",
     "wid.pages.download.mindustryx.betaTips": "알림: MindustryX의 베타는 일시적으로 배포되는 경우가 있어 런처는 베타를 로컬에 캐시하지 않습니다. 검색 후에는 표시되지만 저장되지 않고 필요할 때만 불러옵니다.",
 
+    "wid.pages.download.item.download": "다운로드",
+    "wid.pages.download.item.repoInfo": "저장소 정보",
+    "wid.pages.download.item.repoInfo.publish": "출시 시간:$1",
+    "wid.pages.download.item.link": "링크",
+
     "wid.pages.game": "게임",
     "wid.pages.setting": "설정",
     "wid.pages.setting.launcher": "런처",

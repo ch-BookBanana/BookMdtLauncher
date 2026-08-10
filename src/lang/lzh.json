@@ -45,6 +45,11 @@
     "wid.pages.download.beta": "Beta",
     "wid.pages.download.mindustryx.betaTips": "示：MindustryX 之 Beta 多為短暫放送，器不留其於本地；雖於搜得時見之，然僅當場載入，不存為常。",
 
+    "wid.pages.download.item.download": "納之",
+    "wid.pages.download.item.repoInfo": "庫訊",
+    "wid.pages.download.item.repoInfo.publish": "發布之時:$1",
+    "wid.pages.download.item.link": "鏈",
+
     "wid.pages.game": "藏戲",
     "wid.pages.setting": "機杼",
     "wid.pages.setting.launcher": "啟闔之器",

@@ -22,14 +22,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 init = {
-    "version": "26-T0605",
+    "version": "26-T0810",
     "BuildCode": "10000.0"
 }
 
 
-from PyQt5.Qt import *
-import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re
+from PyQt5.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, QUrl, pyqtSignal
+from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QScreen, QPainterPath, QCursor, QImage
+from PyQt5.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QAction, QDialog, QTextEdit
+from PyQt5.QtNetwork import QLocalServer, QLocalSocket
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, traceback, webbrowser
+from urllib.parse import urljoin, urlparse
 import requests
+try:
+    import markdown as _markdown
+    _MD_AVAILABLE = True
+except Exception:
+    _markdown = None
+    _MD_AVAILABLE = False
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import ctypes
@@ -73,6 +83,100 @@ def t(text, *args):
     except Exception:
         pass
     return text
+
+
+def md_to_html(text, base_url=None, session=None, cache_dir=None):
+    """markdown → HTML（含表格支持），并把 <img> 资源缓存到本地。
+
+    参数:
+        text      : markdown 原文
+        base_url  : 相对路径图片的解析基准（如 README 的 raw 地址）
+        session   : requests.Session，用于下载图片（可为 None 表示离线）
+        cache_dir : 图片缓存目录（默认 BML/.tmp/mdimg）
+    返回:
+        HTML 字符串；若 markdown 库不可用则原样返回文本。
+    """
+    if not _MD_AVAILABLE or not text:
+        return text or ""
+    try:
+        # nl2br：把单个换行（CRLF 等）也转为 <br>，避免 markdown 默认合并为同一行
+        html = _markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists", "nl2br"])
+    except Exception:
+        return text
+    # 给表格加边框（Qt 富文本渲染表格默认无边框）
+    html = re.sub(r"<table[^>]*>", '<table border="1" cellspacing="0" cellpadding="4">', html)
+    # 图片缓存
+    try:
+        html = _cache_md_images(html, base_url, session, cache_dir)
+    except Exception:
+        pass
+    return html
+
+
+def _cache_md_images(html, base_url, session, cache_dir):
+    if cache_dir is None:
+        cache_dir = getPath("BML/.tmp/mdimg")
+    os.makedirs(cache_dir, exist_ok=True)
+    fallback = getPath("src/assets/files/file-image.png")
+
+    def _to_local(src):
+        src = src.strip()
+        if not src or src.startswith(("data:", "#", "file:")):
+            return src
+        if src.startswith(("http://", "https://")):
+            full = src
+        elif base_url:
+            full = urljoin(base_url, src)
+        else:
+            full = None
+        if not full:
+            return QUrl.fromLocalFile(fallback).toString()
+        # 文件名：url 哈希 + 扩展名
+        ext = os.path.splitext(urlparse(full).path)[1]
+        if not ext or len(ext) > 8:
+            ext = ".png"
+        name = hashlib.sha1(full.encode("utf-8")).hexdigest()[:16] + ext
+        local = os.path.join(cache_dir, name)
+        if not os.path.exists(local) and session is not None:
+            try:
+                resp = session.get(full, timeout=10, stream=True)
+                if resp.status_code == 200:
+                    with open(local, "wb") as f:
+                        for chunk in resp.iter_content(65536):
+                            f.write(chunk)
+            except Exception:
+                pass
+        if os.path.exists(local) and os.path.getsize(local) > 0:
+            return QUrl.fromLocalFile(local).toString()
+        return QUrl.fromLocalFile(fallback).toString()
+
+    def _replace(m):
+        tag = m.group(0)
+        # 替换 src 为本地路径
+        def _src(m2):
+            return m2.group(1) + _to_local(m2.group(2)) + m2.group(3)
+        new_tag = re.sub(r'(\bsrc\s*=\s*["\'])([^"\']+)(["\'])', _src, tag, flags=re.IGNORECASE)
+        # 移除已有 width/height，统一按原始尺寸等比例缩小 1/2
+        new_tag = re.sub(r'\s+(?:width|height)\s*=\s*["\'][^"\']*["\']', '', new_tag, flags=re.IGNORECASE)
+        w = h = 0
+        ms = re.search(r'\bsrc\s*=\s*["\']([^"\']+)["\']', new_tag, flags=re.IGNORECASE)
+        if ms:
+            try:
+                q = QImage(QUrl(ms.group(1)).toLocalFile())
+                if not q.isNull():
+                    w, h = q.width() // 2, q.height() // 2
+            except Exception:
+                pass
+        if w > 0 and h > 0:
+            size_attr = ' width="%d" height="%d"' % (w, h)
+            if re.search(r'/\s*>$', new_tag):
+                new_tag = re.sub(r'/\s*>$', size_attr + '/>', new_tag)
+            else:
+                new_tag = re.sub(r'>$', size_attr + '>', new_tag)
+        # 换行由 nl2br 扩展统一处理，这里不再额外添加
+        return new_tag
+
+    return re.sub(r'<img\b[^>]*>', _replace, html, flags=re.IGNORECASE)
 
 
 class Leftw(QWidget):
@@ -228,6 +332,9 @@ class Main():
         # 后台预加载所有游戏数据到缓存，加速后续切换
         QThTimer.task(lambda event: mdtScanner.preload_all(), None, None, 100)
 
+        # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
+        app.aboutToQuit.connect(self._cleanup_on_quit)
+
     def gameRenovate(self, event):
         mdtScanner.invalidate_cache()
         mdts = mdtScanner.getMdts()
@@ -247,8 +354,27 @@ class Main():
             self.settings["gameList"] = games
             event.lambdas[0].emit()
             event.lambdas[1].emit()
-        
-        
+
+    def _cleanup_on_quit(self):
+        """应用退出前的统一清理（aboutToQuit 时执行）。
+
+        顺序：隐藏托盘 → 停止下载线程 → 停止 QThTimer 后台线程。
+        QThTimer.shutdown() 在模块内也连接了 aboutToQuit，重复调用是幂等的。
+        """
+        try:
+            self.tray.hide()
+        except Exception:
+            pass
+        try:
+            from src.utils.QDownloader import shutdown_all as _qd_shutdown_all
+            _qd_shutdown_all()
+        except Exception:
+            pass
+        try:
+            QThTimer.shutdown()
+        except Exception:
+            pass
+
     _OBF_BYTE = 0x5A
 
     @classmethod
@@ -412,6 +538,7 @@ class Main():
             conn.deleteLater()
 
         def init_wid(self):
+            self.floatingStack = self.FloatingStack(self, self.root)
             self.root.logger.debug("init QW.window.left")
             self.left = self.Left(self, self.root)
             self.root.logger.debug("init QW.window.lline")
@@ -434,6 +561,8 @@ class Main():
 
             self.left.raise_()
             self.lline.raise_()
+
+            self.floatingStack.raise_()
 
             self.githubSetting = self.GithubSetting(self, self.root)
 
@@ -506,6 +635,7 @@ class Main():
         def resizeEvent(self, event):
             super().resizeEvent(event)
             self.githubSetting.setGeometry(0,0,self.width(),self.height())
+            self.floatingStack.setGeometry(0,40,self.width(),self.height()-40)
             
 
         class GithubSetting(QWidget):
@@ -531,6 +661,11 @@ class Main():
 
                 self.panel = self.Panel(self, self.root)
                 self.l.addWidget(self.panel,0)
+
+            def showEvent(self, event):
+                # 显示时提层，盖过 floatingStack 等覆盖控件
+                super().showEvent(event)
+                self.raise_()
 
             def _sync_rate_from_api(self):
                 """将 GithubAPI 中的实时 rate 同步到 settings 内存（不写盘）。"""
@@ -2714,6 +2849,7 @@ class Main():
                                         btn.click()
                                     return page_
 
+                                # 下载界面游戏本体模板
                                 class Template(QWidget):
                                     def __init__(self, parent=None, root=None, text=None, icon=None):
                                         super().__init__()
@@ -2785,6 +2921,15 @@ class Main():
                                         self.scroll_slider.setVisible(
                                             self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
                                         )
+
+                                    def _clear_scroll_stretch(self):
+                                        i = 0
+                                        while i < self.scroll_layout.count():
+                                            it = self.scroll_layout.itemAt(i)
+                                            if it is not None and it.spacerItem() is not None:
+                                                self.scroll_layout.takeAt(i)
+                                                continue
+                                            i += 1
 
                                     def resizeEvent(self, event):
                                         self.scroll_slider.setGeometry(
@@ -2989,8 +3134,17 @@ class Main():
                                             self.data = {}
                                             self.btnPix = [QPixmap(),QPixmap()]
                                             self.setAttribute(Qt.WA_StyledBackground, True)
-                                            self.setStyleSheet("border-radius:10px;max-width:600px;")
+
+                                            self.setStyleSheet('QWidget[wid_="download.game.classs"]{border-radius:10px;}')
+                                            self.setProperty("wid_","download.game.classs")
+                                            self.setMaximumWidth(600)
                                             self.init_wid()
+
+                                        def sizeHint(self):
+                                            h = super().sizeHint().height()
+                                            if h < 0 and self.layout() is not None:
+                                                h = self.layout().totalSizeHint().height()
+                                            return QSize(600, h)
 
                                         def init_wid(self):
                                             self.layout = QVBoxLayout(self)
@@ -3080,14 +3234,20 @@ class Main():
                                             super().__init__()
                                             self.parent = parent
                                             self.root = root
-                                            self.itemd = {}   # data list: index -> data
-                                            self.itemw = []   # pool of visible Item widgets
+                                            # 上层模板（Classs.parent 即 Template 子类），供 Item 引用 RepoInfo 等嵌套类
+                                            self.template = self.parent.parent if self.parent is not None else None
+                                            self.itemd = {}   # 数据列表
+                                            self.itemw = []   # 可视化复用item池
                                             self.item_h = 50
                                             self.viewport_h = 0
                                             self.total_count = 0
                                             self.start_index = 0
                                             self.init_wid()
                                             self._update_visible()
+                                            self._app_state_conn = None
+                                            _app = QApplication.instance()
+                                            if _app is not None:
+                                                self._app_state_conn = _app.applicationStateChanged.connect(self._on_app_state_changed)
 
                                         def init_wid(self):
                                             self.layout = QVBoxLayout(self)
@@ -3097,12 +3257,13 @@ class Main():
                                             self.scroll = QScrollArea(self)
                                             self.scroll.setWidgetResizable(True)
                                             self.scroll.setFrameShape(QFrame.NoFrame)
+                                            # 滚动时：1) 刷新 item 池内容 2) 刷新悬停状态
                                             self.scroll.verticalScrollBar().valueChanged.connect(self._update_visible)
+                                            self.scroll.verticalScrollBar().valueChanged.connect(self._check_all_hover)
                                             self.layout.addWidget(self.scroll)
 
                                             self.main = QWidget()
                                             self.main.setMinimumWidth(0)
-                                            self.main.setAttribute(Qt.WA_TransparentForMouseEvents, True)
                                             self.scroll.setWidget(self.main)
 
                                             self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
@@ -3117,7 +3278,7 @@ class Main():
                                                 item["name"] = name
                                                 self.itemd[idx] = item
                                             self.total_count = len(data)
-                                            self.main.setMinimumHeight(self.total_count * self.item_h)
+                                            self.main.setFixedHeight(self.total_count * self.item_h)
                                             self._update_visible()
 
                                         def resizeEvent(self, event):
@@ -3128,7 +3289,7 @@ class Main():
                                             self.viewport_h = self.height()
                                             visible = int((self.viewport_h + self.item_h - 1) / self.item_h) + 2
                                             while len(self.itemw) < visible:
-                                                it = self.Item(self.main, self.root)
+                                                it = self.Item(self.main, self.root, self.template)
                                                 it.setParent(self.main)
                                                 it.hide()
                                                 self.itemw.append(it)
@@ -3145,23 +3306,36 @@ class Main():
                                                 self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
                                             )
                                             self._update_visible()
-                                            
-                                        def scrollEvent(self):
-                                            self._update_visible()
+
+                                        def _check_all_hover(self):
+                                            for w in self.itemw:
+                                                w.check_hover()
+
+                                        def _on_app_state_changed(self, state):
+                                            self._check_all_hover()
+
+                                        def deleteLater(self):
+                                            conn = getattr(self, '_app_state_conn', None)
+                                            if conn is not None:
+                                                try:
+                                                    QApplication.instance().applicationStateChanged.disconnect(conn)
+                                                except Exception:
+                                                    pass
+                                                self._app_state_conn = None
+                                            super().deleteLater()
 
                                         def _update_visible(self):
                                             if self.total_count == 0:
                                                 for w in self.itemw:
                                                     w.hide()
                                                 return
-                                            # ensure pool populated even before first resize
                                             if not self.itemw:
                                                 self.viewport_h = self.scroll.viewport().height()
                                                 if self.viewport_h <= 0:
                                                     self.viewport_h = 400
                                                 visible = max(1, int(self.viewport_h / self.item_h)) + 1
                                                 for _ in range(visible):
-                                                    it = self.Item(self.main, self.root)
+                                                    it = self.Item(self.main, self.root, self.template)
                                                     it.setParent(self.main)
                                                     it.hide()
                                                     self.itemw.append(it)
@@ -3171,7 +3345,6 @@ class Main():
                                             if first < 0:
                                                 first = 0
                                             self.start_index = first
-                                            # populate pool
                                             for i, widget in enumerate(self.itemw):
                                                 idx = self.start_index + i
                                                 if idx >= self.total_count:
@@ -3182,17 +3355,34 @@ class Main():
                                                     widget.hide()
                                                     continue
                                                 widget.set_data(data, getattr(self, 'item_icon_pixmap', None))
+                                                widget.lighting(bool(self.root.settings.get("theme")))
+                                                widget.check_hover()
                                                 y = idx * self.item_h
                                                 widget.setGeometry(0, y, self.scroll.viewport().width(), self.item_h)
                                                 widget.show()
 
                                         class Item(QWidget):
-                                            def __init__(self,parent=None,root=None):
+                                            def __init__(self,parent=None,root=None,template=None):
                                                 super().__init__(parent)
                                                 self.parent = parent
                                                 self.root = root
+                                                self.template = template
+                                                if self.template is None:
+                                                    # 兜底：沿父链查找包含 RepoInfo 的模板
+                                                    w = self.parent
+                                                    while w is not None:
+                                                        if hasattr(w, "RepoInfo"):
+                                                            self.template = w
+                                                            break
+                                                        w = w.parent()
                                                 self.data={}
+                                                self.light = None
+                                                self._hovering = False
+                                                self.pixmap = QPixmap()
                                                 self.setFixedHeight(50)
+                                                self.setMouseTracking(True)
+                                                self.setAttribute(Qt.WA_StyledBackground, True)
+                                                self.setObjectName("item")
                                                 self.init_wid()
 
                                             def set_data(self, data: dict, icon_pixmap=None):
@@ -3201,23 +3391,62 @@ class Main():
                                                 time = self.data.get("time") or ""
                                                 self.title.setText(title)
                                                 self.time.setText(time)
+                                                self.pixmap = icon_pixmap or QPixmap()
                                                 # pre-computed pixmap passed from outside
                                                 if icon_pixmap and not icon_pixmap.isNull():
                                                     self.icon.setPixmap(icon_pixmap.scaled(30,30, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                                                 else:
                                                     self.icon.clear()
 
+                                            class RBtn(QPushButton):
+                                                def __init__(self, icon_path, tooltip_key, parent=None, root=None):
+                                                    super().__init__(parent)
+                                                    self.parent = parent
+                                                    self.root = root
+                                                    self._icon_path = icon_path
+                                                    self._tooltip_key = tooltip_key
+                                                    self._is_show = True   # 悬浮 Item 时是否显示该按钮
+                                                    self.init_ui()
+
+                                                def init_ui(self):
+                                                    self.setFixedSize(20, 20)
+                                                    self.setProperty("wid", "lbtn")
+                                                    # 开启 QSS 背景，让 lbtn:hover 的悬停背景生效
+                                                    self.setAttribute(Qt.WA_StyledBackground, True)
+                                                    self.hide()
+                                                    self.langing()
+
+                                                def langing(self):
+                                                    self.setToolTip(self.root.langer.get(self._tooltip_key))
+
+                                                def lighting(self, light: bool):
+                                                    color = QColor(0, 0, 0) if light else QColor(255, 255, 255)
+                                                    icon = change_color(self._icon_path, color)
+                                                    pixmap = icon.pixmap(20, 20)
+                                                    if not pixmap.isNull():
+                                                        smooth_pixmap = pixmap.scaled(
+                                                            18, 18,
+                                                            Qt.KeepAspectRatio,
+                                                            Qt.FastTransformation
+                                                        )
+                                                        self.setIcon(QIcon(smooth_pixmap))
+                                                    else:
+                                                        self.root.logger.warning(f"Failed to load pixmap for {self._icon_path}")
+
                                             def init_wid(self):
                                                 self.layout = QHBoxLayout(self)
-                                                self.layout.setContentsMargins(0, 0, 0, 0)
-                                                self.layout.setSpacing(10)
+                                                self.layout.setContentsMargins(10, 0, 10, 0)
+                                                self.layout.setSpacing(0)
                                                 self.layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
                                                 self.icon = QLabel()
                                                 self.icon.setFixedSize(30,30)
                                                 self.layout.addWidget(self.icon,0)
 
+                                                self.layout.addSpacing(10)
+
                                                 self.l1w = QWidget()
+                                                self.l1w.setStyleSheet("background:transparent")
                                                 self.layout.addWidget(self.l1w,1)
                                                 self.l1 = QVBoxLayout(self.l1w)
                                                 self.l1.setContentsMargins(0, 0, 0, 0)
@@ -3233,6 +3462,310 @@ class Main():
                                                 self.time.setProperty("wid","title")
                                                 self.time.setFixedHeight(20)
                                                 self.l1.addWidget(self.time,0)
+
+                                                self.layout.addStretch(1)
+
+                                                # right-side action buttons
+                                                self.btn_download = self.RBtn(getPath("src/assets/buttons/download.png"), "wid.pages.download.item.download", self, self.root)
+                                                self.layout.addWidget(self.btn_download, 0)
+
+                                                self.btn_repoInfo = self.RBtn(getPath("src/assets/nav/menu.png"), "wid.pages.download.item.repoInfo", self, self.root)
+                                                self.layout.addWidget(self.btn_repoInfo, 0)
+                                                self.btn_repoInfo.clicked.connect(lambda:self.root.window.floatingStack.add_page(self.template.RepoInfo(self,self.root,self.data,self.pixmap)))
+                                                
+                                                self.btn_link = self.RBtn(getPath("src/assets/nav/link.png"), "wid.pages.download.item.link", self, self.root)
+                                                self.layout.addWidget(self.btn_link, 0)
+                                                self.btn_link.clicked.connect(self.open_release)
+
+                                                self._action_btns = [self.btn_download, self.btn_repoInfo, self.btn_link]
+
+                                            def open_release(self):
+                                                url = self.data.get("releaseUrl") or ""
+                                                if url:
+                                                    webbrowser.open(url)
+                                                else:
+                                                    self.root.logger.warning("Item has no releaseUrl to open")
+
+                                            def set_hover(self, hover):
+                                                if self._hovering != hover:
+                                                    self._hovering = hover
+                                                    # 悬停时应用高亮背景，移开恢复（内联样式保证 QWidget 子类背景生效）
+                                                    light = bool(self.root.settings.get("theme"))
+                                                    bg = "rgb(229, 228, 228)" if light else "rgb(55, 55, 55)"
+                                                    self.setStyleSheet(
+                                                        "QWidget#item { background: %s; }" % bg if hover else ""
+                                                    )
+                                                    self._update_btns()
+
+                                            def _update_btns(self):
+                                                for btn in self._action_btns:
+                                                    btn.setVisible(self._hovering and getattr(btn, '_is_show', True))
+
+                                            def check_hover(self):
+                                                if self.isVisible():
+                                                    pos = self.mapFromGlobal(QCursor.pos())
+                                                    self.set_hover(self.rect().contains(pos))
+                                                else:
+                                                    self.set_hover(False)
+
+                                            def enterEvent(self, event):
+                                                self.set_hover(True)
+                                                super().enterEvent(event)
+
+                                            def leaveEvent(self, event):
+                                                # 鼠标移到子按钮上时 Item 也会收到 Leave，
+                                                # 但不能直接取消悬停，需按全局位置判断是否真的离开 Item
+                                                self.check_hover()
+                                                super().leaveEvent(event)
+
+                                            def mouseMoveEvent(self, event):
+                                                self.check_hover()
+                                                super().mouseMoveEvent(event)
+
+                                            def lighting(self, light: bool):
+                                                if self.light == light:
+                                                    return
+                                                self.light = light
+                                                for btn in self._action_btns:
+                                                    btn.lighting(light)
+
+                                    class RepoInfo(QWidget):
+                                        def __init__(self, parent=None, root=None, data=None, pixmap=None): 
+                                            super().__init__()
+                                            self.parent = parent
+                                            self.root = root
+                                            self.data = data
+                                            self.pixmap = pixmap
+                                            self.setObjectName("repoInfo")
+                                            self.setAttribute(Qt.WA_StyledBackground, True)
+                                            self.init_wid()
+                                            self.langing()
+                                            self.lighting(bool(self.root.settings.get("theme")))
+
+                                        def init_wid(self):
+                                            self.layout = QVBoxLayout(self)
+                                            self.layout.setContentsMargins(0, 0, 0, 0)
+                                            self.layout.setSpacing(0)
+                                            self.layout.setAlignment(Qt.AlignTop)
+
+                                            # 滚动区域（整体可滚动，隐藏原生滚动条）
+                                            self.scroll = QScrollArea(self)
+                                            self.scroll.setWidgetResizable(True)
+                                            self.scroll.setFrameShape(QFrame.NoFrame)
+                                            self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                            self.layout.addWidget(self.scroll, 1)
+
+                                            self.main = QWidget()
+                                            self.main.setObjectName("repoMain")
+                                            self.main.setAttribute(Qt.WA_StyledBackground, True)
+                                            # 内容最大宽度 800，超出后在视口中水平居中
+                                            self.main.setMaximumWidth(800)
+                                            self.scroll_layout = QVBoxLayout(self.main)
+                                            self.scroll_layout.setContentsMargins(20, 15, 20, 15)
+                                            self.scroll_layout.setSpacing(10)
+                                            self.scroll_layout.setAlignment(Qt.AlignTop)
+                                            self.scroll.setWidget(self.main)
+                                            self.scroll.setAlignment(Qt.AlignHCenter)
+
+                                            self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
+                                            self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
+                                            self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
+                                            self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+
+                                            data = self.data or {}
+
+                                            # ===== 顶部：左图标 + 中间(title / 发布时间) =====
+                                            self.h1 = QWidget()
+                                            self.h1.setStyleSheet("background: transparent")
+                                            self.scroll_layout.addWidget(self.h1, 0)
+                                            self.h1_layout = QHBoxLayout(self.h1)
+                                            self.h1_layout.setContentsMargins(0, 0, 0, 0)
+                                            self.h1_layout.setSpacing(15)
+                                            self.h1_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+                                            self.icon = QLabel()
+                                            self.icon.setFixedSize(48, 48)
+                                            self.h1_layout.addWidget(self.icon, 0)
+
+                                            self.h1w = QWidget()
+                                            self.h1w.setStyleSheet("background: transparent")
+                                            self.h1_layout.addWidget(self.h1w, 1)
+                                            self.h1w_layout = QVBoxLayout(self.h1w)
+                                            self.h1w_layout.setContentsMargins(0, 0, 0, 0)
+                                            self.h1w_layout.setSpacing(4)
+                                            self.h1w_layout.setAlignment(Qt.AlignVCenter)
+
+                                            self.title = QLabel(data.get("title") or data.get("name") or "")
+                                            self.title.setProperty("wid", "text")
+                                            self.title.setStyleSheet("font-size: 18px; font-weight: bold;")
+                                            self.title.setWordWrap(True)
+                                            self.h1w_layout.addWidget(self.title, 0)
+
+                                            self.time = QLabel()
+                                            self.time.setProperty("wid", "title")
+                                            self.time.setStyleSheet("font-size: 13px;")
+                                            self.h1w_layout.addWidget(self.time, 0)
+
+                                            # ===== 分隔线 =====
+                                            line1 = QWidget()
+                                            line1.setProperty("wid", "line")
+                                            line1.setFixedHeight(1)
+                                            self.scroll_layout.addWidget(line1, 0)
+
+                                            # ===== 定高介绍区（内部可滚动查看全文） =====
+                                            self.intro_area = QScrollArea(self.main)
+                                            self.intro_area.setFixedHeight(300)
+                                            self.intro_area.setWidgetResizable(True)
+                                            self.intro_area.setFrameShape(QFrame.NoFrame)
+                                            self.intro_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                            self.scroll_layout.addWidget(self.intro_area, 0)
+
+                                            self.intro = QLabel()
+                                            self.intro.setAlignment(Qt.AlignTop)
+                                            self.intro.setTextFormat(Qt.RichText)
+                                            self.intro.setProperty("wid", "text")
+                                            self.intro.setStyleSheet("font-size: 14px;")
+                                            self.intro.setWordWrap(True)
+                                            self.intro.setTextInteractionFlags(Qt.NoTextInteraction)
+                                            self.intro_area.setWidget(self.intro)
+
+                                            # 后台转换 markdown → HTML（含图片缓存），完成后渲染
+                                            intro_md = data.get("intro") or ""
+                                            base_url = getattr(getattr(self.parent, "template", None), "introUrl", None)
+                                            self._intro_loading = QLabel("...")
+                                            self._intro_loading.setStyleSheet("color: gray; font-size: 14px;")
+                                            self._intro_loading.setParent(self.intro_area.viewport())
+                                            self._intro_loading.adjustSize()
+                                            self._intro_loading.move(0, 0)
+
+                                            def _job(event):
+                                                return md_to_html(
+                                                    intro_md,
+                                                    base_url=base_url,
+                                                    session=self.root.githubAPI._session if self.root else None,
+                                                    cache_dir=getPath("BML/.tmp/mdimg"),
+                                                )
+
+                                            def _done(result):
+                                                try:
+                                                    if not isinstance(result, str):
+                                                        result = intro_md
+                                                    self.intro.setText(result)
+                                                    self.intro.setTextFormat(Qt.RichText)
+                                                except Exception:
+                                                    pass
+                                                finally:
+                                                    try:
+                                                        self._intro_loading.hide()
+                                                        self._intro_loading.deleteLater()
+                                                    except Exception:
+                                                        pass
+
+                                            QThTimer.task(_job, result_callback=_done)
+
+                                            # ===== 分隔线 =====
+                                            line2 = QWidget()
+                                            line2.setProperty("wid", "line")
+                                            line2.setFixedHeight(1)
+                                            self.scroll_layout.addWidget(line2, 0)
+
+                                            # ===== 文件列表（item 风格：图标 + 标题 + 下载按钮） =====
+                                            self.files_w = QWidget()
+                                            self.files_w.setStyleSheet("background: transparent")
+                                            self.scroll_layout.addWidget(self.files_w, 0)
+                                            self.files_layout = QVBoxLayout(self.files_w)
+                                            self.files_layout.setContentsMargins(0, 0, 0, 0)
+                                            self.files_layout.setSpacing(0)
+                                            self.files_layout.setAlignment(Qt.AlignTop)
+
+                                            self.files = []
+                                            assets = data.get("assets") or {}
+                                            for name in assets.keys():
+                                                fi = self.FileItem(self.files_w, self.root, name)
+                                                self.files.append(fi)
+                                                self.files_layout.addWidget(fi, 0)
+
+                                            self.scroll_layout.addStretch(1)
+
+                                        def langing(self):
+                                            time_str = (self.data or {}).get("time") or ""
+                                            self.time.setText(t(self.root.langer.get("wid.pages.download.item.repoInfo.publish"), time_str))
+                                            for fi in self.files:
+                                                fi.langing()
+
+                                        def lighting(self, light):
+                                            bg = "rgb(229, 228, 228)" if light else "rgb(55, 55, 55)"
+                                            self.setStyleSheet("QWidget#repoInfo { background: %s; }" % bg)
+                                            self.main.setStyleSheet("QWidget#repoMain { background: %s; }" % bg)
+                                            if self.pixmap is not None and not self.pixmap.isNull():
+                                                self.icon.setPixmap(self.pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                                            else:
+                                                self.icon.clear()
+                                            for fi in self.files:
+                                                fi.lighting(light)
+
+                                        def resizeEvent(self, event):
+                                            self.scroll_slider.setGeometry(
+                                                self.scroll.width() - 5, 0, 5, self.scroll.height()
+                                            )
+                                            super().resizeEvent(event)
+
+                                        def showEvent(self, event):
+                                            super().showEvent(event)
+                                            self.scroll_slider.setVisible(
+                                                self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
+                                            )
+
+                                        class FileItem(QWidget):
+                                            def __init__(self, parent=None, root=None, name=""):
+                                                super().__init__(parent)
+                                                self.parent = parent
+                                                self.root = root
+                                                self.name = name
+                                                self.setFixedHeight(40)
+                                                self.setAttribute(Qt.WA_StyledBackground, True)
+                                                self.init_wid()
+                                                self.langing()
+                                                self.lighting(bool(self.root.settings.get("theme")))
+
+                                            def init_wid(self):
+                                                self.layout = QHBoxLayout(self)
+                                                self.layout.setContentsMargins(8, 0, 8, 0)
+                                                self.layout.setSpacing(8)
+                                                self.layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+                                                self.icon = QLabel()
+                                                self.icon.setFixedSize(24, 24)
+                                                self.layout.addWidget(self.icon, 0)
+
+                                                self.title = QLabel(self.name)
+                                                self.title.setProperty("wid", "text")
+                                                self.title.setStyleSheet("font-size: 14px;")
+                                                self.title.setWordWrap(True)
+                                                self.layout.addWidget(self.title, 1)
+
+                                                self.btn_download = QPushButton(self)
+                                                self.btn_download.setFixedSize(18, 18)
+                                                self.btn_download.setProperty("wid", "lbtn")
+                                                self.btn_download.setAttribute(Qt.WA_StyledBackground, True)
+                                                # 目前不连接任何信号
+                                                self.layout.addWidget(self.btn_download, 0)
+
+                                            def langing(self):
+                                                self.btn_download.setToolTip(self.root.langer.get("wid.pages.download.item.download"))
+
+                                            def lighting(self, light):
+                                                color = QColor(0, 0, 0) if light else QColor(255, 255, 255)
+                                                icon = change_color("src/assets/files/file.png", color)
+                                                pixmap = icon.pixmap(24, 24)
+                                                if not pixmap.isNull():
+                                                    self.icon.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                                                bicon = change_color("src/assets/buttons/download.png", color)
+                                                bpixmap = bicon.pixmap(18, 18)
+                                                if not bpixmap.isNull():
+                                                    self.btn_download.setIcon(QIcon(bpixmap.scaled(16, 16, Qt.KeepAspectRatio, Qt.FastTransformation)))
+
+                                            
 
                                 class Origin(Template):
                                     def __init__(self, parent=None, root=None, text=None, icon=None):
@@ -3262,6 +3795,8 @@ class Main():
                                         for w in self.classs.values():
                                             w.deleteLater()
                                         self.classs.clear()
+                                        # 清理上次添加的 stretch（遍历移除全部 spacer，防止残留累积）
+                                        self._clear_scroll_stretch()
                                         # pre-compute icon pixmap once
                                         icon_pixmap = QPixmap()
                                         if os.path.exists(self.iconPath):
@@ -3270,8 +3805,9 @@ class Main():
                                             clss = self.Classs(self, self.root)
                                             clss.setData(i, j, icon_pixmap)
                                             self.classs[i] = clss
-                                            self.scroll_layout.addWidget(clss)
-
+                                            self.scroll_layout.addWidget(clss,0)
+                                        # 尾部 stretch 吸收剩余空间，防止面板被垂直拉伸（挤压在顶部）
+                                        self.scroll_layout.addStretch(1)
 
                                     def classify(self, back):
                                         name_raw = back.get("name") or ""
@@ -3347,8 +3883,8 @@ class Main():
                                         self.betaTipsText.setWordWrap(True)
                                         bt_l.addWidget(self.betaTipsText, 1)
 
-                                        # let height follow text (minimum height), place later above first Classs
-                                        self.betaTips.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+                                        self.betaTips.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+                                        self.betaTips.setMaximumWidth(600)
                                         try:
                                             self.betaTipsIcon.setPixmap(change_color(getPath("src/assets/actions/tips.png"), QColor(255,165,0)).pixmap(QSize(18,18)))
                                         except Exception:
@@ -3398,6 +3934,8 @@ class Main():
                                         for w in self.classs.values():
                                             w.deleteLater()
                                         self.classs.clear()
+                                        # 清理上次添加的 stretch（遍历移除全部 spacer，防止残留累积）
+                                        self._clear_scroll_stretch()
                                         icon_pixmap = QPixmap()
                                         if os.path.exists(self.iconPath):
                                             icon_pixmap.load(self.iconPath)
@@ -3419,7 +3957,9 @@ class Main():
                                             display_name = self.root.langer.get(f"wid.pages.download.{i}")
                                             clss.setData(display_name, j, icon_pixmap)
                                             self.classs[i] = clss
-                                            self.scroll_layout.addWidget(clss)
+                                            self.scroll_layout.addWidget(clss,0)
+                                        # 尾部 stretch 吸收剩余空间，防止面板被垂直拉伸（挤压在顶部）
+                                        self.scroll_layout.addStretch(1)
 
                                     def classify(self, back):
                                         name_raw = back.get("name") or ""
@@ -4208,6 +4748,160 @@ class Main():
                                     if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,self.root.langer.get("wid.pages.setting.launcher.java.select.auto"))
                                 except : pass
 
+        class FloatingStack(QWidget):
+            def __init__(self,parent=None,root=None):
+                super().__init__(parent)
+                self.parent = parent
+                self.root = root
+                self.setAttribute(Qt.WA_StyledBackground, True)
+                self.init_wid()
+                self.refresh()
+
+            def init_wid(self):
+                self.layout = QVBoxLayout(self)
+                self.layout.setContentsMargins(0,0,0,0)
+                self.layout.setSpacing(0)
+                self.layout.setAlignment(Qt.AlignTop)
+
+                self.line = QWidget()
+                self.line.setProperty("wid","line")
+                self.line.setFixedHeight(1)
+                self.layout.addWidget(self.line)
+
+                self.l2w = QWidget()
+                self.layout.addWidget(self.l2w,1)
+
+                self.l2 = QHBoxLayout(self.l2w)
+                self.l2.setContentsMargins(0,0,0,0)
+                self.l2.setSpacing(0)
+                self.l2.setAlignment(Qt.AlignLeft)
+
+                self.left = self.Left(self,self.root)
+                self.l2.addWidget(self.left,0)
+
+                self.line2 = QWidget()
+                self.line2.setProperty("wid","line")
+                self.line2.setFixedWidth(1)
+                self.l2.addWidget(self.line2,0)
+
+                self.main = self.Main(self,self.root)
+                self.l2.addWidget(self.main,1)
+
+            def refresh(self):
+                # 栈空时隐藏整个浮层，否则显示并提层
+                if self.main.count() <= 0:
+                    self.hide()
+                else:
+                    self.show()
+                    self.raise_()
+                self.left.refresh()
+
+            def add_page(self,wid):
+                # 入栈：添加页面并切换到栈顶
+                self.main.addWidget(wid)
+                self.main.setCurrentWidget(wid)
+                self.refresh()
+
+            def pop_page(self):
+                # 出栈：移除栈顶并销毁
+                if self.main.count() <= 0:
+                    return
+                wid = self.main.currentWidget()
+                self.main.removeWidget(wid)
+                wid.deleteLater()
+                # 显示剩余栈顶
+                if self.main.count() > 0:
+                    self.main.setCurrentIndex(self.main.count() - 1)
+                self.refresh()
+
+            def clear(self):
+                # 清空整个栈（一次性全部销毁）
+                while self.main.count() > 0:
+                    wid = self.main.widget(0)
+                    self.main.removeWidget(wid)
+                    wid.deleteLater()
+                self.refresh()
+
+            class Left(QWidget):
+                def __init__(self,parent=None,root=None):
+                    super().__init__(parent)
+                    self.parent = parent
+                    self.root = root
+                    self.setFixedWidth(40)
+                    self.init_wid()
+
+                def init_wid(self):
+                    self.layout = QVBoxLayout(self)
+                    self.layout.setContentsMargins(5,5,5,5)
+                    self.layout.setSpacing(0)
+                    self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+                    # 内置退出按钮（左箭头，返回上一页）
+                    self.back = self.Back(self,self.root)
+                    self.layout.addWidget(self.back,0,Qt.AlignHCenter)
+
+                    # 清空整个栈按钮（叉号）
+                    self.btn_close = self.Close(self,self.root)
+                    self.layout.addWidget(self.btn_close,0,Qt.AlignHCenter)
+
+                def refresh(self):
+                    # 栈空时禁用两个按钮
+                    enabled = self.parent.main.count() > 0
+                    self.back.setEnabled(enabled)
+                    self.btn_close.setEnabled(enabled)
+
+                class Back(QPushButton):
+                    def __init__(self,parent=None,root=None):
+                        super().__init__(parent)
+                        self.parent = parent
+                        self.root = root
+                        self.setFixedSize(30,30)
+                        self.setAttribute(Qt.WA_StyledBackground, False)
+                        self.setProperty("wid","tbtn")
+                        self.langing()
+                        self.lighting(self.root.settings["theme"])
+                        self.clicked.connect(self.parent.parent.pop_page)
+
+                    def lighting(self, light: bool):
+                        color = QColor(120,120,120) if light else QColor(200,200,200)
+                        logo = change_color("src/assets/nav/back.png", color)
+                        self.setIcon(QIcon(logo.pixmap(48,48)))
+
+                    def langing(self):
+                        self.setToolTip(self.root.langer.get("text.return"))
+
+                class Close(QPushButton):
+                    def __init__(self,parent=None,root=None):
+                        super().__init__(parent)
+                        self.parent = parent
+                        self.root = root
+                        self.setFixedSize(30,30)
+                        self.setAttribute(Qt.WA_StyledBackground, False)
+                        self.setProperty("wid","tbtn")
+                        self.langing()
+                        self.lighting(self.root.settings["theme"])
+                        self.clicked.connect(self.parent.parent.clear)
+
+                    def lighting(self, light: bool):
+                        color = QColor(120,120,120) if light else QColor(200,200,200)
+                        logo = change_color("src/assets/tribtns/close.png", color)
+                        self.setIcon(QIcon(logo.pixmap(48,48)))
+
+                    def langing(self):
+                        self.setToolTip(self.root.langer.get("wid.top.close"))
+
+            class Main(QStackedWidget):
+                def __init__(self,parent=None,root=None):
+                    super().__init__(parent)
+                    self.parent = parent
+                    self.root = root
+                    self.init_wid()
+
+                def init_wid(self):
+                    # QStackedWidget 内部自带 QStackedLayout 管理页面，无需（也不能）再设置 layout
+                    pass
+
+
     class Tray(QSystemTrayIcon):
         def __init__(self, parent=None, root=None):
             super().__init__()
@@ -4626,8 +5320,6 @@ class Main():
         def taskbar_theme(self):
             """
             获取 Windows 系统外壳主题颜色 (light/dark)
-            注意：这主要影响任务栏、开始菜单等系统UI。
-            如果希望跟随应用窗口主题，应使用 AppsUseLightTheme
             """
             try:
                 key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -4656,9 +5348,14 @@ if __name__ == "__main__":
         try:
             main = Main(app)
             main.window.show()
-            sys.exit(app.exec_())
+            code = app.exec_()
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except Exception:
+                pass
+            os._exit(code)
         except Exception as e:
-            import traceback, webbrowser
             err_msg = traceback.format_exc()
 
             print(err_msg)
@@ -4708,4 +5405,6 @@ if __name__ == "__main__":
 
             dialog.rejected.connect(QApplication.quit)
             dialog.exec_()
+            # 出错分支同样强制退出，避免残留线程导致挂起/崩溃弹窗
+            os._exit(1)
 

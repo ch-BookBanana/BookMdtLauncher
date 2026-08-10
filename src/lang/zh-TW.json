@@ -45,6 +45,11 @@
     "wid.pages.download.beta": "Beta",
     "wid.pages.download.mindustryx.betaTips": "提醒：MindustryX 的 Beta 版本通常短暫發布，啟動器不會將 Beta 快取於本機；搜尋後會顯示 Beta，但僅作即時載入，並不會儲存。",
 
+    "wid.pages.download.item.download": "下載",
+    "wid.pages.download.item.repoInfo": "儲存庫資訊",
+    "wid.pages.download.item.repoInfo.publish": "發佈時間:$1",
+    "wid.pages.download.item.link": "連結",
+
     "wid.pages.game": "遊戲",
     "wid.pages.setting": "設定",
     "wid.pages.setting.launcher": "啟動器",
