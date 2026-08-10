@@ -85,6 +85,43 @@ def t(text, *args):
     return text
 
 
+def _preprocess_md(text):
+    """markdown 预处理：修复 GitHub release body 中的表格解析问题。
+
+    - 统一换行符为 \\n
+    - 表格块（连续的 | 行）前若无空行则补空行（tables 扩展要求表格是新块开头）
+    - 去除表格行前导缩进（缩进的表格会被当作代码块/列表续行）
+    """
+    if not text:
+        return text
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    out = []
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        is_table_row = stripped.startswith("|") and "|" in stripped[1:]
+        if is_table_row:
+            block = []
+            j = i
+            while j < n:
+                s = lines[j].strip()
+                if s.startswith("|") and "|" in s[1:]:
+                    block.append(s)  # 去缩进
+                    j += 1
+                else:
+                    break
+            if out and out[-1].strip() != "":
+                out.append("")
+            out.extend(block)
+            i = j
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
 def md_to_html(text, base_url=None, session=None, cache_dir=None):
     """markdown → HTML（含表格支持），并把 <img> 资源缓存到本地。
 
@@ -99,6 +136,8 @@ def md_to_html(text, base_url=None, session=None, cache_dir=None):
     if not _MD_AVAILABLE or not text:
         return text or ""
     try:
+        # 预处理：修复表格块（补空行 + 去缩进）
+        text = _preprocess_md(text)
         # nl2br：把单个换行（CRLF 等）也转为 <br>，避免 markdown 默认合并为同一行
         html = _markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists", "nl2br"])
     except Exception:
@@ -119,6 +158,51 @@ def _cache_md_images(html, base_url, session, cache_dir):
     os.makedirs(cache_dir, exist_ok=True)
     fallback = getPath("src/assets/files/file-image.png")
 
+    def _download(full):
+        """下载单张图片到缓存，返回 (full, 本地路径或 None)"""
+        # 文件名：url 哈希 + 扩展名
+        ext = os.path.splitext(urlparse(full).path)[1]
+        if not ext or len(ext) > 8:
+            ext = ".png"
+        name = hashlib.sha1(full.encode("utf-8")).hexdigest()[:16] + ext
+        local = os.path.join(cache_dir, name)
+        if os.path.exists(local) and os.path.getsize(local) > 0:
+            return full, local
+        if session is None:
+            return full, None
+        try:
+            resp = session.get(full, timeout=10, stream=True)
+            if resp.status_code == 200:
+                with open(local, "wb") as f:
+                    for chunk in resp.iter_content(65536):
+                        f.write(chunk)
+                if os.path.exists(local) and os.path.getsize(local) > 0:
+                    return full, local
+        except Exception:
+            pass
+        return full, None
+
+    # 收集所有远程图片 URL，并行下载。
+    # 共享 githubAPI 的 session（trust_env=True），自动尊重系统代理（VPN/加速器）。
+    mapping = {}
+    remote = []
+    for s in re.findall(r'<img\b[^>]*\bsrc\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
+        s = s.strip()
+        if not s or s.startswith(("data:", "#", "file:")):
+            continue
+        if s.startswith(("http://", "https://")):
+            full = s
+        elif base_url:
+            full = urljoin(base_url, s)
+        else:
+            continue
+        remote.append(full)
+    if remote:
+        max_workers = min(len(remote), 8)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for full, local in pool.map(_download, remote):
+                mapping[full] = local
+
     def _to_local(src):
         src = src.strip()
         if not src or src.startswith(("data:", "#", "file:")):
@@ -131,22 +215,8 @@ def _cache_md_images(html, base_url, session, cache_dir):
             full = None
         if not full:
             return QUrl.fromLocalFile(fallback).toString()
-        # 文件名：url 哈希 + 扩展名
-        ext = os.path.splitext(urlparse(full).path)[1]
-        if not ext or len(ext) > 8:
-            ext = ".png"
-        name = hashlib.sha1(full.encode("utf-8")).hexdigest()[:16] + ext
-        local = os.path.join(cache_dir, name)
-        if not os.path.exists(local) and session is not None:
-            try:
-                resp = session.get(full, timeout=10, stream=True)
-                if resp.status_code == 200:
-                    with open(local, "wb") as f:
-                        for chunk in resp.iter_content(65536):
-                            f.write(chunk)
-            except Exception:
-                pass
-        if os.path.exists(local) and os.path.getsize(local) > 0:
+        local = mapping.get(full)
+        if local is not None and os.path.exists(local):
             return QUrl.fromLocalFile(local).toString()
         return QUrl.fromLocalFile(fallback).toString()
 
@@ -165,6 +235,11 @@ def _cache_md_images(html, base_url, session, cache_dir):
                 q = QImage(QUrl(ms.group(1)).toLocalFile())
                 if not q.isNull():
                     w, h = q.width() // 2, q.height() // 2
+                    # 过大图片进一步缩小：超过最大宽/高时等比缩放
+                    MAX_W, MAX_H = 500, 400
+                    if w > MAX_W or h > MAX_H:
+                        scale = min(MAX_W / w, MAX_H / h)
+                        w, h = max(1, int(w * scale)), max(1, int(h * scale))
             except Exception:
                 pass
         if w > 0 and h > 0:
@@ -358,7 +433,7 @@ class Main():
     def _cleanup_on_quit(self):
         """应用退出前的统一清理（aboutToQuit 时执行）。
 
-        顺序：隐藏托盘 → 停止下载线程 → 停止 QThTimer 后台线程。
+        顺序：隐藏托盘 → 停止下载线程 → 停止 QThTimer 后台线程 → 清理图片缓存。
         QThTimer.shutdown() 在模块内也连接了 aboutToQuit，重复调用是幂等的。
         """
         try:
@@ -372,6 +447,14 @@ class Main():
             pass
         try:
             QThTimer.shutdown()
+        except Exception:
+            pass
+        # 删除 markdown 图片缓存（mdimg），下次渲染时重新下载
+        try:
+            import shutil
+            mdimg = getPath("BML/.tmp/mdimg")
+            if os.path.isdir(mdimg):
+                shutil.rmtree(mdimg, ignore_errors=True)
         except Exception:
             pass
 
