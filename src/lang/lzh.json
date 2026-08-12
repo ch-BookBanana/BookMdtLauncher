@@ -30,8 +30,13 @@
     "wid.pages.start.gameNotfound2": "往納戲之頁，可覓而備之",
     "wid.pages.start.startbtn": "啟戲",
     "wid.pages.start.modbtn": "治模",
-    "wid.pages.start.gamebtn": "擇戲",
-
+    "wid.pages.start.gamebtn": "擇戲",    "wid.pages.start.java.idle": "備妥",
+    "wid.pages.start.java.missing": "未見Java",
+    "wid.pages.start.java.resume": "續載未竟之Java...",
+    "wid.pages.start.java.downloading": "載Java中... $1%",
+    "wid.pages.start.java.extracting": "部署Java中... $1%",
+    "wid.pages.start.java.done": "Java部署畢",
+    "wid.pages.start.java.error": "Java載敗",
     "wid.pages.download": "納戲",
     "wid.pages.download.game": "戲本",
 

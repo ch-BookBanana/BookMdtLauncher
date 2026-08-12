@@ -31,6 +31,13 @@
     "wid.pages.start.startbtn": "Start Game",
     "wid.pages.start.modbtn": "Manage Mods",
     "wid.pages.start.gamebtn": "Select Game",
+    "wid.pages.start.java.idle": "Ready",
+    "wid.pages.start.java.missing": "No Java detected",
+    "wid.pages.start.java.resume": "Resuming unfinished Java download...",
+    "wid.pages.start.java.downloading": "Downloading Java... $1%",
+    "wid.pages.start.java.extracting": "Deploying Java... $1%",
+    "wid.pages.start.java.done": "Java deployment complete",
+    "wid.pages.start.java.error": "Java download failed",
 
     "wid.pages.download": "Download",
     "wid.pages.download.game": "Game Files",

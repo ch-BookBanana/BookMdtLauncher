@@ -15,9 +15,74 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import requests, json, time, copy, os, base64
+import requests, json, time, copy, os, base64, ssl, tempfile, atexit
 
 from PyQt5.QtCore import pyqtSignal, QObject, QTimer
+
+# ---------------------------------------------------------------
+# CA bundle：certifi + Windows 系统证书库（加速器/抓包工具根证书）
+# ---------------------------------------------------------------
+_bundle_path = None
+
+
+def _cleanup_bundle(path):
+    """进程退出时删除临时 CA bundle 文件。"""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def _get_ca_bundle():
+    """合并 certifi 默认 CA 与 Windows 系统证书库为 PEM 文件路径。
+
+    requests 的 verify 只接受 True / CA 文件路径 / False；
+    直接传 SSLContext 会在 requests 内部 os.path.exists(SSLContext)
+    处崩溃（TypeError: path should be string, bytes, os.PathLike...）。
+    加速器把根证书装进 Windows 系统证书库，certifi 不认识 →
+    必须两者合并才不误报网络失败。
+    返回文件路径；任何一步失败则回退 True（默认 certifi）。
+    """
+    global _bundle_path
+    if _bundle_path and os.path.exists(_bundle_path):
+        return _bundle_path
+    parts = []
+    try:
+        import certifi
+        with open(certifi.where(), "rb") as f:
+            parts.append(f.read().decode("utf-8", "ignore"))
+    except Exception:
+        pass
+    try:
+        for der, _enc, _flags in ssl.enum_certificates("ROOT"):
+            if not der:
+                continue
+            b64 = base64.b64encode(der).decode("ascii")
+            lines = [b64[i:i + 64] for i in range(0, len(b64), 64)]
+            parts.append(
+                "-----BEGIN CERTIFICATE-----\n"
+                + "\n".join(lines)
+                + "\n-----END CERTIFICATE-----\n"
+            )
+    except Exception:
+        pass
+    text = "\n".join(parts).strip()
+    if not text:
+        return True
+    try:
+        fd, path = tempfile.mkstemp(suffix=".pem", prefix="bml_ca_")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text + "\n")
+        _bundle_path = path
+        try:
+            atexit.register(_cleanup_bundle, path)
+        except Exception:
+            pass
+        return path
+    except Exception:
+        return True
+
 
 class GithubAPI(QObject):
     refreshed = pyqtSignal()
@@ -30,6 +95,9 @@ class GithubAPI(QObject):
         self._checking = False
         self._session = requests.Session()
         self._session.trust_env = True  # honor system proxy (VPN/accelerator)
+        # verify 不能用 SSLContext（requests 内部会 os.path.exists 崩溃），
+        # 改用合并 bundle：certifi + Windows 系统证书库（加速器根证书）。
+        self._session.verify = _get_ca_bundle()
         self.setToken(token)
         self.default_rate = {
             "core":   {"remaining": None, "reset": [], "reset_ts": 0},
@@ -196,10 +264,14 @@ class GithubAPI(QObject):
                 return False, "auth", "Token refused"
             else:
                 return False, "http", rest.status_code
-        except requests.ConnectionError:
-            return False, "network", "ConnectionError"
-        except requests.Timeout:
-            return False, "network", "Timeout"
+        except requests.exceptions.SSLError as e:
+            # SSLError 是 ConnectionError 的子类，必须先于它捕获，
+            # 否则会被当成"网络不通"误报（加速器 MITM 证书场景）。
+            return False, "network", "SSL certificate verify failed: " + str(e)
+        except requests.ConnectionError as e:
+            return False, "network", str(e)
+        except requests.Timeout as e:
+            return False, "network", "Timeout: " + str(e)
         except Exception as e:
             return False, "unknown", str(e)
         finally:

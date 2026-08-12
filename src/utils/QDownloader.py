@@ -62,12 +62,40 @@ import hashlib
 import shutil
 import threading
 from threading import Lock
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 
 import requests
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal
 
 from .path_utils import getPath
+
+
+# 默认 User-Agent：使用下载工具 UA（curl/wget/aria2 风格）。
+# 清华等国内镜像站对 python-requests / 浏览器 UA 返回 403（反爬白名单只放行下载工具），
+# 统一伪装为 curl 可被正常放行；对 GitHub 等其他源无副作用。
+_DEFAULT_USER_AGENT = "curl/8.5.0"
+
+
+# ==================== SSL 证书验证容错 ====================
+# Watt Toolkit（Steam++）等加速器会注入自签根证书，Python 的 certifi 不信任，
+# 导致 SSLError: CERTIFICATE_VERIFY_FAILED。默认走证书验证（安全），
+# 遇 SSLError 自动降级为 verify=False 重试一次并抑制 InsecureRequestWarning。
+def _ssl_retry_request(sess, method, url, **kwargs):
+    """带 SSL 降级重试的请求。正常环境走证书验证，证书异常时降级 verify=False。"""
+    try:
+        return getattr(sess, method)(url, **kwargs)
+    except requests.exceptions.SSLError:
+        try:
+            import warnings
+            try:
+                from requests.packages.urllib3.exceptions import InsecureRequestWarning
+            except Exception:
+                from urllib3.exceptions import InsecureRequestWarning
+            warnings.simplefilter("ignore", InsecureRequestWarning)
+        except Exception:
+            pass
+        kwargs["verify"] = False
+        return getattr(sess, method)(url, **kwargs)
 
 
 # ==================== 1. 系统代理检测（支持加速器/VPN） ====================
@@ -158,6 +186,15 @@ def get_active_task(task_id):
     with _REGISTRY_LOCK:
         return _TASK_REGISTRY.get(task_id)
 
+def get_active_tasks():
+    """返回所有活动任务的快照。
+
+    返回: {task_id: QDownloader实例}
+    （运行中 + 暂停中，均已注册到路由表）
+    """
+    with _REGISTRY_LOCK:
+        return dict(_TASK_REGISTRY)
+
 def register_task(task_id, instance):
     with _REGISTRY_LOCK:
         if task_id in _TASK_REGISTRY:
@@ -172,26 +209,51 @@ def unregister_task(task_id):
 # ==================== 3. 下载器主类 ====================
 class QDownloader(QObject):
     """
-    多线程断点续传下载器
+    多线程断点续传下载器（全程运行在子线程 QThread 中，外部只能通过信号槽交互）
+
     信号：
         started()                    - 下载开始
         finished(bool)               - 下载完成（True 成功 / False 失败）
         cancelled()                  - 下载被取消（与失败区分，不再发射 finished）
-        progress(done, total)        - 总体进度（字节）
+        progress(done, total)        - 总体进度（已下载字节量, 总字节）
         thread_progress(id, idx, %)  - 单块进度
+        source_selected(str)         - 多源竞速后选定的下载源 URL
         error(str)                   - 错误信息
+
+    多源竞速：
+        传入 urls 列表时，启动前对每个源进行 5 秒或 1MB 的限时测速
+        （先到先停），选择速度最高的源作为实际下载地址，
+        通过 source_selected 信号通知。
+
+    任务信息：
+        运行时在 tmp 目录目标任务文件夹（BML/.tmp/QDownloader/<task_id>/）
+        下写入 download.json：块数量、每块状态
+        （p: 100 完成 / 1~99 未完成百分比 / 0 未开始）与已下载字节（b），
+        以及总进度 done_bytes，供界面展示与下次续传使用。
+
+    进度汇总：
+        下载线程每 1 秒遍历各分线程实时更新的已下载字节量，
+        汇总为总进度发射 progress 信号；get_progress() 返回字节进度。
     """
     started = pyqtSignal()
     finished = pyqtSignal(bool)
     cancelled = pyqtSignal()
     progress = pyqtSignal(int, int)
     thread_progress = pyqtSignal(int, int, int)
+    source_selected = pyqtSignal(str)
     error = pyqtSignal(str)
 
     # ---------- 初始化 ----------
-    def __init__(self, url=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None):
+    def __init__(self, url=None, urls=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None):
         super().__init__()
-        self.url = url
+        # 支持单源（url）与多源（urls 列表，启动时竞速选优）
+        if urls:
+            self.urls = [u for u in urls if u]
+        elif isinstance(url, (list, tuple)):
+            self.urls = [u for u in url if u]
+        else:
+            self.urls = [url] if url else []
+        self.url = self.urls[0] if len(self.urls) == 1 else None   # 多源时竞速后确定
         self.dest_path = os.path.abspath(dest_path) if dest_path else None
         self.num_threads = max(1, min(num_threads, 8))
         self.chunk_size = chunk_size_mb * 1024 * 1024
@@ -204,13 +266,22 @@ class QDownloader(QObject):
         self.block_count = 0
         self.block_size = 0
         self.completed_blocks = set()
+        self._block_bytes = []             # 每块已下载字节量（分线程写入，主下载线程汇总）
+        self._block_bytes_lock = Lock()
         self._lock = Lock()
         self._save_counter = 0
+        self._json_save_counter = 0
         self._is_paused = False
         self._is_cancelled = False
         self._is_running = False
         self._pause_event = threading.Event()
         self._pause_event.set()   # 默认未暂停
+
+        # 停滞监控（供诊断/看门狗）
+        self._watch_tick = 0               # 主下载线程轮询次数
+        self._stall_checks = 0             # 停滞检测计数
+        self._last_activity = time.monotonic()
+        self._active_responses = {}        # {block_idx: response} 进行中的网络响应
 
         # 任务ID（由目标路径哈希生成）
         self.task_id = None
@@ -222,14 +293,19 @@ class QDownloader(QObject):
         if self.dest_path:
             self._init_task_id()
 
-        # 内部线程
+        # 内部线程：run/下载逻辑只在子线程执行，外部只能通过信号槽交互
         self._thread = QThread()
         self.moveToThread(self._thread)
         self._thread.started.connect(self._run)
-        # finished / cancelled 均需退出线程并注销任务
-        self.finished.connect(self._thread.quit)
+        # finished / cancelled 均需退出线程并注销任务。
+        # quit 用 DirectConnection：信号在下载线程发射，若默认 AutoConnection 会
+        # 排队到主线程事件循环，而持有方可能在主线程阻塞等待本线程退出（wait），
+        # 导致 quit 永远处理不到、线程无法退出，随后销毁运行中的 QThread 崩溃。
+        # QThread::quit 线程安全，可在任意线程直接调用。
+        # 删除对象统一由持有方（JavaDownloadFlow）在 wait_thread 确保线程退出后执行。
+        self.finished.connect(self._thread.quit, Qt.DirectConnection)
         self.finished.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
-        self.cancelled.connect(self._thread.quit)
+        self.cancelled.connect(self._thread.quit, Qt.DirectConnection)
         self.cancelled.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
 
     def _init_task_id(self):
@@ -269,8 +345,12 @@ class QDownloader(QObject):
         """启动下载（非阻塞）"""
         if self._is_running:
             return
-        if not self.dest_path or not self.url:
-            self.error.emit("未设置目标路径或下载链接")
+        if not self.dest_path:
+            self.error.emit("未设置目标路径")
+            return
+        # 多源模式允许 url 暂为 None：启动后在子线程中竞速确定
+        if not self.url and not self.urls:
+            self.error.emit("未设置下载链接")
             return
         if not self._thread.isRunning():
             self._thread.start()
@@ -298,10 +378,147 @@ class QDownloader(QObject):
             stopped = self._thread.wait(timeout)
         if stopped:
             self._cleanup(keep_state=False)
+        # 线程从未启动（未 start 即 cancel）：finished/cancelled 信号不会发射，
+        # 需要手动注销，避免僵尸任务残留在注册表中
+        unregister_task(self.task_id)
+
+    def wait_thread(self, timeout=None):
+        """等待内部下载线程完全退出（返回是否已退出）。
+
+        在释放/删除本对象前调用，确保 QThread 不再运行，
+        避免销毁运行中的线程导致 Qt 致命崩溃。
+        """
+        t = self._thread
+        if t is not None and t.isRunning():
+            return t.wait(timeout)
+        return True
+
+    def __del__(self):
+        """兜底：对象被 GC 时若线程仍在运行，先等待其退出再销毁。"""
+        try:
+            t = getattr(self, "_thread", None)
+            if t is not None and t.isRunning():
+                t.wait(3000)
+        except Exception:
+            pass
 
     def get_progress(self):
-        done = len(self.completed_blocks) * self.block_size if self.block_size else 0
+        """获取总进度（已下载字节量, 总字节）。"""
+        with self._block_bytes_lock:
+            done = sum(self._block_bytes) if self._block_bytes else len(self.completed_blocks) * self.block_size
         return min(done, self.total_size), self.total_size
+
+    # ---------- 字节进度与任务信息 ----------
+    def _init_block_bytes(self):
+        """初始化每块已下载字节：从临时块文件实际大小 + 已完成块推断。"""
+        with self._block_bytes_lock:
+            self._block_bytes = [0] * self.block_count
+        for i in range(self.block_count):
+            tmp = os.path.join(self.temp_dir, f"block_{i}.tmp")
+            if os.path.isfile(tmp):
+                try:
+                    size = os.path.getsize(tmp)
+                except OSError:
+                    size = 0
+                with self._block_bytes_lock:
+                    self._block_bytes[i] = size
+        with self._lock:
+            completed = list(self.completed_blocks)
+        for i in completed:
+            if 0 <= i < self.block_count:
+                with self._block_bytes_lock:
+                    self._block_bytes[i] = self._block_size_of(i)
+
+    def _emit_progress(self):
+        """汇总各分线程的已下载字节量并发射总进度信号。"""
+        with self._block_bytes_lock:
+            done = sum(self._block_bytes)
+        self.progress.emit(min(done, self.total_size), self.total_size)
+
+    def _save_download_json(self):
+        """把任务信息写入 tmp 目标任务文件夹下的 download.json。
+
+        块状态 p：100 完成 / 1~99 未完成（百分比）/ 0 未开始；b 为该块已下载字节。
+        """
+        try:
+            with self._block_bytes_lock:
+                block_bytes = list(self._block_bytes)
+            with self._lock:
+                completed = set(self.completed_blocks)
+            blocks = []
+            done_total = 0
+            for i in range(self.block_count):
+                b = block_bytes[i] if i < len(block_bytes) else 0
+                done_total += b
+                if i in completed:
+                    p = 100
+                elif b > 0:
+                    total_b = self._block_size_of(i)
+                    p = max(1, min(99, int(b * 100 / total_b))) if total_b else 0
+                else:
+                    p = 0
+                blocks.append({"p": p, "b": b})
+            data = {
+                "url": self.url,
+                "urls": self.urls,
+                "dest_path": self.dest_path,
+                "total_size": self.total_size,
+                "block_count": self.block_count,
+                "block_size": self.block_size,
+                "blocks": blocks,
+                "done_bytes": min(done_total, self.total_size),
+                "updated_at": int(time.time())
+            }
+            os.makedirs(self.temp_root, exist_ok=True)
+            with open(os.path.join(self.temp_root, "download.json"), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _save_download_json_if_needed(self):
+        """节流写 download.json（约每 5 秒一次）。"""
+        self._json_save_counter += 1
+        if self._json_save_counter >= 5:
+            self._json_save_counter = 0
+            self._save_download_json()
+
+    def _race_sources(self, sess):
+        """多源竞速：对每个 URL 限时 5 秒或 1MB 测速，返回速度最高的 URL。
+
+        每个源先到先停：下载满 1MB 或耗时达到 5 秒即停止测速，
+        以平均速度比较，选择最快的源作为正式下载地址。
+        """
+        probe_size = 1024 * 1024
+        timeout = 5.0
+        best_url = self.urls[0] if self.urls else None
+        best_speed = -1.0
+        for url in self.urls:
+            if self._is_cancelled or _ABORT_EVENT.is_set():
+                break
+            t0 = time.monotonic()
+            got = 0
+            try:
+                resp = _ssl_retry_request(sess, "get", url,
+                                          headers={"Range": "bytes=0-%d" % (probe_size - 1)},
+                                          stream=True, timeout=10)
+                resp.raise_for_status()
+                try:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if self._is_cancelled or _ABORT_EVENT.is_set():
+                            break
+                        got += len(chunk)
+                        if got >= probe_size or time.monotonic() - t0 >= timeout:
+                            break
+                finally:
+                    resp.close()
+                cost = time.monotonic() - t0
+                speed = got / cost if cost > 0 else 0.0
+                if speed > best_speed:
+                    best_speed = speed
+                    best_url = url
+            except Exception:
+                continue
+        return best_url
 
     # ---------- 内部核心 ----------
     def _run(self):
@@ -311,6 +528,26 @@ class QDownloader(QObject):
         self.started.emit()
 
         try:
+            # 创建带代理的 Session（trust_env 兜底读取环境变量代理）
+            sess = requests.Session()
+            sess.trust_env = True
+            sess.headers.update({"User-Agent": _DEFAULT_USER_AGENT})
+            if self.proxy:
+                sess.proxies.update({"http": self.proxy, "https": self.proxy})
+
+            # 多源竞速：对每个 URL 限时 5s 或 1MB 测速，选择速度最高的源
+            if not self.url and len(self.urls) > 1:
+                picked = self._race_sources(sess)
+                if picked:
+                    self.url = picked
+                    self.source_selected.emit(picked)
+            elif not self.url and self.urls:
+                self.url = self.urls[0]
+            if not self.url:
+                self.error.emit("未设置下载链接")
+                self.finished.emit(False)
+                return
+
             # 准备下载（获取文件大小，检查断点支持）
             if not self._prepare():
                 self.finished.emit(False)
@@ -319,51 +556,63 @@ class QDownloader(QObject):
                 self.cancelled.emit()
                 return
 
-            # 创建临时目录，加载断点状态
+            # 创建临时目录，加载断点状态，初始化每块字节进度
             self._prepare_temp_files()
             self._load_state()
+            self._init_block_bytes()
+
+            # 写入任务信息 download.json（块数量/每块状态/已下载字节）
+            self._save_download_json()
 
             # 构建待下载块列表
             pending = [i for i in range(self.block_count) if i not in self.completed_blocks]
             if not pending:
                 self._merge_files()
+                self._cleanup(keep_state=False)
                 self.finished.emit(True)
                 return
-
-            # 创建带代理的 Session（trust_env 兜底读取环境变量代理）
-            sess = requests.Session()
-            sess.trust_env = True
-            if self.proxy:
-                sess.proxies.update({"http": self.proxy, "https": self.proxy})
 
             # 多线程执行（不用 with：__exit__ 会 shutdown(wait=True)，取消时会被网络超时阻塞）
             executor = ThreadPoolExecutor(max_workers=self.num_threads)
             try:
                 futures = {executor.submit(self._download_block, sess, idx): idx for idx in pending}
+                pending_futures = set(futures.keys())
 
-                for future in as_completed(futures):
+                # 主下载线程每 1 秒轮询：遍历各分线程的字节进度并汇总为总进度，
+                # 同时节流写 download.json，供界面展示与下次续传
+                while pending_futures:
                     if self._is_cancelled:
                         self.cancelled.emit()
                         return
+                    done_set, pending_futures = wait(pending_futures, timeout=1.0)
+                    self._watch_tick += 1
+                    self._emit_progress()
+                    self._save_download_json_if_needed()
+                    # 简单停滞监控：长时间无字节写入且任务未完成则计数（供诊断/看门狗）
+                    if self._last_activity is not None and time.monotonic() - self._last_activity > 20:
+                        self._stall_checks += 1
 
-                    idx = futures[future]
-                    try:
-                        ok = future.result()
-                        if ok:
-                            with self._lock:
-                                self.completed_blocks.add(idx)
-                                self._save_state_if_needed()
-                        else:
-                            if self._is_cancelled:
-                                self.cancelled.emit()
+                    for fut in done_set:
+                        idx = futures[fut]
+                        try:
+                            ok = fut.result()
+                            if ok:
+                                with self._lock:
+                                    self.completed_blocks.add(idx)
+                                    with self._block_bytes_lock:
+                                        self._block_bytes[idx] = self._block_size_of(idx)
+                                    self._save_state_if_needed()
                             else:
-                                self.error.emit(f"块 {idx} 下载失败（重试耗尽）")
-                                self.finished.emit(False)
+                                if self._is_cancelled:
+                                    self.cancelled.emit()
+                                else:
+                                    self.error.emit(f"块 {idx} 下载失败（重试耗尽）")
+                                    self.finished.emit(False)
+                                return
+                        except Exception as e:
+                            self.error.emit(str(e))
+                            self.finished.emit(False)
                             return
-                    except Exception as e:
-                        self.error.emit(str(e))
-                        self.finished.emit(False)
-                        return
             finally:
                 # wait=False：不阻塞等待正在进行的网络请求，工作线程自然结束
                 executor.shutdown(wait=False, cancel_futures=True)
@@ -391,17 +640,19 @@ class QDownloader(QObject):
         try:
             sess = requests.Session()
             sess.trust_env = True  # 兜底读取环境变量代理（加速器）
+            sess.headers.update({"User-Agent": _DEFAULT_USER_AGENT})
             if self.proxy:
                 sess.proxies.update({"http": self.proxy, "https": self.proxy})
 
             # 优先 HEAD；部分服务器（如某些 CDN）禁用 HEAD，退化为 GET + Range 探测
             supports_range = False
             try:
-                resp = sess.head(self.url, allow_redirects=True, timeout=30)
+                resp = _ssl_retry_request(sess, "head", self.url, allow_redirects=True, timeout=30)
                 resp.raise_for_status()
             except requests.exceptions.RequestException:
-                resp = sess.get(self.url, headers={"Range": "bytes=0-0"},
-                                stream=True, timeout=30)
+                resp = _ssl_retry_request(sess, "get", self.url,
+                                          headers={"Range": "bytes=0-0"},
+                                          stream=True, timeout=30)
                 resp.raise_for_status()
                 # GET + Range 探测返回 206 说明服务器支持断点续传
                 supports_range = resp.status_code == 206
@@ -425,8 +676,9 @@ class QDownloader(QObject):
             # HEAD 成功但未确认支持 Range 时，用 GET + Range 探测二次确认
             if not supports_range:
                 try:
-                    probe = sess.get(self.url, headers={"Range": "bytes=0-0"},
-                                     stream=True, timeout=30)
+                    probe = _ssl_retry_request(sess, "get", self.url,
+                                               headers={"Range": "bytes=0-0"},
+                                               stream=True, timeout=30)
                     supports_range = probe.status_code == 206
                     probe.close()
                 except requests.exceptions.RequestException:
@@ -536,27 +788,38 @@ class QDownloader(QObject):
             try:
                 local_headers = self.headers.copy()
                 local_headers['Range'] = f'bytes={resume_from}-{end}'
-                resp = session.get(self.url, headers=local_headers, stream=True, timeout=60)
+                resp = _ssl_retry_request(session, "get", self.url,
+                                          headers=local_headers, stream=True, timeout=60)
                 resp.raise_for_status()
 
                 total_block = end - start + 1
-                with open(tmp_path, mode) as f:
-                    downloaded = cur
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        # 暂停时阻塞等待（线程不退出，resume 后继续）
-                        self._pause_event.wait()
-                        if self._is_cancelled or _ABORT_EVENT.is_set():
-                            return False
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if downloaded % (512 * 1024) == 0 or downloaded >= total_block:
-                                percent = int((downloaded / total_block) * 100)
-                                self.thread_progress.emit(
-                                    block_idx % self.num_threads,
-                                    block_idx,
-                                    min(percent, 100)
-                                )
+                with self._lock:
+                    self._active_responses[block_idx] = resp
+                try:
+                    with open(tmp_path, mode) as f:
+                        downloaded = cur
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            # 暂停时阻塞等待（线程不退出，resume 后继续）
+                            self._pause_event.wait()
+                            if self._is_cancelled or _ABORT_EVENT.is_set():
+                                return False
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                # 实时记录本块已下载字节（供主下载线程汇总总进度）
+                                with self._block_bytes_lock:
+                                    self._block_bytes[block_idx] = downloaded
+                                self._last_activity = time.monotonic()
+                                if downloaded % (512 * 1024) == 0 or downloaded >= total_block:
+                                    percent = int((downloaded / total_block) * 100)
+                                    self.thread_progress.emit(
+                                        block_idx % self.num_threads,
+                                        block_idx,
+                                        min(percent, 100)
+                                    )
+                finally:
+                    with self._lock:
+                        self._active_responses.pop(block_idx, None)
                 return True
 
             except (requests.exceptions.Timeout,
@@ -652,11 +915,21 @@ class QDownloader(QObject):
                 total = state.get('total_size', 0)
                 blocks = state.get('completed_blocks', [])
                 block_size = state.get('block_size', 1)
-                done = len(blocks) * block_size
+                # 优先取 download.json 的实时字节进度，否则按完成块数估算
+                done = 0
+                try:
+                    with open(os.path.join(task_dir, "download.json"), 'r', encoding='utf-8') as df:
+                        djson = json.load(df)
+                    done = djson.get('done_bytes', 0)
+                    urls = djson.get('urls') or None
+                except Exception:
+                    urls = None
+                    done = len(blocks) * block_size
                 percent = (done / total * 100) if total > 0 else 0.0
 
                 pending[task_id] = {
                     "url": state.get('url', ''),
+                    "urls": urls or [state.get('url', '')],
                     "dest_path": state.get('dest_path', ''),
                     "total_size": total,
                     "block_count": state.get('block_count', 0),
@@ -689,9 +962,20 @@ class QDownloader(QObject):
         with open(state_file, 'r') as f:
             state = json.load(f)
 
-        # 创建新实例，自动注册
+        # 优先读取 download.json 的多源列表（含竞速结果），否则退回单源 url
+        urls = None
+        try:
+            with open(os.path.join(temp_root, "download.json"), 'r', encoding='utf-8') as df:
+                djson = json.load(df)
+            urls = djson.get('urls') or None
+        except Exception:
+            urls = None
+        if not urls:
+            urls = [state['url']]
+
+        # 创建新实例（多源续传同样在子线程中竞速选优），自动注册
         downloader = cls(
-            url=state['url'],
+            urls=urls,
             dest_path=state['dest_path'],
             num_threads=num_threads,
             headers=headers or {},

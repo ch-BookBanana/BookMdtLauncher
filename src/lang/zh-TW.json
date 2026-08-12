@@ -31,6 +31,13 @@
     "wid.pages.start.startbtn": "開始遊戲",
     "wid.pages.start.modbtn": "管理模組",
     "wid.pages.start.gamebtn": "選擇遊戲",
+    "wid.pages.start.java.idle": "就緒",
+    "wid.pages.start.java.missing": "未檢測到Java",
+    "wid.pages.start.java.resume": "正在下載未完成的Java...",
+    "wid.pages.start.java.downloading": "正在下載Java... $1%",
+    "wid.pages.start.java.extracting": "正在部署Java... $1%",
+    "wid.pages.start.java.done": "Java部署完成",
+    "wid.pages.start.java.error": "Java下載失敗",
 
     "wid.pages.download": "下載",
     "wid.pages.download.game": "遊戲本體",

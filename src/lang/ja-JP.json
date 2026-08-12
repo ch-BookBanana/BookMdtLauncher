@@ -30,8 +30,13 @@
     "wid.pages.start.gameNotfound2": "ダウンロードページからダウンロードしてください",
     "wid.pages.start.startbtn": "ゲーム開始",
     "wid.pages.start.modbtn": "MODを管理",
-    "wid.pages.start.gamebtn": "ゲーム選択",
-
+    "wid.pages.start.gamebtn": "ゲーム選択",    "wid.pages.start.java.idle": "準備完了",
+    "wid.pages.start.java.missing": "Javaが見つかりません",
+    "wid.pages.start.java.resume": "未完了のJavaダウンロードを再開中...",
+    "wid.pages.start.java.downloading": "Javaをダウンロード中... $1%",
+    "wid.pages.start.java.extracting": "Javaを展開中... $1%",
+    "wid.pages.start.java.done": "Javaの展開が完了しました",
+    "wid.pages.start.java.error": "Javaのダウンロードに失敗しました",
     "wid.pages.download": "ダウンロード",
     "wid.pages.download.game": "ゲーム本体",
 

@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import os, zipfile, hashlib, json
 from .path_utils import getPath
+from .javaScanner import javaScanner
 
 def _parse_simple_config_typed(content: str) -> dict:
     """解析 version.properties 内容为字典"""
@@ -190,7 +191,14 @@ class mdtScanner:
 
     @classmethod
     def getMdtData(cls, subdir_name, settings):
-        """返回指定子目录的 data.json 内容，失败返回默认值。"""
+        """返回指定子目录的 BML.json 内容，失败返回默认值。
+
+        javaPath 取值语义：
+            None           - 自动匹配（settings["javaPath"]=None 时占位，不写入 BML.json）
+            "<:|follow|:>" - 跟随全局设置（写入 BML.json 的标识符）
+            具体路径       - 已选定的 Java
+        具体路径不可用（Java 缺失/无效）时直接改为 "<:|follow|:>" 写入并返回，
+        """
         cls._retrieve_mdt_data(subdir_name)
         data_path = getPath(os.path.join(cls.base_dir, subdir_name, "BML.json"))
         data = {}
@@ -198,9 +206,10 @@ class mdtScanner:
             with open(data_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         if (data["javaPath"] == "<:|follow|:>" and settings["javaPath"] is None) or data["javaPath"] is None:
+            # 自动选择：优先 17，其次最高版本
             max_vers = -1
             max_path = None
-            for path,version in settings["javaPaths"]:
+            for path, version in settings["javaPaths"]:
                 vers = version.split(".")[0]
                 if int(vers) > max_vers:
                     max_vers = int(vers)
@@ -212,4 +221,16 @@ class mdtScanner:
             data["javaPath"] = max_path
         elif data["javaPath"] == "<:|follow|:>":
             data["javaPath"] = settings["javaPath"]
+
+        # 仅校验具体路径：不可用 → 改回 follow 写入并返回
+        # （None 表示自动匹配，不参与 isJava 校验，也不写入 BML.json）
+        java_path = data["javaPath"]
+        if java_path and java_path != "<:|follow|:>" and not javaScanner.isJava(java_path):
+            data["javaPath"] = "<:|follow|:>"
+            try:
+                with open(data_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
+            except Exception:
+                pass
+            return data
         return data   

@@ -50,6 +50,8 @@ from src.utils.mdtLauncher import mdtLauncher
 from src.utils.javaScanner import javaScanner
 from src.utils.QThTimer import QThTimer
 from src.utils.githubAPI import GithubAPI
+from src.utils import javaDownload
+from src.utils.QDownloader import QDownloader
 
 
 def change_color(path, color: QColor):
@@ -320,10 +322,10 @@ class Main():
         self.winreg = self.Winreg(self, self)
         self.logger = self.Logger(self, self)
         self.logger.info("\n------------Book MDT Launcher------------"
-                         f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
-                         f"\n-version: {init['version']}"
-                         f"\n-BuildVersion: {init['BuildCode']}"
-                         "\n-----------------------------------------")
+                        f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
+                        f"\n-version: {init['version']}"
+                        f"\n-BuildVersion: {init['BuildCode']}"
+                        "\n-----------------------------------------")
         self.defsettings = {
             "language": None,
             "theme": 0,
@@ -410,6 +412,17 @@ class Main():
         # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
         app.aboutToQuit.connect(self._cleanup_on_quit)
 
+        # Java 自动下载：启动时检索未完成的 Java 下载（.tmp/javaDownload.json）
+        self.java_flow = None      # 启动延续流程实例（run 触发的下载由 launcher 内置管理）
+        # launcher 内置 Java 自动下载：其信号直接驱动 UI 切页与状态显示
+        self.launcher.java_missing.connect(lambda: self._java_show_status("missing"))
+        self.launcher.java_status.connect(self._on_java_status)
+        self.launcher.java_progress.connect(self._on_java_progress)
+        self.launcher.java_extract_progress.connect(self._on_java_extract_progress)
+        self.launcher.java_done.connect(self._on_java_download_done)
+        if javaDownload.get_status() in ("downloading", "extracting"):
+            QTimer.singleShot(300, self._java_startup_resume)
+
     def gameRenovate(self, event):
         mdtScanner.invalidate_cache()
         mdts = mdtScanner.getMdts()
@@ -440,6 +453,11 @@ class Main():
             self.tray.hide()
         except Exception:
             pass
+        # 取消 Java 下载/解压流程（保留 javaDownload.json，下次启动续传）
+        try:
+            self._java_cancel_all()
+        except Exception:
+            pass
         try:
             from src.utils.QDownloader import shutdown_all as _qd_shutdown_all
             _qd_shutdown_all()
@@ -455,6 +473,166 @@ class Main():
             mdimg = getPath("BML/.tmp/mdimg")
             if os.path.isdir(mdimg):
                 shutil.rmtree(mdimg, ignore_errors=True)
+        except Exception:
+            pass
+
+    # ==================== Java 自动下载流程 ====================
+    def _java_bottom(self):
+        """Start 页左栏 Bottom（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Suspend。"""
+        return self.window.main.main.start.left.main
+
+    def _java_stack(self):
+        """Start 页主区 stack（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Log。"""
+        return self.window.main.main.start.main.stack
+
+    def _java_startup_resume(self):
+        """程序启动时发现未完成的 Java 下载：切页并同步状态，接管续传。
+
+        左 stacked（left.bottom）显示"正在下载未完成的Java..."，
+        主区（right.main）同步切到 Launch 页，等待一秒后
+        切换"正在下载Java"并拉起 QDownloader 实例，继续流程。
+        """
+        status = javaDownload.get_status()
+        if status not in ("downloading", "extracting"):
+            return
+        info = javaDownload.load_info() or {}
+        # 同时切 left.bottom 与 right.main 到 Launch 页（唯一状态 label）
+        try:
+            bottom = self._java_bottom()
+            bottom.setCurrentIndex(3)
+            self._java_stack().setCurrentIndex(3)
+            if status == "downloading":
+                bottom.launch.setStatus("resume")      # 正在下载未完成的Java...
+            else:
+                bottom.launch.setStatus("extracting")  # 正在解压/部署Java...
+        except Exception:
+            pass
+        # 等待一秒后，切换"正在下载Java"并拉起 QDownloader 续传
+        def _resume_once():
+            # 防重入：已有延续流程或 launcher 内置流程在下载时，不重复创建
+            # （相同 dest 的 QDownloader 会因 task_id 冲突抛错）
+            if self.java_flow is not None:
+                return
+            try:
+                if self.launcher._java_flow is not None:
+                    return
+            except Exception:
+                pass
+            self._java_begin(resume=True)
+        QTimer.singleShot(1000, _resume_once)
+
+    def _java_begin(self, resume=False):
+        """拉起 Java 下载流程（仅启动延续流程使用）。
+
+        resume=True: 从 javaDownload.json 续传（程序启动延续流程）；
+        点击开始游戏触发的自动下载由 launcher 内置管理。
+        """
+        if self.java_flow is not None:
+            return
+        flow = javaDownload.JavaDownloadFlow(resume=resume)
+        self.java_flow = flow
+        flow.status_changed.connect(self._on_java_status)
+        flow.progress.connect(self._on_java_progress)
+        flow.extract_progress.connect(self._on_java_extract_progress)
+        flow.finished.connect(self._on_java_finished)
+        flow.error.connect(lambda msg: self.logger.error("[Java下载]" + str(msg)))
+        flow.start()
+
+    def _on_java_status(self, status):
+        """Java 下载/解压状态变化：left.bottom 与 right.main 都切到 Launch 页并更新 label。"""
+        try:
+            bottom = self._java_bottom()
+            bottom.setCurrentIndex(3)
+            self._java_stack().setCurrentIndex(3)
+            bottom.launch.setStatus(status)
+        except Exception as e:
+            print("[java_ui_status]", status, "ERR:", repr(e))
+
+    def _on_java_progress(self, done, total):
+        """下载字节进度 → label 显示百分比（如 正在下载Java... 45%）。"""
+        try:
+            pct = int(done * 100 / total) if total else 0
+            bottom = self._java_bottom()
+            bottom.setCurrentIndex(3)
+            self._java_stack().setCurrentIndex(3)
+            bottom.launch.setStatus("downloading", pct)
+        except Exception as e:
+            print("[java_ui_progress]", done, total, "ERR:", repr(e))
+
+    def _on_java_extract_progress(self, done, total):
+        """解压进度 → label 显示百分比（如 正在解压Java... 45%）。"""
+        try:
+            pct = int(done * 100 / total) if total else 0
+            bottom = self._java_bottom()
+            bottom.setCurrentIndex(3)
+            self._java_stack().setCurrentIndex(3)
+            bottom.launch.setStatus("extracting", pct)
+        except Exception as e:
+            print("[java_ui_extract]", done, total, "ERR:", repr(e))
+
+    def _on_java_finished(self, ok):
+        """启动延续流程结束：显示"Java部署完成/失败"，等待一秒后返回主界面。
+
+        （run 触发的下载由 launcher 内置管理，其 java_done 信号走 _on_java_download_done）
+        """
+        flow = self.java_flow
+        self.java_flow = None   # 释放流程引用（QDownloader 已完成并注销）
+        if flow is not None:
+            try:
+                flow.shutdown()   # 确保下载/解压线程完全退出后再释放
+            except Exception:
+                pass
+        if ok:
+            self._java_show_status("done")
+        else:
+            self._java_show_status("error")
+        QTimer.singleShot(1000, self._java_go_home)
+
+    def _on_java_download_done(self, ok):
+        """launcher 内置 Java 下载流程结束：显示结果，一秒后由 launcher 自动重新 run 或回主界面。
+
+        ok=True：launcher 内部已刷新 Java 设置并重新启动游戏（game_launched 信号会切页）；
+        ok=False：显示失败，一秒后回主界面。
+        """
+        if ok:
+            self._java_show_status("done")
+        else:
+            self._java_show_status("error")
+            QTimer.singleShot(1000, self._java_go_home)
+
+    def _java_show_status(self, status):
+        """left.bottom 与 right.main 都切到 Launch 页并更新唯一状态 label。"""
+        try:
+            bottom = self._java_bottom()
+            bottom.setCurrentIndex(3)
+            self._java_stack().setCurrentIndex(3)
+            bottom.launch.setStatus(status)
+        except Exception as e:
+            print("[java_ui_show]", status, "ERR:", repr(e))
+
+    def _java_go_home(self):
+        """返回主界面（左 stacked 与主区均回到 Start 页）。"""
+        try:
+            self._java_bottom().setCurrentIndex(0)
+            self._java_stack().setCurrentIndex(0)
+        except Exception:
+            pass
+
+    def _java_cancel_all(self):
+        """取消当前 Java 下载流程（用户手动取消/退出时）。"""
+        flow = self.java_flow
+        self.java_flow = None
+        if flow is not None:
+            try:
+                flow.cancel()
+            except Exception:
+                pass
+        # launcher 内置流程
+        try:
+            lf = self.launcher._java_flow
+            self.launcher._java_flow = None
+            if lf is not None:
+                lf.cancel()
         except Exception:
             pass
 
@@ -1299,7 +1477,7 @@ class Main():
                                     )
                                 elif error_type == "network":
                                     self.tokenMsg.setText(
-                                        f"{self.root.langer.get('github.settings.latencyConnError')}，{self.root.langer.get('github.settings.tokenChecking')}"
+                                        f"{self.root.langer.get('github.settings.latencyConnError')}: {data}"
                                     )
                                 else:
                                     self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
@@ -1339,7 +1517,9 @@ class Main():
                                     )
                                 elif error_type == "network":
                                     # 网络不通，保留 token
-                                    self.tokenMsg.setText(self.root.langer.get("github.settings.latencyConnError"))
+                                    self.tokenMsg.setText(
+                                        f"{self.root.langer.get('github.settings.latencyConnError')}: {data}"
+                                    )
                                 else:
                                     self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
                             QThTimer.task(
@@ -2192,8 +2372,40 @@ class Main():
                                     self.cancle.setText(self.root.langer.get("text.return"))
 
                             class Launch(Pages):
+                                """左 stacked 的启动/Java 下载状态页：只允许有一个 label 显示状态。"""
                                 def __init__(self, parent=None, root=None):
                                     super().__init__(parent,root)
+                                    self.init_wid()
+                                    self.langing()
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(30,50,30,50)
+                                    self.layout.setSpacing(10)
+                                    self.layout.setAlignment(Qt.AlignCenter)
+                                    self.label = QLabel(self)
+                                    self.label.setProperty("wid", "title")
+                                    self.label.setWordWrap(True)
+                                    self.label.setAlignment(Qt.AlignCenter)
+                                    self.label.setStyleSheet("font-size:14px;")
+                                    self.layout.addWidget(self.label)
+
+                                def langing(self):
+                                    self.label.setText(self.root.langer.get("wid.pages.start.java.idle"))
+
+                                def setStatus(self, status, pct=None):
+                                    """唯一状态 label：resume/downloading/extracting/done/error/idle。
+
+                                    pct 不为 None 时追加百分比（如 正在下载Java... 45%）。
+                                    """
+                                    key = "wid.pages.start.java." + status
+                                    text = self.root.langer.get(key)
+                                    if pct is not None:
+                                        text = t(text, pct)
+                                    else:
+                                        # 无百分比时移除 $1 占位符（避免显示字面量）
+                                        text = text.replace("$1%", "").replace("$1", "")
+                                    self.label.setText(text)
 
                             class Suspend(Pages):
                                 def __init__(self, parent=None, root=None):
@@ -2272,7 +2484,15 @@ class Main():
                                 self.mod.setFixedHeight(50)
                                 self.layout.addWidget(self.mod,2,1,1,1)
 
-                                self.start.clicked.connect(lambda: self.root.launcher.run(self.root.settings["defaultGame"]))
+                                self.start.clicked.connect(self.on_start_clicked)
+
+                            def on_start_clicked(self):
+                                """开始游戏：无可用 Java 时自动触发下载流程（launcher 会发 java_missing）。"""
+                                root = self.root
+                                if root.java_flow is not None:
+                                    return  # 已有 Java 下载流程在运行
+                                # 手动指定了 Java 则直接用，否则 launcher 内部自动选择并校验
+                                root.launcher.run(root.settings["defaultGame"])
 
                             def langing(self):
                                 self.start.setText(self.root.langer.get("wid.pages.start.startbtn"))
