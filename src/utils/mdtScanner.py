@@ -158,6 +158,28 @@ class mdtScanner:
         return list(result)
 
     @classmethod
+    def getDownloadingMdts(cls):
+        """返回 .Mindustrys 下所有含 downloading.json 的子目录名称及内容。
+
+        返回 {子目录名: downloading.json 内容}；
+        没有任何子目录存在 downloading.json 时返回 None。"""
+        result = {}
+        if not os.path.isdir(cls.base_dir):
+            return None
+        for item in os.listdir(cls.base_dir):
+            subdir = os.path.join(cls.base_dir, item)
+            if not os.path.isdir(subdir):
+                continue
+            dfile = os.path.join(subdir, "downloading.json")
+            if os.path.isfile(dfile):
+                try:
+                    with open(dfile, "r", encoding="utf-8") as f:
+                        result[item] = json.load(f)
+                except Exception:
+                    continue
+        return result if result else None
+
+    @classmethod
     def _retrieve_mdt_data(cls, subdir_name):
         """读取 data.json，与默认值深度合并后写回。"""
         default_data = {

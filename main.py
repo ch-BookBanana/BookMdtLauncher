@@ -31,7 +31,7 @@ from PyQt5.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, QUrl, p
 from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QScreen, QPainterPath, QCursor, QImage
 from PyQt5.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QAction, QDialog, QTextEdit
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, traceback, webbrowser
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, traceback, webbrowser, threading
 from urllib.parse import urljoin, urlparse
 import requests
 try:
@@ -124,7 +124,7 @@ def _preprocess_md(text):
     return "\n".join(out)
 
 
-def md_to_html(text, base_url=None, session=None, cache_dir=None):
+def md_to_html(text, base_url=None, session=None, cache_dir=None, on_image=None):
     """markdown → HTML（含表格支持），并把 <img> 资源缓存到本地。
 
     参数:
@@ -132,6 +132,8 @@ def md_to_html(text, base_url=None, session=None, cache_dir=None):
         base_url  : 相对路径图片的解析基准（如 README 的 raw 地址）
         session   : requests.Session，用于下载图片（可为 None 表示离线）
         cache_dir : 图片缓存目录（默认 BML/.tmp/mdimg）
+        on_image  : 可选回调 on_image(full, local)。未缓存图片先以占位图显示，
+                    后台逐张下载，每成功一张调用一次该回调（下载线程中触发）。
     返回:
         HTML 字符串；若 markdown 库不可用则原样返回文本。
     """
@@ -146,28 +148,36 @@ def md_to_html(text, base_url=None, session=None, cache_dir=None):
         return text
     # 给表格加边框（Qt 富文本渲染表格默认无边框）
     html = re.sub(r"<table[^>]*>", '<table border="1" cellspacing="0" cellpadding="4">', html)
-    # 图片缓存
+    # 图片缓存：立即返回（未缓存图先占位），后台下载完成后经 on_image 逐张替换
     try:
-        html = _cache_md_images(html, base_url, session, cache_dir)
+        html = _cache_md_images(html, base_url, session, cache_dir, on_image)
     except Exception:
         pass
     return html
 
 
-def _cache_md_images(html, base_url, session, cache_dir):
+def _cache_md_images(html, base_url, session, cache_dir, on_image=None):
+    """把 <img> 的远程 src 换成本地缓存；未缓存的先以占位图显示并打上 data-mdimg 标记，
+    后台线程池逐张下载，每成功一张就回调 on_image(full, local)，由调用方把该图替换为真实图。
+
+    注意：本函数立即返回（不等待下载完成），下载线程为 daemon。
+    """
     if cache_dir is None:
         cache_dir = getPath("BML/.tmp/mdimg")
     os.makedirs(cache_dir, exist_ok=True)
     fallback = getPath("src/assets/files/file-image.png")
 
-    def _download(full):
-        """下载单张图片到缓存，返回 (full, 本地路径或 None)"""
-        # 文件名：url 哈希 + 扩展名
+    def _local_path(full):
+        """url → 缓存文件路径（sha1 前 16 位 + 扩展名）"""
         ext = os.path.splitext(urlparse(full).path)[1]
         if not ext or len(ext) > 8:
             ext = ".png"
         name = hashlib.sha1(full.encode("utf-8")).hexdigest()[:16] + ext
-        local = os.path.join(cache_dir, name)
+        return os.path.join(cache_dir, name)
+
+    def _download(full):
+        """下载单张图片到缓存，返回 (full, 本地路径或 None)"""
+        local = _local_path(full)
         if os.path.exists(local) and os.path.getsize(local) > 0:
             return full, local
         if session is None:
@@ -184,9 +194,8 @@ def _cache_md_images(html, base_url, session, cache_dir):
             pass
         return full, None
 
-    # 收集所有远程图片 URL，并行下载。
+    # 收集所有远程图片 URL；已缓存的直接用本地图，未缓存的先占位 + 后台下载。
     # 共享 githubAPI 的 session（trust_env=True），自动尊重系统代理（VPN/加速器）。
-    mapping = {}
     remote = []
     for s in re.findall(r'<img\b[^>]*\bsrc\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
         s = s.strip()
@@ -199,22 +208,29 @@ def _cache_md_images(html, base_url, session, cache_dir):
         else:
             continue
         remote.append(full)
-    if remote:
-        max_workers = min(len(remote), 8)
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            for full, local in pool.map(_download, remote):
-                mapping[full] = local
+
+    mapping = {}   # full → 本地路径（仅已缓存成功的）
+    pending = []   # 需要后台下载的 URL
+    for full in remote:
+        local = _local_path(full)
+        if os.path.exists(local) and os.path.getsize(local) > 0:
+            mapping[full] = local
+        else:
+            pending.append(full)
+
+    def _resolve_full(src):
+        src = src.strip()
+        if src.startswith(("http://", "https://")):
+            return src
+        if base_url:
+            return urljoin(base_url, src)
+        return None
 
     def _to_local(src):
         src = src.strip()
         if not src or src.startswith(("data:", "#", "file:")):
             return src
-        if src.startswith(("http://", "https://")):
-            full = src
-        elif base_url:
-            full = urljoin(base_url, src)
-        else:
-            full = None
+        full = _resolve_full(src)
         if not full:
             return QUrl.fromLocalFile(fallback).toString()
         local = mapping.get(full)
@@ -228,32 +244,100 @@ def _cache_md_images(html, base_url, session, cache_dir):
         def _src(m2):
             return m2.group(1) + _to_local(m2.group(2)) + m2.group(3)
         new_tag = re.sub(r'(\bsrc\s*=\s*["\'])([^"\']+)(["\'])', _src, tag, flags=re.IGNORECASE)
-        # 移除已有 width/height，统一按原始尺寸等比例缩小 1/2
-        new_tag = re.sub(r'\s+(?:width|height)\s*=\s*["\'][^"\']*["\']', '', new_tag, flags=re.IGNORECASE)
-        w = h = 0
-        ms = re.search(r'\bsrc\s*=\s*["\']([^"\']+)["\']', new_tag, flags=re.IGNORECASE)
+        full = None
+        ms = re.search(r'\bsrc\s*=\s*["\']([^"\']+)["\']', tag, flags=re.IGNORECASE)
         if ms:
-            try:
-                q = QImage(QUrl(ms.group(1)).toLocalFile())
-                if not q.isNull():
-                    w, h = q.width() // 2, q.height() // 2
-                    # 过大图片进一步缩小：超过最大宽/高时等比缩放
-                    MAX_W, MAX_H = 500, 400
-                    if w > MAX_W or h > MAX_H:
-                        scale = min(MAX_W / w, MAX_H / h)
-                        w, h = max(1, int(w * scale)), max(1, int(h * scale))
-            except Exception:
-                pass
-        if w > 0 and h > 0:
-            size_attr = ' width="%d" height="%d"' % (w, h)
+            full = _resolve_full(ms.group(1))
+        new_tag = re.sub(r'\s+(?:width|height)\s*=\s*["\'][^"\']*["\']', '', new_tag, flags=re.IGNORECASE)
+        if full and full not in mapping:
+            attrs = ' data-mdimg="%s" width="64" height="64"' % _html_escape(full)
+        else:
+            attrs = _img_size_attr(mapping.get(full)) if full else ""
+        if attrs:
             if re.search(r'/\s*>$', new_tag):
-                new_tag = re.sub(r'/\s*>$', size_attr + '/>', new_tag)
+                new_tag = re.sub(r'/\s*>$', attrs + '/>', new_tag)
             else:
-                new_tag = re.sub(r'>$', size_attr + '>', new_tag)
-        # 换行由 nl2br 扩展统一处理，这里不再额外添加
+                new_tag = re.sub(r'>$', attrs + '>', new_tag)
         return new_tag
 
-    return re.sub(r'<img\b[^>]*>', _replace, html, flags=re.IGNORECASE)
+    html = re.sub(r'<img\b[^>]*>', _replace, html, flags=re.IGNORECASE)
+
+    # 后台下载未缓存图片：每成功一张回调 on_image(full, local)。
+    # 回调在线程池线程触发，调用方需自行切回主线程（QThTimer 事件模式天然线程安全）。
+    if pending and session is not None and on_image is not None:
+        def _run():
+            max_workers = min(len(pending), 8)
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {pool.submit(_download, full): full for full in pending}
+                for fut in as_completed(futures):
+                    full = futures[fut]
+                    try:
+                        _, local = fut.result()
+                    except Exception:
+                        local = None
+                    if local is not None and os.path.exists(local):
+                        mapping[full] = local
+                        try:
+                            on_image(full, local)
+                        except Exception:
+                            pass
+        threading.Thread(target=_run, daemon=True).start()
+    return html
+
+
+def _html_escape(s):
+    """字符串转义，可安全放入 HTML 双引号属性。"""
+    return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _img_size_attr(local):
+    """按本地图片实际尺寸计算 width/height 属性字符串；空串表示不设置。
+
+    普通图片缩小一半；超过 500x400 时等比缩放到限内。
+    """
+    w = h = 0
+    try:
+        q = QImage(local)
+        if not q.isNull():
+            w, h = q.width() // 2, q.height() // 2
+            # 过大图片进一步缩小：超过最大宽/高时等比缩放
+            MAX_W, MAX_H = 500, 400
+            if w > MAX_W or h > MAX_H:
+                scale = min(MAX_W / w, MAX_H / h)
+                w, h = max(1, int(w * scale)), max(1, int(h * scale))
+    except Exception:
+        pass
+    if w > 0 and h > 0:
+        return ' width="%d" height="%d"' % (w, h)
+    return ""
+
+
+def _apply_md_image(html, full, local):
+    """把 HTML 中标记为 data-mdimg="full" 的图片换成本地缓存图，并重算尺寸。"""
+    key = _html_escape(full)
+
+    def _one(m):
+        tag = m.group(0)
+        # 换 src 为本地文件
+        tag = re.sub(
+            r'(\bsrc\s*=\s*["\'])[^"\']+(["\'])',
+            lambda m2: m2.group(1) + QUrl.fromLocalFile(local).toString() + m2.group(2),
+            tag, flags=re.IGNORECASE)
+        # 去掉占位标记与旧尺寸
+        tag = re.sub(r'\s+data-mdimg\s*=\s*["\'][^"\']*["\']', '', tag, flags=re.IGNORECASE)
+        tag = re.sub(r'\s+(?:width|height)\s*=\s*["\'][^"\']*["\']', '', tag, flags=re.IGNORECASE)
+        # 按本地图实际尺寸
+        size_attr = _img_size_attr(local)
+        if size_attr:
+            if re.search(r'/\s*>$', tag):
+                tag = re.sub(r'/\s*>$', size_attr + '/>', tag)
+            else:
+                tag = re.sub(r'>$', size_attr + '>', tag)
+        return tag
+
+    return re.sub(
+        r'<img\b[^>]*\bdata-mdimg\s*=\s*["\']' + re.escape(key) + r'["\'][^>]*>',
+        _one, html, flags=re.IGNORECASE)
 
 
 class Leftw(QWidget):
@@ -394,7 +478,8 @@ class Main():
                 self.githubAPI.setToken(raw)
             QThTimer.task(
                 lambda e: self.githubAPI.checkToken(),
-                result_callback=self._on_startup_rate_check
+                result_callback=self._on_startup_rate_check,
+                dedicated=True   # 网络任务走独立线程，避免阻塞 QThTimer 共享线程（卡死所有 taskP）
             )
 
 
@@ -1381,7 +1466,7 @@ class Main():
                                 painter.drawPixmap(offset_x, offset_y, scaled)
                                 painter.end()
                                 self.headIcon.setPixmap(round_pix)
-                            QThTimer.task(lambda e,_url=url: _fetch(), result_callback=_set_round)
+                            QThTimer.task(lambda e,_url=url: _fetch(), result_callback=_set_round, dedicated=True)
 
                         def _update_token_section(self, token):
                             if self._editing:
@@ -1484,7 +1569,8 @@ class Main():
 
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.checkToken(),
-                                result_callback=_on_checked
+                                result_callback=_on_checked,
+                                dedicated=True
                             )
 
                         def _clear_token(self):
@@ -1524,7 +1610,8 @@ class Main():
                                     self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.checkToken(),
-                                result_callback=_done
+                                result_callback=_done,
+                                dedicated=True
                             )
 
                         def _test_latency(self):
@@ -1551,7 +1638,8 @@ class Main():
                                     )
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.checkConnection(),
-                                result_callback=_done
+                                result_callback=_done,
+                                dedicated=True
                             )
 
                         def _fetch_user(self):
@@ -1571,7 +1659,8 @@ class Main():
                                     self._refresh_ui()
                             QThTimer.task(
                                 lambda e: self.root.githubAPI.getUser(),
-                                result_callback=_on_user
+                                result_callback=_on_user,
+                                dedicated=True
                             )
 
 
@@ -1903,6 +1992,11 @@ class Main():
                     self.github = self.GitHub(self, self.root)
                     self.layout.addWidget(self.github)
 
+                    self.layout.addSpacing(8)
+
+                    self.dlList = self.DlList(self, self.root)
+                    self.layout.addWidget(self.dlList)
+
                     self.layout.addStretch(1)
 
                     self.root.logger.debug("init QW.windowL.mainL.topL.tbt_mini")
@@ -1998,8 +2092,6 @@ class Main():
                             key = "github.token.error"
                         else:
                             key = "github.token"
-
-                        # t() 内部 reversed(args)，所以传参也反向：
                         #   $1=剩余次数 $2=刷新时间 $3=剩余次数 $4=刷新时间
                         self.setToolTip(str(t(
                             self.root.langer.get(key),
@@ -2016,7 +2108,7 @@ class Main():
                         if core_rem is not None and search_rem is not None:
                             return
                         self._hover_pending = True
-                        QThTimer.task(self.root.githubAPI.checkToken)
+                        QThTimer.task(self.root.githubAPI.checkToken, dedicated=True)
                         # 2 秒后允许下次 hover 触发
                         QTimer.singleShot(2000, lambda: setattr(self, '_hover_pending', False))
 
@@ -2025,6 +2117,53 @@ class Main():
                         self._update_tooltip()
                         if self.root.settings["github"]["token_enc"] is not None:
                             self._maybe_fetch_rate()
+
+                class DlList(QPushButton):
+                    def __init__(self, parent=None, root=None):
+                        super().__init__()
+                        self.parent = parent
+                        self.root = root
+                        self.init_ui()
+                        self.shown = True
+                        self.hide()
+                        self._active_state = None
+                        self._dl_timer = QThTimer.taskP(
+                            1000, self._check_state, [lambda v: self._apply_visible(v)]
+                        )
+                        self.destroyed.connect(self._stop_dl_timer)
+
+                    def _check_state(self, event):
+                        """子线程：读取任务表，与本地状态比对，变化才 emit。"""
+                        cur = bool(QDownloader.get_active_tasks())
+                        if cur != self._active_state:
+                            self._active_state = cur
+                            event.lambdas[0].emit(cur)
+
+                    def _apply_visible(self, visible):
+                        """主线程：仅状态变化时被调用，更新 UI。"""
+                        try:
+                            self.setVisible(visible and self.shown)
+                        except Exception:
+                            pass
+
+                    def _stop_dl_timer(self):
+                        # 自身销毁时停掉周期任务，避免对已删除对象回调
+                        try:
+                            timer = getattr(self, "_dl_timer", None)
+                            if timer is not None:
+                                timer.destroy()
+                                self._dl_timer = None
+                        except Exception:
+                            pass
+
+                    def init_ui(self):
+                        self.setFixedSize(30,30)
+                        self.setAttribute(Qt.WA_StyledBackground, False)
+                        self.setStyleSheet("QPushButton {border-radius: 15px;}")
+
+                    def lighting(self, light):
+                        self.setIcon(QIcon(change_color(getPath("src/assets/actions/dl_list.png"),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
+                        self.setIconSize(QSize(30,30))
 
 
                 class TriBtn(QPushButton):
@@ -3935,6 +4074,10 @@ class Main():
                                             # 后台转换 markdown → HTML（含图片缓存），完成后渲染
                                             intro_md = data.get("intro") or ""
                                             base_url = getattr(getattr(self.parent, "template", None), "introUrl", None)
+                                            # 图片先全部以占位图显示，后台逐张下载，每成功一张就替换为真实图
+                                            self._intro_html = ""
+                                            self._mdimg_pending = {}
+                                            self._mdimg_flush = None
                                             self._intro_loading = QLabel("...")
                                             self._intro_loading.setStyleSheet("color: gray; font-size: 14px;")
                                             self._intro_loading.setParent(self.intro_area.viewport())
@@ -3942,17 +4085,23 @@ class Main():
                                             self._intro_loading.move(0, 0)
 
                                             def _job(event):
+                                                try:
+                                                    on_image = event.lambdas[0].emit
+                                                except Exception:
+                                                    on_image = None
                                                 return md_to_html(
                                                     intro_md,
                                                     base_url=base_url,
                                                     session=self.root.githubAPI._session if self.root else None,
                                                     cache_dir=getPath("BML/.tmp/mdimg"),
+                                                    on_image=on_image,
                                                 )
 
                                             def _done(result):
                                                 try:
                                                     if not isinstance(result, str):
                                                         result = intro_md
+                                                    self._intro_html = result
                                                     self.intro.setText(result)
                                                     self.intro.setTextFormat(Qt.RichText)
                                                 except Exception:
@@ -3964,7 +4113,33 @@ class Main():
                                                     except Exception:
                                                         pass
 
-                                            QThTimer.task(_job, result_callback=_done)
+                                            def _on_md_image(full, local):
+                                                # 主线程（QueuedConnection）：收集已下载图片，同帧合并刷新
+                                                try:
+                                                    self._mdimg_pending[full] = local
+                                                    if self._mdimg_flush is None:
+                                                        self._mdimg_flush = QTimer.singleShot(0, _flush_md_images)
+                                                except Exception:
+                                                    pass
+
+                                            def _flush_md_images():
+                                                try:
+                                                    self._mdimg_flush = None
+                                                    if not self._mdimg_pending:
+                                                        return
+                                                    pending, self._mdimg_pending = self._mdimg_pending, {}
+                                                    html = getattr(self, "_intro_html", None)
+                                                    if not html:
+                                                        return
+                                                    for full, local in pending.items():
+                                                        html = _apply_md_image(html, full, local)
+                                                    self._intro_html = html
+                                                    self.intro.setText(html)
+                                                    self.intro.setTextFormat(Qt.RichText)
+                                                except Exception:
+                                                    pass
+
+                                            QThTimer.task(_job, events=[_on_md_image], result_callback=_done, dedicated=True)
 
                                             # ===== 分隔线 =====
                                             line2 = QWidget()

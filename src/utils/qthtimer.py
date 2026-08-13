@@ -68,6 +68,7 @@ QThTimer 使用文档（简洁版，中文）
 """
 
 import inspect
+import traceback
 
 from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, Qt
 
@@ -409,7 +410,13 @@ class QThTimer(QObject):
         def _wrapped_job():
             try:
                 return job(event)
-            except Exception as e:
+            except Exception:
+                # job 异常不再静默吞掉：打印完整堆栈便于定位（仍返回异常对象，
+                # 兼容 result_callback 收到的可能是异常的容错逻辑）
+                traceback.print_exc()
+                import sys
+                sys.stdout.flush()
+                e = sys.exc_info()[1]
                 return e
 
         timer = cls(interval, dedicated=dedicated)
@@ -471,7 +478,13 @@ class QThTimer(QObject):
             try:
                 result = job(event)
                 return result
-            except Exception as e:
+            except Exception:
+                # job 异常不再静默吞掉：打印完整堆栈便于定位（仍返回异常对象，
+                # 兼容 result_callback 收到的可能是异常的容错逻辑）
+                traceback.print_exc()
+                import sys
+                sys.stdout.flush()
+                e = sys.exc_info()[1]
                 return e
 
         timer = cls(interval, dedicated=dedicated)

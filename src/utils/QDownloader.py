@@ -1006,3 +1006,7 @@ class QDownloader(QObject):
             except Exception:
                 pass
         return count
+
+    @classmethod
+    def get_active_tasks(cls):
+        return get_active_tasks()
