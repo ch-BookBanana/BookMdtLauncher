@@ -1,5 +1,5 @@
 /BML/
-/py313/
+/python/
 /venv/
 __pycache__/
 /test.py
@@ -8,4 +8,8 @@ __pycache__/
 /installer.cmd
 /main.spec
 /.vscode/
-/scripts
+/scripts/
+/main.build/
+/main.dist/
+/main.onefile-build/
+nuitka-crash-report.xml

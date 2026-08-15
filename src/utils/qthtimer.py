@@ -24,10 +24,10 @@ QThTimer 使用文档（简洁版，中文）
     - 类方法（便捷）
         * `QThTimer.singleShot(ms, callback)`：单次延迟在主线程调用 `callback()`。
         * `QThTimer.timer(ms, [callbacks], single_shot=False)`：创建并启动一个计时器，`callbacks` 接收 `timeout`。
-        * `QThTimer.task(job, events=None, result_callback=None, interval=0)`：事件模式的后台任务。
+        * `QThTimer.task(interval, job, events=None, result_callback=None, dedicated=False)`：事件模式的后台任务。
 
 `task`（事件模式，推荐）
-    - 用法：`QThTimer.task(job, events=None, result_callback=None, interval=0)`。
+    - 用法：`QThTimer.task(interval, job, events=None, result_callback=None, dedicated=False)`。
     - 约定：`job` 必须接受一个 `event` 参数；在子线程内部可调用 `event.lambdas[i].emit(value)`。
     - `events` 参数用于指定回调列表，支持两种形式：
             1. 列表：`[cb1, cb2, ...]`，每个元素对应一个 `event.lambdas[i]` 信号。
@@ -52,7 +52,7 @@ QThTimer 使用文档（简洁版，中文）
             def on_done(res):
                     print('result', res)
 
-            QThTimer.task(job, events=[on_progress], result_callback=on_done)
+            QThTimer.task(0, job, events=[on_progress], result_callback=on_done)
 
 父对象（parent）支持
     - 在构造 `QThTimer(interval, parent=someQObject)` 时，`QThTimer` 会监听 `parent.destroyed`，
@@ -359,11 +359,12 @@ class QThTimer(QObject):
         return timer
 
     @classmethod
-    def task(cls, job, events=None, result_callback=None, interval=0, dedicated=False):
+    def task(cls, interval, job, events=None, result_callback=None, dedicated=False):
         """
         在子线程执行 `job(event)`（事件模式）。
 
         参数：
+          - interval：延迟毫秒（0 表示立即）。
           - job(event): 在子线程执行，必须接受一个 `event` 参数。
                  可在 `job` 内使用 `event.lambdas[i].emit(value)` 发出事件信号。
           - events: 可选，指定事件回调，支持格式：
@@ -371,7 +372,6 @@ class QThTimer(QObject):
                 * 回调列表：`[callback1, callback2]`
             仅支持回调列表或单个回调，不支持元组或名称对。
           - result_callback：可选，job 返回值的回调（在主线程中调用）。
-          - interval：延迟毫秒（0 表示立即）。
           - dedicated：True 时使用独立线程（适合 >1s 长任务），避免阻塞共享线程队列。
 
         返回：已启动的 `QThTimer` 实例。

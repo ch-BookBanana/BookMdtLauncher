@@ -54,6 +54,10 @@
     "wid.pages.download.item.repoInfo": "リポジトリ情報",
     "wid.pages.download.item.repoInfo.publish": "公開時間:$1",
     "wid.pages.download.item.link": "リンク",
+    "wid.pages.download.item.name.willBe": "ゲーム名は次のように設定されます: $1",
+    "wid.pages.download.item.name.illegal": "名前に\\/:*?\"<>|の不正な文字を含めることはできません",
+    "wid.pages.download.item.name.dot": ".で始めることはできません",
+    "wid.pages.download.item.name.noUrl": "ダウンロードリンクを取得できません",
 
     "wid.pages.game": "ゲーム",
     "wid.pages.setting": "設定",

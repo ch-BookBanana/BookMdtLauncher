@@ -56,6 +56,10 @@
     "wid.pages.download.item.repoInfo": "Repo Info",
     "wid.pages.download.item.repoInfo.publish": "Release Time:$1",
     "wid.pages.download.item.link": "Link",
+    "wid.pages.download.item.name.willBe": "Game will be named as: $1",
+    "wid.pages.download.item.name.illegal": "Name cannot contain \\/:*?\"<>| illegal characters",
+    "wid.pages.download.item.name.dot": "Must not start with .",
+    "wid.pages.download.item.name.noUrl": "No download link available",
 
     "wid.pages.game": "Game",
     "wid.pages.setting": "Settings",

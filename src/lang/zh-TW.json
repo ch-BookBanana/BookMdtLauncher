@@ -56,6 +56,10 @@
     "wid.pages.download.item.repoInfo": "儲存庫資訊",
     "wid.pages.download.item.repoInfo.publish": "發佈時間:$1",
     "wid.pages.download.item.link": "連結",
+    "wid.pages.download.item.name.willBe": "遊戲名稱將設定為:$1",
+    "wid.pages.download.item.name.illegal": "名稱不能包含\\/:*?\"<>|等非法字元",
+    "wid.pages.download.item.name.dot": "禁止以.作為開頭",
+    "wid.pages.download.item.name.noUrl": "無法取得下載連結",
 
     "wid.pages.game": "遊戲",
     "wid.pages.setting": "設定",

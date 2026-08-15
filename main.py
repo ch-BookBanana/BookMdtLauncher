@@ -31,7 +31,7 @@ from PyQt5.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, QUrl, p
 from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QScreen, QPainterPath, QCursor, QImage
 from PyQt5.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QAction, QDialog, QTextEdit
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, traceback, webbrowser, threading
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, time, traceback, webbrowser, threading
 from urllib.parse import urljoin, urlparse
 import requests
 try:
@@ -477,6 +477,7 @@ class Main():
             if raw:
                 self.githubAPI.setToken(raw)
             QThTimer.task(
+                0,
                 lambda e: self.githubAPI.checkToken(),
                 result_callback=self._on_startup_rate_check,
                 dedicated=True   # 网络任务走独立线程，避免阻塞 QThTimer 共享线程（卡死所有 taskP）
@@ -486,13 +487,13 @@ class Main():
         self.signals.register("tokenVerified", pyqtSignal(bool, str, object))
         self.signals.register("gameRenovated", pyqtSignal())
         QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
-        QThTimer.task(self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
+        QThTimer.task(0, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
 
         self.tray = self.Tray(self, self)
         self.window = self.Window(self, self)
 
         # 后台预加载所有游戏数据到缓存，加速后续切换
-        QThTimer.task(lambda event: mdtScanner.preload_all(), None, None, 100)
+        QThTimer.task(100, lambda event: mdtScanner.preload_all())
 
         # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
         app.aboutToQuit.connect(self._cleanup_on_quit)
@@ -1466,7 +1467,7 @@ class Main():
                                 painter.drawPixmap(offset_x, offset_y, scaled)
                                 painter.end()
                                 self.headIcon.setPixmap(round_pix)
-                            QThTimer.task(lambda e,_url=url: _fetch(), result_callback=_set_round, dedicated=True)
+                            QThTimer.task(0, lambda e,_url=url: _fetch(), result_callback=_set_round, dedicated=True)
 
                         def _update_token_section(self, token):
                             if self._editing:
@@ -1568,6 +1569,7 @@ class Main():
                                     self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
 
                             QThTimer.task(
+                                0,
                                 lambda e: self.root.githubAPI.checkToken(),
                                 result_callback=_on_checked,
                                 dedicated=True
@@ -1609,6 +1611,7 @@ class Main():
                                 else:
                                     self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
                             QThTimer.task(
+                                0,
                                 lambda e: self.root.githubAPI.checkToken(),
                                 result_callback=_done,
                                 dedicated=True
@@ -1637,6 +1640,7 @@ class Main():
                                         self.root.langer.get("github.settings.latencyError").replace("$1", str(latency))
                                     )
                             QThTimer.task(
+                                0,
                                 lambda e: self.root.githubAPI.checkConnection(),
                                 result_callback=_done,
                                 dedicated=True
@@ -1658,6 +1662,7 @@ class Main():
                                     self.root.settings["github"]["user"] = {"name": None, "headurl": None}
                                     self._refresh_ui()
                             QThTimer.task(
+                                0,
                                 lambda e: self.root.githubAPI.getUser(),
                                 result_callback=_on_user,
                                 dedicated=True
@@ -2108,7 +2113,7 @@ class Main():
                         if core_rem is not None and search_rem is not None:
                             return
                         self._hover_pending = True
-                        QThTimer.task(self.root.githubAPI.checkToken, dedicated=True)
+                        QThTimer.task(0, lambda e: self.root.githubAPI.checkToken(), dedicated=True)
                         # 2 秒后允许下次 hover 触发
                         QTimer.singleShot(2000, lambda: setattr(self, '_hover_pending', False))
 
@@ -2127,10 +2132,17 @@ class Main():
                         self.shown = True
                         self.hide()
                         self._active_state = None
+                        # taskP 周期驱动：job 在 QThTimer 共享子线程检查任务表，
+                        # 仅状态变化时 emit 回主线程刷新 UI——主线程零轮询、跨线程消息最少
                         self._dl_timer = QThTimer.taskP(
                             1000, self._check_state, [lambda v: self._apply_visible(v)]
                         )
                         self.destroyed.connect(self._stop_dl_timer)
+                        self.clicked.connect(self._on_click)
+
+                    def _on_click(self):
+                        """打开下载列表页（floatingStack 导航页）。"""
+                        self.root.window.floatingStack.add_page(self.DlListPage(self, self.root))
 
                     def _check_state(self, event):
                         """子线程：读取任务表，与本地状态比对，变化才 emit。"""
@@ -2143,6 +2155,13 @@ class Main():
                         """主线程：仅状态变化时被调用，更新 UI。"""
                         try:
                             self.setVisible(visible and self.shown)
+                        except Exception:
+                            pass
+
+                    def update_shown(self):
+                        """shown 变化（DlListPage 打开/关闭）后立即刷新，不等下一个周期。"""
+                        try:
+                            self.setVisible(self._active_state and self.shown)
                         except Exception:
                             pass
 
@@ -2165,6 +2184,22 @@ class Main():
                         self.setIcon(QIcon(change_color(getPath("src/assets/actions/dl_list.png"),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
                         self.setIconSize(QSize(30,30))
 
+                    class DlListPage(QWidget):
+                        def __init__(self, parent=None, root=None):
+                            super().__init__()
+                            self.parent = parent
+                            self.root = root
+                            self.parent.shown = False
+                            self.parent.update_shown()
+                            self.init_ui()
+
+                        def on_close(self):
+                            self.parent.shown = True
+                            self.parent.update_shown()
+
+                        def init_ui(self):
+                            self.setAttribute(Qt.WA_StyledBackground, True)
+                            self.setProperty("wid", "color2")
 
                 class TriBtn(QPushButton):
                     def __init__(self, logo: list, parent=None, root=None):
@@ -2294,7 +2329,7 @@ class Main():
                         root.signals.register("start_gameChanged", pyqtSignal(object))
                         super().__init__(parent, root, text, logo)
                         QThTimer.taskP(1000, self.left.changeTimer, [self.left.sets])
-                        QThTimer.task(self.left.changeTimer, [self.left.sets], None ,0)
+                        QThTimer.task(0, self.left.changeTimer, [self.left.sets])
                         self.root.launcher.game_launched.connect(lambda: self.main.stack.setCurrentIndex(3))
                         self.root.launcher.game_launched.connect(lambda: self.left.main.setCurrentIndex(3))
                         self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
@@ -2314,7 +2349,7 @@ class Main():
                         else:
                             self.root.settings["defaultGame"] = game
                         self.root.signals.emit("start_gameChanged", game)
-                        QThTimer.task(self.left.changeTimer, [self.left.sets])
+                        QThTimer.task(0, self.left.changeTimer, [self.left.sets])
 
                             
 
@@ -3512,7 +3547,7 @@ class Main():
                                                 safety.stop()
                                             on_done(result)
 
-                                        QThTimer.task(job, result_callback=_on_done, dedicated=True)
+                                        QThTimer.task(0, job, result_callback=_on_done, dedicated=True)
 
                                     def search(self):
                                         def job(event):
@@ -3910,6 +3945,7 @@ class Main():
                                                 # right-side action buttons
                                                 self.btn_download = self.RBtn(getPath("src/assets/buttons/download.png"), "wid.pages.download.item.download", self, self.root)
                                                 self.layout.addWidget(self.btn_download, 0)
+                                                self.btn_download.clicked.connect(lambda:self.root.window.floatingStack.add_page(self.template.Download(self,self.root,self.data,self.pixmap)))
 
                                                 self.btn_repoInfo = self.RBtn(getPath("src/assets/nav/menu.png"), "wid.pages.download.item.repoInfo", self, self.root)
                                                 self.layout.addWidget(self.btn_repoInfo, 0)
@@ -3970,6 +4006,328 @@ class Main():
                                                 self.light = light
                                                 for btn in self._action_btns:
                                                     btn.lighting(light)
+
+                                    class Download(QWidget):
+                                        def __init__(self, parent=None, root=None, data=None, pixmap=None):
+                                            super().__init__()
+                                            self.parent = parent
+                                            self.root = root
+                                            self.data = data
+                                            self.pixmap = pixmap
+                                            self._final_name = None
+                                            self._validate_key = None
+                                            self._closed = False
+                                            self._dl_timer = None
+                                            self._task_list = []
+                                            self.setAttribute(Qt.WA_StyledBackground, True)
+                                            self.setProperty("wid","color2")
+                                            self.init_wid()
+                                            self.langing()
+                                            self.lighting(bool(self.root.settings.get("theme")))
+                                            self._init_name_input()
+                                            self._start_validation()
+
+                                        def init_wid(self):
+                                            self.lay = QVBoxLayout(self)
+                                            self.lay.setSpacing(0)
+                                            self.lay.setContentsMargins(0, 0, 0, 0)
+                                            self.lay.setAlignment(Qt.AlignCenter)
+
+                                            self.main = QWidget()
+                                            self.main.setAttribute(Qt.WA_StyledBackground, True)
+                                            self.main.setFixedSize(400, 300)
+                                            self.lay.addWidget(self.main,0)
+
+                                            self.layout = QVBoxLayout(self.main)
+                                            self.layout.setSpacing(0)
+                                            self.layout.setContentsMargins(15, 15, 15, 15)
+                                            self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+
+
+                                            self.h1 = QWidget()
+                                            self.h1.setStyleSheet("background: transparent")
+                                            self.layout.addWidget(self.h1, 0)
+                                            self.h1_layout = QHBoxLayout(self.h1)
+                                            self.h1_layout.setContentsMargins(0, 0, 0, 0)
+                                            self.h1_layout.setSpacing(15)
+                                            self.h1_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+                                            self.icon = QLabel()
+                                            self.icon.setFixedSize(48, 48)
+                                            self.h1_layout.addWidget(self.icon, 0)
+
+                                            self.h1w = QWidget()
+                                            self.h1w.setStyleSheet("background: transparent")
+                                            self.h1_layout.addWidget(self.h1w, 1)
+                                            self.h1w_layout = QVBoxLayout(self.h1w)
+                                            self.h1w_layout.setContentsMargins(0, 0, 0, 0)
+                                            self.h1w_layout.setSpacing(4)
+                                            self.h1w_layout.setAlignment(Qt.AlignVCenter)
+
+                                            self.title = QLabel(self.data.get("title") or self.data.get("name") or "")
+                                            self.title.setProperty("wid", "text")
+                                            self.title.setStyleSheet("font-size: 18px; font-weight: bold;")
+                                            self.title.setWordWrap(True)
+                                            self.h1w_layout.addWidget(self.title, 0)
+
+                                            self.time = QLabel()
+                                            self.time.setProperty("wid", "title")
+                                            self.time.setStyleSheet("font-size: 13px;")
+                                            self.h1w_layout.addWidget(self.time, 0)
+
+
+                                            self.layout.addSpacing(15)
+
+
+                                            self.line = QWidget()
+                                            self.line.setProperty("wid", "line")
+                                            self.line.setFixedHeight(1)
+                                            self.layout.addWidget(self.line, 0)
+
+                                            self.layout.addStretch(1)
+
+                                            self.label = QLabel()
+                                            self.label.setFixedHeight(40)
+                                            self.label.setStyleSheet("font-size: 18px;")
+                                            self.label.setProperty("wid", "text")
+                                            self.layout.addWidget(self.label, 0)
+
+                                            # 名称输入框：默认 "界面名-版本"（自动去重 (1)(2)...）
+                                            self.input = QLineEdit()
+                                            self.input.setProperty("wid", "input")
+                                            self.input.setFixedHeight(32)
+                                            self.input.setClearButtonEnabled(True)
+                                            self.layout.addWidget(self.input, 0)
+
+                                            self.layout.addSpacing(6)
+
+                                            # 提示标签 + 确定按钮一行
+                                            self.bottom = QWidget()
+                                            self.bottom.setStyleSheet("background: transparent")
+                                            self.layout.addWidget(self.bottom, 0)
+                                            self.bottom_layout = QHBoxLayout(self.bottom)
+                                            self.bottom_layout.setContentsMargins(0, 0, 0, 0)
+                                            self.bottom_layout.setSpacing(8)
+                                            self.bottom_layout.setAlignment(Qt.AlignVCenter)
+
+                                            self.label2 = QLabel()
+                                            self.label2.setProperty("wid", "text")
+                                            self.label2.setStyleSheet("font-size: 13px;")
+                                            self.label2.setWordWrap(True)
+                                            self.bottom_layout.addWidget(self.label2, 1)
+
+                                            self.btn_ok = QPushButton()
+                                            self.btn_ok.setProperty("wid", "btn")
+                                            self.btn_ok.setFixedSize(80, 30)
+                                            self.btn_ok.setEnabled(False)
+                                            self.btn_ok.setStyleSheet("background-color: rgba(240, 183, 49, 100); border: none;")
+                                            self.btn_ok.clicked.connect(self._on_ok)
+                                            self.bottom_layout.addWidget(self.btn_ok, 0)
+
+                                            self.layout.addStretch(1)
+
+                                        def langing(self):
+                                            time_str = (self.data or {}).get("time") or ""
+                                            self.time.setText(t(self.root.langer.get("wid.pages.download.item.repoInfo.publish"), time_str))
+                                            self.label.setText(self.root.langer.get("wid.pages.download"))
+                                            self.btn_ok.setText(self.root.langer.get("text.yes"))
+                                        
+                                        def lighting(self, light):
+                                            if self.pixmap is not None and not self.pixmap.isNull():
+                                                self.icon.setPixmap(self.pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                                            else:
+                                                self.icon.clear()
+
+                                        # ---------- 名称默认值与去重 ----------
+                                        @staticmethod
+                                        def _unique_name(name, existing):
+                                            if name not in existing:
+                                                return name
+                                            i = 1
+                                            while "%s(%d)" % (name, i) in existing:
+                                                i += 1
+                                            return "%s(%d)" % (name, i)
+
+                                        def _init_name_input(self):
+                                            template = getattr(self.parent, "template", None)
+                                            interface_name = ""
+                                            if template is not None:
+                                                interface_name = self.root.langer.get(getattr(template, "text", "")) or ""
+                                            base = interface_name + "-" + (self.data.get("name") or "")
+                                            existing = set(mdtScanner.getMdts())
+                                            existing |= set((mdtScanner.getDownloadingMdts() or {}).keys())
+                                            self.input.setText(self._unique_name(base, existing))
+                                            self.input.textChanged.connect(self._on_text_changed)
+
+                                        # ---------- 名称校验：子线程收集 / 主线程应用 ----------
+                                        def _collect_mdts(self, event):
+                                            """子线程：收集已安装/下载中的游戏名列表（纯文件/缓存操作，线程安全）。"""
+                                            try:
+                                                mdts = set(mdtScanner.getMdts())
+                                                downloading = set((mdtScanner.getDownloadingMdts() or {}).keys())
+                                                return {"mdts": mdts, "downloading": downloading}
+                                            except Exception as e:
+                                                return e
+
+                                        def _start_validation(self):
+                                            # 周期检测：覆盖下载中任务的新建/完成/失败变化
+                                            self._dl_timer = QThTimer.taskP(1000, self._collect_mdts, result_callback=self._apply_validation)
+
+                                        def _stop_validation(self):
+                                            try:
+                                                t = getattr(self, "_dl_timer", None)
+                                                if t is not None:
+                                                    t.destroy()
+                                                    self._dl_timer = None
+                                            except Exception:
+                                                pass
+
+                                        def on_close(self):
+                                            """FloatingStack 出栈时同步调用：停止周期检测，防止对已销毁对象回调。"""
+                                            self._closed = True
+                                            self._stop_validation()
+
+                                        def _on_text_changed(self, text):
+                                            # 文字变化：立即单次检测（QThTimer.task）
+                                            if self._closed:
+                                                return
+                                            try:
+                                                timer = QThTimer.task(0, self._collect_mdts, result_callback=self._apply_validation)
+                                                self._task_list.append(timer)
+                                                timer.finished.connect(lambda: self._discard_task(timer))
+                                            except Exception:
+                                                pass
+
+                                        def _discard_task(self, timer):
+                                            try:
+                                                if timer in self._task_list:
+                                                    self._task_list.remove(timer)
+                                            except Exception:
+                                                pass
+
+                                        def _apply_validation(self, result):
+                                            if self._closed or isinstance(result, Exception):
+                                                return
+                                            text = self.input.text().strip()
+                                            existing = result["mdts"] | result["downloading"]
+                                            if not text:
+                                                state, final, msg = "empty", None, ""
+                                            elif re.search(r'[\\/:*?"<>|]', text):
+                                                state, final, msg = "illegal", None, self.root.langer.get("wid.pages.download.item.name.illegal")
+                                            elif text.startswith("."):
+                                                state, final, msg = "dot", None, self.root.langer.get("wid.pages.download.item.name.dot")
+                                            elif text in existing:
+                                                unique = self._unique_name(text, existing)
+                                                state, final, msg = "dup", unique, t(self.root.langer.get("wid.pages.download.item.name.willBe"), unique)
+                                            else:
+                                                state, final, msg = "ok", text, ""
+                                            self._final_name = final
+                                            key = (state, msg)
+                                            if key == self._validate_key:
+                                                return
+                                            self._validate_key = key
+                                            if state in ("illegal", "dot"):
+                                                self.input.setStyleSheet("border: 1px solid red;")
+                                                self.label2.setStyleSheet("font-size: 13px; color: red;")
+                                                self.label2.setText(msg)
+                                                self.btn_ok.setEnabled(False)
+                                                self.btn_ok.setStyleSheet("background-color: rgba(240, 183, 49, 100); border: none;")
+                                            elif state == "dup":
+                                                self.input.setStyleSheet("border: 1px solid yellow;")
+                                                self.label2.setStyleSheet("font-size: 13px; color: yellow;")
+                                                self.label2.setText(msg)
+                                                self.btn_ok.setEnabled(True)
+                                                self.btn_ok.setStyleSheet("background-color: #f0b731; border: none;")
+                                            elif state == "empty":
+                                                self.input.setStyleSheet("")
+                                                self.label2.setStyleSheet("font-size: 13px;")
+                                                self.label2.setText("")
+                                                self.btn_ok.setEnabled(False)
+                                                self.btn_ok.setStyleSheet("background-color: rgba(240, 183, 49, 100); border: none;")
+                                            else:
+                                                self.input.setStyleSheet("")
+                                                self.label2.setStyleSheet("font-size: 13px;")
+                                                self.label2.setText("")
+                                                self.btn_ok.setEnabled(True)
+                                                self.btn_ok.setStyleSheet("background-color: #f0b731; border: none;")
+
+                                        # ---------- 确定：创建下载任务 ----------
+                                        def _on_ok(self):
+                                            name = self._final_name
+                                            if not name:
+                                                return
+                                            url = self.data.get("gameLinear") or ""
+                                            if not url:
+                                                for a in (self.data.get("assets") or {}).values():
+                                                    url = a.get("linear") or ""
+                                                    if url:
+                                                        break
+                                            if not url:
+                                                self.label2.setStyleSheet("font-size: 13px; color: red;")
+                                                self.label2.setText(self.root.langer.get("wid.pages.download.item.name.noUrl"))
+                                                return
+                                            target_dir = getPath("BML/.Mindustrys/" + name)
+                                            try:
+                                                os.makedirs(target_dir, exist_ok=True)
+                                            except OSError as e:
+                                                self.root.logger.error("[mdt-download] 创建目录失败: %s" % e)
+                                                return
+                                            dest_path = os.path.join(target_dir, "mdt.jar")
+                                            info = {
+                                                "id": hashlib.md5(dest_path.encode("utf-8")).hexdigest()[:8],
+                                                "name": name,
+                                                "repo": getattr(getattr(self.parent, "template", None), "releaseRepo", None),
+                                                "title": self.data.get("title"),
+                                                "time": self.data.get("time"),
+                                                "url": url,
+                                                "dest": dest_path,
+                                                "created_at": int(time.time()),
+                                            }
+                                            try:
+                                                with open(os.path.join(target_dir, "downloading.json"), "w", encoding="utf-8") as f:
+                                                    json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
+                                            except OSError as e:
+                                                self.root.logger.error("[mdt-download] 写入 downloading.json 失败: %s" % e)
+                                                return
+                                            try:
+                                                dl = QDownloader(url=url, dest_path=dest_path, num_threads=4, chunk_size_mb=4)
+                                            except Exception as e:
+                                                self.root.logger.error("[mdt-download] 创建下载任务失败: %s" % e)
+                                                return
+                                            if not hasattr(self.root, "_mdt_downloads"):
+                                                self.root._mdt_downloads = []
+                                            self.root._mdt_downloads.append(dl)
+                                            dl.finished.connect(lambda ok, d=dl, n=name: self._on_dl_finished(d, n, ok))
+                                            dl.error.connect(lambda err, d=dl: self.root.logger.error("[mdt-download:%s] %s" % (getattr(d, "task_id", "?"), err)))
+                                            dl.start()
+                                            self.root.logger.info("[mdt-download] 开始下载 %s: %s" % (name, url))
+                                            # 删除自身，下载在后台由 QDownloader 自行处理
+                                            self.root.window.floatingStack.pop_page()
+
+                                        def _on_dl_finished(self, dl, name, ok):
+                                            """下载完成收尾：释放 QDownloader；成功后刷新 BML.json 并删除 downloading.json。"""
+                                            try:
+                                                dl.wait_thread(5000)
+                                                dl.deleteLater()
+                                            except Exception:
+                                                pass
+                                            try:
+                                                if dl in self.root._mdt_downloads:
+                                                    self.root._mdt_downloads.remove(dl)
+                                            except Exception:
+                                                pass
+                                            if not ok:
+                                                self.root.logger.error("[mdt-download] %s 下载失败（downloading.json 已保留）" % name)
+                                                return
+                                            try:
+                                                mdtScanner._retrieve_mdt_data(name)
+                                                dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
+                                                if os.path.isfile(dfile):
+                                                    os.remove(dfile)
+                                                mdtScanner.invalidate_cache()
+                                                self.root.logger.info("[mdt-download] %s 下载完成" % name)
+                                            except Exception as e:
+                                                self.root.logger.error("[mdt-download] %s 收尾失败: %s" % (name, e))
 
                                     class RepoInfo(QWidget):
                                         def __init__(self, parent=None, root=None, data=None, pixmap=None): 
@@ -4139,7 +4497,7 @@ class Main():
                                                 except Exception:
                                                     pass
 
-                                            QThTimer.task(_job, events=[_on_md_image], result_callback=_done, dedicated=True)
+                                            QThTimer.task(0, _job, events=[_on_md_image], result_callback=_done, dedicated=True)
 
                                             # ===== 分隔线 =====
                                             line2 = QWidget()
@@ -5286,17 +5644,21 @@ class Main():
                     return
                 wid = self.main.currentWidget()
                 self.main.removeWidget(wid)
+                on_close = getattr(wid, "on_close", None)
+                if on_close is not None:
+                    on_close()
                 wid.deleteLater()
-                # 显示剩余栈顶
                 if self.main.count() > 0:
                     self.main.setCurrentIndex(self.main.count() - 1)
                 self.refresh()
 
             def clear(self):
-                # 清空整个栈（一次性全部销毁）
                 while self.main.count() > 0:
                     wid = self.main.widget(0)
                     self.main.removeWidget(wid)
+                    on_close = getattr(wid, "on_close", None)
+                    if on_close is not None:
+                        on_close()
                     wid.deleteLater()
                 self.refresh()
 

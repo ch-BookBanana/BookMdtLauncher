@@ -56,6 +56,10 @@
     "wid.pages.download.item.repoInfo": "저장소 정보",
     "wid.pages.download.item.repoInfo.publish": "출시 시간:$1",
     "wid.pages.download.item.link": "링크",
+    "wid.pages.download.item.name.willBe": "게임 이름은 다음과 같이 설정됩니다: $1",
+    "wid.pages.download.item.name.illegal": "이름에 \\/:*?\"<>| 잘못된 문자를 포함할 수 없습니다",
+    "wid.pages.download.item.name.dot": ".로 시작할 수 없습니다",
+    "wid.pages.download.item.name.noUrl": "다운로드 링크를 가져올 수 없습니다",
 
     "wid.pages.game": "게임",
     "wid.pages.setting": "설정",

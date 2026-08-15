@@ -54,6 +54,10 @@
     "wid.pages.download.item.repoInfo": "庫訊",
     "wid.pages.download.item.repoInfo.publish": "發布之時:$1",
     "wid.pages.download.item.link": "鏈",
+    "wid.pages.download.item.name.willBe": "遊戲名將設為:$1",
+    "wid.pages.download.item.name.illegal": "名稱不可含\\/:*?\"<>|等非法字元",
+    "wid.pages.download.item.name.dot": "禁止以.為首",
+    "wid.pages.download.item.name.noUrl": "無法獲取下載鏈接",
 
     "wid.pages.game": "藏戲",
     "wid.pages.setting": "機杼",
