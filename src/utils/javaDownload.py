@@ -33,10 +33,35 @@ import time
 import threading
 import zipfile
 import shutil
+import logging
 from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal
 
 from .path_utils import getPath
 from .QDownloader import QDownloader
+
+_log = logging.getLogger("Main.JavaDownload")
+
+# i18n：日志文本来自语言文件（main.py 初始化 langer 后注入翻译函数）。
+# 未注入时回退为 key 本身，日志仍可读、不影响运行。
+_tr_func = None
+
+
+def set_tr_func(fn):
+    """注入语言翻译函数（langer.get），供本模块日志 i18n。"""
+    global _tr_func
+    _tr_func = fn
+
+
+def _tr(key, *args):
+    """取翻译文本并替换 $1/$2 占位符；未注入翻译函数时原样返回 key。"""
+    text = _tr_func(key) if _tr_func is not None else key
+    try:
+        for i, arg in enumerate(reversed(args), start=1):
+            text = text.replace("$%d" % i, str(arg))
+    except Exception:
+        pass
+    return text
+
 
 # ---------------- 路径与默认版本 ----------------
 TMP_DIR = getPath(os.path.join("BML", ".tmp"))
@@ -175,6 +200,7 @@ class JavaDownloadFlow(QObject):
         extract_progress(int,int) 解压进度（已解压字节, 总字节）
         finished(bool)            流程结束（True 成功 / False 失败或取消）
         error(str)                错误信息
+        cancelled()               下载被用户取消/退出（UI 据此显示"已取消"而非"失败"）
 
     resume=True 时从 BML/.tmp/javaDownload.json 读取信息继续
     （程序启动延续流程）；否则创建新的 javaDownload.json 并开始下载。
@@ -185,6 +211,8 @@ class JavaDownloadFlow(QObject):
     extract_progress = pyqtSignal(int, int)
     finished = pyqtSignal(bool)
     error = pyqtSignal(str)
+    cancelled = pyqtSignal()                 # 下载被用户取消/退出（UI 据此显示"已取消"而非"失败"）
+    paused_changed = pyqtSignal(bool, int)   # (是否暂停, 当前百分比)，UI 据此显示"Java暂停下载 n%"
 
     def __init__(self, parent=None, resume=False, urls=None, version=None, build=None, major=None):
         super().__init__()
@@ -199,6 +227,7 @@ class JavaDownloadFlow(QObject):
         self._extract_thread = None
         self._extract_worker = None
         self._is_cancelled = False
+        self._is_paused = False    # 下载是否被用户暂停（暂停中不转发进度，避免覆盖暂停提示）
         self._info = {}
         self._last_status = None   # 已发射的状态（没变不重发）
         self._last_pct = -1        # 已发射的进度百分比（取整后没变不重发）
@@ -206,6 +235,7 @@ class JavaDownloadFlow(QObject):
     # ---------- 公开接口 ----------
     def start(self):
         """开始 Java 下载/解压流程（非阻塞，结果通过信号返回）。"""
+        _log.info(_tr("log.java.flow_start", self.resume, self.dest))
         if self.resume:
             info = load_info() or {}
             status = info.get("status")
@@ -234,6 +264,7 @@ class JavaDownloadFlow(QObject):
 
     def cancel(self):
         """取消流程：停止 QDownloader 与解压线程（保留 javaDownload.json 供续传）。"""
+        _log.info(_tr("log.java.cancel"))
         self._is_cancelled = True
         self.shutdown()
 
@@ -244,6 +275,7 @@ class JavaDownloadFlow(QObject):
         调用后所有 QThread 均已退出，可安全释放引用而不触发
         "QThread: Destroyed while thread is still running"。
         """
+        _log.info(_tr("log.java.shutdown"))
         # 1. 下载线程
         dl = self._downloader
         self._downloader = None
@@ -272,14 +304,23 @@ class JavaDownloadFlow(QObject):
         if status != self._last_status:
             self._last_status = status
             self._last_pct = -1   # 换阶段后第一个进度帧必发
+            _log.info(_tr("log.java.status", status))
             self.status_changed.emit(status)
 
     def _emit_progress(self, done, total):
-        """下载进度：百分比取整后没变化就不发（1% 才发一次）。"""
+        """下载进度：百分比取整后没变化就不发（1% 才发一次）。
+
+        暂停中只更新内部百分比（供恢复时显示），不发射 progress——
+        否则暂停瞬间的在途数据会让百分比跳动，把"Java暂停下载 n%"
+        覆盖回"正在下载Java n%"（进度不再变化时就会卡在错误提示上）。
+        """
         pct = int(done * 100 / total) if total else 0
         if pct == self._last_pct:
             return
         self._last_pct = pct
+        if self._is_paused:
+            _log.info(_tr("log.java.progress_suppressed", pct))
+            return
         self.progress.emit(done, total)
 
     def _emit_extract_progress(self, done, total):
@@ -308,7 +349,8 @@ class JavaDownloadFlow(QObject):
         try:
             os.makedirs(JAVA_TMP_DIR, exist_ok=True)
             dl = QDownloader(urls=self.urls, dest_path=self.dest,
-                             num_threads=4, chunk_size_mb=4)
+                             num_threads=4, chunk_size_mb=4,
+                             title="Java %s" % (self.version or ""))
         except Exception as e:
             self.error.emit(str(e))
             self.finished.emit(False)
@@ -317,15 +359,45 @@ class JavaDownloadFlow(QObject):
         dl.source_selected.connect(self._on_source_selected)
         dl.progress.connect(self._emit_progress)
         dl.finished.connect(self._on_download_finished)
+        dl.cancelled.connect(self._on_download_cancelled)
+        dl.paused_changed.connect(self._on_download_paused_changed)
         dl.error.connect(self.error)
         dl.start()
 
     def _on_source_selected(self, url):
+        _log.info(_tr("log.java.source_selected", url))
         self._info["url"] = url
         self._info["updated_at"] = int(time.time())
         save_info(self._info)
 
+    def _on_download_paused_changed(self, paused):
+        """下载暂停/恢复：记录暂停状态并转发给 UI（带当前百分比）。"""
+        self._is_paused = bool(paused)
+        pct = self._last_pct if self._last_pct >= 0 else 0
+        _log.info(_tr("log.java.dl_paused" if paused else "log.java.dl_resumed", pct))
+        self.paused_changed.emit(paused, pct)
+
+    def _on_download_cancelled(self):
+        """下载被取消（用户取消/退出时）：善后释放 QDownloader 并结束流程。
+
+        保留 javaDownload.json（status 保持 downloading），下次启动续传；
+        发 cancelled 信号让 UI 显示"已取消"，不误报"下载失败"。
+        """
+        self._is_cancelled = True
+        _log.info(_tr("log.java.dl_cancelled"))
+        dl = self._downloader
+        self._downloader = None
+        if dl is not None:
+            try:
+                dl.wait_thread(5000)
+                dl.deleteLater()
+            except Exception:
+                pass
+        self.cancelled.emit()
+        self.finished.emit(False)
+
     def _on_download_finished(self, ok):
+        _log.info(_tr("log.java.dl_finished", ok, self._is_cancelled))
         # 无论成功失败都释放并删除 QDownloader。
         # 必须先 wait_thread 确保下载线程完全退出，否则销毁仍运行的 QThread
         # 会触发 Qt 致命错误（QThread: Destroyed while thread is still running）。
@@ -351,8 +423,9 @@ class JavaDownloadFlow(QObject):
             self.finished.emit(False)
             return
         self._is_cancelled = False
+        _log.info(_tr("log.java.extract_start", self.dest))
         if not os.path.isfile(self.dest):
-            self.error.emit("Java 压缩包缺失: " + self.dest)
+            self.error.emit(_tr("log.java.extract_missing", self.dest))
             self._info["status"] = "error"
             save_info(self._info)
             self._emit_status("error")
@@ -393,6 +466,7 @@ class JavaDownloadFlow(QObject):
                 thread.wait(5000)
             except Exception:
                 pass
+        _log.info(_tr("log.java.extract_finished", ok, self._is_cancelled))
         if not ok or self._is_cancelled:
             if not self._is_cancelled:
                 self._info["status"] = "error"

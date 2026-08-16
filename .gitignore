@@ -1,7 +1,7 @@
 /BML/
 /python/
 /venv/
-__pycache__/
+__pycache__/*
 /test.py
 /build/
 /dist/
@@ -13,3 +13,5 @@ __pycache__/
 /main.dist/
 /main.onefile-build/
 nuitka-crash-report.xml
+src/utils/__pycache__/*
+src/__pycache__/*

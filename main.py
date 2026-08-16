@@ -22,16 +22,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 init = {
-    "version": "26-T0810",
-    "BuildCode": "10000.0"
+    "version": "26-T0816",
+    "BuildCode": "10000.00"
 }
 
 
 from PyQt5.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QScreen, QPainterPath, QCursor, QImage
-from PyQt5.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QAction, QDialog, QTextEdit
+from PyQt5.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QAction, QDialog, QTextEdit, QProgressBar
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
-import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, time, traceback, webbrowser, threading
+import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, time, shutil, traceback, webbrowser, threading
 from urllib.parse import urljoin, urlparse
 import requests
 try:
@@ -46,7 +46,7 @@ import ctypes
 import ctypes.wintypes
 from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
-from src.utils.mdtLauncher import mdtLauncher
+from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
 from src.utils.javaScanner import javaScanner
 from src.utils.QThTimer import QThTimer
 from src.utils.githubAPI import GithubAPI
@@ -85,6 +85,18 @@ def t(text, *args):
     except Exception:
         pass
     return text
+
+
+def _is_mdt_download(dest):
+    """dest 是否属于 mdt 游戏下载目标（BML/.Mindustrys/ 下）。"""
+    if not dest:
+        return False
+    try:
+        base = os.path.normcase(os.path.normpath(mdtScanner.base_dir))
+        path = os.path.normcase(os.path.normpath(dest))
+        return path == base or path.startswith(base + os.sep)
+    except Exception:
+        return False
 
 
 def _preprocess_md(text):
@@ -465,6 +477,9 @@ class Main():
                 pass
 
         self.langer = self.Langer(self, self)
+        # 工具模块日志 i18n：注入 langer.get 翻译函数（未注入时日志回退为 key 本身）
+        javaDownload.set_tr_func(self.langer.get)
+        mdt_set_tr_func(self.langer.get)
         self.logger._cleanup_old_logs()
 
         self.saveSettings()
@@ -500,14 +515,20 @@ class Main():
 
         # Java 自动下载：启动时检索未完成的 Java 下载（.tmp/javaDownload.json）
         self.java_flow = None      # 启动延续流程实例（run 触发的下载由 launcher 内置管理）
+        self._java_flow_cancelled = False   # 启动延续流程是否被用户取消（决定显示"已取消"还是"失败"）
         # launcher 内置 Java 自动下载：其信号直接驱动 UI 切页与状态显示
         self.launcher.java_missing.connect(lambda: self._java_show_status("missing"))
         self.launcher.java_status.connect(self._on_java_status)
         self.launcher.java_progress.connect(self._on_java_progress)
         self.launcher.java_extract_progress.connect(self._on_java_extract_progress)
         self.launcher.java_done.connect(self._on_java_download_done)
+        self.launcher.java_cancelled.connect(self._on_java_cancelled)
+        self.launcher.java_paused.connect(self._on_java_paused_changed)
         if javaDownload.get_status() in ("downloading", "extracting"):
             QTimer.singleShot(300, self._java_startup_resume)
+
+        # mdt 游戏下载：启动时通过 MdtScanner 获取 downloadingMdts，逐个续传并同步暂停状态
+        QTimer.singleShot(400, self._resume_mdt_downloads)
 
     def gameRenovate(self, event):
         mdtScanner.invalidate_cache()
@@ -581,6 +602,7 @@ class Main():
         status = javaDownload.get_status()
         if status not in ("downloading", "extracting"):
             return
+        self.logger.info(t(self.langer.get("log.java.resume_takeover"), status), name="Java")
         info = javaDownload.load_info() or {}
         # 同时切 left.bottom 与 right.main 到 Launch 页（唯一状态 label）
         try:
@@ -615,18 +637,22 @@ class Main():
         """
         if self.java_flow is not None:
             return
+        self.logger.info(t(self.langer.get("log.java.flow_create"), resume), name="Java")
         flow = javaDownload.JavaDownloadFlow(resume=resume)
         self.java_flow = flow
         flow.status_changed.connect(self._on_java_status)
         flow.progress.connect(self._on_java_progress)
         flow.extract_progress.connect(self._on_java_extract_progress)
         flow.finished.connect(self._on_java_finished)
-        flow.error.connect(lambda msg: self.logger.error("[Java下载]" + str(msg)))
+        flow.cancelled.connect(self._on_java_flow_cancelled)
+        flow.paused_changed.connect(self._on_java_paused_changed)
+        flow.error.connect(lambda msg: self.logger.error(t(self.langer.get("log.java.dl_error_prefix"), str(msg))))
         flow.start()
 
     def _on_java_status(self, status):
         """Java 下载/解压状态变化：left.bottom 与 right.main 都切到 Launch 页并更新 label。"""
         try:
+            self.logger.info(t(self.langer.get("log.java.status_change"), status), name="Java")
             bottom = self._java_bottom()
             bottom.setCurrentIndex(3)
             self._java_stack().setCurrentIndex(3)
@@ -656,8 +682,34 @@ class Main():
         except Exception as e:
             print("[java_ui_extract]", done, total, "ERR:", repr(e))
 
+    def _on_java_paused_changed(self, paused, pct):
+        """Java 下载暂停/恢复 → label 显示"Java暂停下载 n%"或恢复"正在下载Java n%"。"""
+        try:
+            _state = self.langer.get("log.java.paused_state" if paused else "log.java.resumed_state")
+            self.logger.info(t(self.langer.get("log.java.paused_change"), _state, pct), name="Java")
+            bottom = self._java_bottom()
+            bottom.setCurrentIndex(3)
+            self._java_stack().setCurrentIndex(3)
+            if paused:
+                bottom.launch.setStatus("paused", pct)
+            else:
+                bottom.launch.setStatus("downloading", pct)
+        except Exception as e:
+            print("[java_ui_paused]", paused, pct, "ERR:", repr(e))
+
+    def _on_java_flow_cancelled(self):
+        """启动延续流程的下载被用户取消（下载列表页/退出）：记录标记。"""
+        self.logger.info(self.langer.get("log.java.flow_cancelled"), name="Java")
+        self._java_flow_cancelled = True
+
+    def _on_java_cancelled(self):
+        """launcher 内置 Java 下载被用户取消：显示"已取消"，一秒后回主界面。"""
+        self.logger.info(self.langer.get("log.java.dl_cancelled_show"), name="Java")
+        self._java_show_status("cancelled")
+        QTimer.singleShot(1000, self._java_go_home)
+
     def _on_java_finished(self, ok):
-        """启动延续流程结束：显示"Java部署完成/失败"，等待一秒后返回主界面。
+        """启动延续流程结束：显示"Java部署完成/失败/已取消"，等待一秒后返回主界面。
 
         （run 触发的下载由 launcher 内置管理，其 java_done 信号走 _on_java_download_done）
         """
@@ -668,8 +720,13 @@ class Main():
                 flow.shutdown()   # 确保下载/解压线程完全退出后再释放
             except Exception:
                 pass
+        cancelled = self._java_flow_cancelled
+        self._java_flow_cancelled = False
+        self.logger.info(t(self.langer.get("log.java.flow_finished"), ok, cancelled), name="Java")
         if ok:
             self._java_show_status("done")
+        elif cancelled:
+            self._java_show_status("cancelled")   # 用户主动取消，不误报"下载失败"
         else:
             self._java_show_status("error")
         QTimer.singleShot(1000, self._java_go_home)
@@ -680,6 +737,7 @@ class Main():
         ok=True：launcher 内部已刷新 Java 设置并重新启动游戏（game_launched 信号会切页）；
         ok=False：显示失败，一秒后回主界面。
         """
+        self.logger.info(t(self.langer.get("log.java.dl_finished_show"), ok), name="Java")
         if ok:
             self._java_show_status("done")
         else:
@@ -706,6 +764,7 @@ class Main():
 
     def _java_cancel_all(self):
         """取消当前 Java 下载流程（用户手动取消/退出时）。"""
+        self.logger.info(self.langer.get("log.java.cancel_all"), name="Java")
         flow = self.java_flow
         self.java_flow = None
         if flow is not None:
@@ -721,6 +780,70 @@ class Main():
                 lf.cancel()
         except Exception:
             pass
+
+    def _resume_mdt_downloads(self):
+        """启动续传所有未完成的 mdt 游戏下载（downloading.json 记录），并同步暂停状态。
+
+        通过 mdtScanner.getDownloadingMdts() 获取下载中列表；
+        有 .tmp/<task_id>/state.json → continue_task 续传；否则用 downloading.json
+        的 url/dest 新建任务；downloading.json 记录 paused=true 时创建后立即暂停。
+        """
+        try:
+            downloading = mdtScanner.getDownloadingMdts() or {}
+        except Exception as e:
+            self.logger.warning(t(self.langer.get("log.dl.mdt_scan_error"), repr(e)))
+            return
+        if not downloading:
+            return
+        if not hasattr(self, "_mdt_downloads"):
+            self._mdt_downloads = []
+        for name, info in downloading.items():
+            dest = info.get("dest") or ""
+            url = info.get("url") or ""
+            if not (dest and url):
+                continue
+            task_id = hashlib.md5(dest.encode("utf-8")).hexdigest()
+            paused = bool(info.get("paused"))
+            try:
+                if task_id in QDownloader.get_active_tasks():
+                    continue
+                try:
+                    dl = QDownloader.continue_task(task_id)
+                except Exception:
+                    dl = QDownloader(url=url, dest_path=dest, num_threads=4, chunk_size_mb=4, title=info.get("title") or name)
+                    dl.start()
+                if paused:
+                    dl.pause()   # 同步暂停状态：线程进入下载循环后在安全点等待
+                dl.finished.connect(lambda ok, d=dl, n=name: self._on_mdt_download_finished(d, n, ok))
+                self._mdt_downloads.append(dl)
+                self.logger.info(t(self.langer.get("log.dl.mdt_resume_start"), name, paused))
+            except Exception as e:
+                self.logger.warning(t(self.langer.get("log.dl.mdt_resume_error"), name, repr(e)))
+
+    def _on_mdt_download_finished(self, dl, name, ok):
+        """启动续传任务收尾：释放 QDownloader；成功后刷新 BML.json 并删除 downloading.json。"""
+        try:
+            dl.wait_thread(5000)
+            dl.deleteLater()
+        except Exception:
+            pass
+        try:
+            if dl in self._mdt_downloads:
+                self._mdt_downloads.remove(dl)
+        except Exception:
+            pass
+        if not ok:
+            self.logger.error(t(self.langer.get("log.dl.mdt_finished_fail"), name))
+            return
+        try:
+            mdtScanner._retrieve_mdt_data(name)
+            dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
+            if os.path.isfile(dfile):
+                os.remove(dfile)
+            mdtScanner.invalidate_cache()
+            self.logger.info(t(self.langer.get("log.dl.mdt_finished_ok"), name))
+        except Exception as e:
+            self.logger.error(t(self.langer.get("log.dl.mdt_finished_clean_err"), name, repr(e)))
 
     _OBF_BYTE = 0x5A
 
@@ -1440,20 +1563,28 @@ class Main():
 
                         def _load_avatar(self, url):
                             def _fetch():
+                                # 复用 githubAPI 的 session：走系统代理 + 合并 CA bundle
+                                # （裸 requests.get 无法访问 avatars.githubusercontent.com）
                                 try:
-                                    import requests as _req
-                                    resp = _req.get(url, timeout=10)
+                                    session = getattr(self.root, "githubAPI", None)
+                                    sess = getattr(session, "_session", None)
+                                    if sess is not None:
+                                        resp = sess.get(url, timeout=10)
+                                    else:
+                                        import requests as _req
+                                        resp = _req.get(url, timeout=10)
                                     if resp.status_code == 200:
-                                        pix = QPixmap()
-                                        pix.loadFromData(resp.content)
-                                        return pix
+                                        return resp.content
                                 except Exception:
                                     pass
-                                return QPixmap()
-                            def _set_round(pix):
-                                if not pix or pix.isNull():
+                                return None
+                            def _set_round(data):
+                                # 主线程创建 QPixmap（QPixmap 是 GUI 类，禁止在子线程创建）
+                                if not data:
                                     return
-                                size = min(pix.width(), pix.height())
+                                pix = QPixmap()
+                                if not pix.loadFromData(data):
+                                    return
                                 scaled = pix.scaled(78, 78, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                                 round_pix = QPixmap(78, 78)
                                 round_pix.fill(Qt.transparent)
@@ -1556,6 +1687,8 @@ class Main():
                                     self._editing = False
                                     self._refresh_ui()
                                     self._fetch_user()
+                                    # 最后设置，避免被 _refresh_ui 清空（tokenMsg 会随验证结果显性显示）
+                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
                                 elif error_type == "auth":
                                     self.root.settings["github"]["useful"] = False
                                     self.tokenMsg.setText(
@@ -1593,8 +1726,9 @@ class Main():
                                 if ok:
                                     self._gs._sync_rate_from_api()
                                     self.root.settings["github"]["useful"] = True
-                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
                                     self._refresh_ui()
+                                    # 最后设置，避免被 _refresh_ui 清空（tokenMsg 会随验证结果显性显示）
+                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
                                 elif error_type == "auth":
                                     # 仅明确的认证失败才清除 token
                                     self._gs._clear_token_data()
@@ -2191,15 +2325,435 @@ class Main():
                             self.root = root
                             self.parent.shown = False
                             self.parent.update_shown()
+                            self.item_map = {}          # task_id -> Item
+                            self._closed = False
+                            self._timer = None
+                            self._last_java_paused = None   # 检测循环上次看到的 Java 暂停状态（变化时记日志）
                             self.init_ui()
+                            self.langing()
+                            # 初始化时立即扫描一次，随后周期刷新
+                            self._timer = QThTimer.taskP(1000, self._snapshot_tasks, result_callback=self._render_items)
+                            QThTimer.task(0, self._snapshot_tasks, result_callback=self._render_items)
 
                         def on_close(self):
+                            self._closed = True
                             self.parent.shown = True
                             self.parent.update_shown()
+                            try:
+                                if self._timer is not None:
+                                    self._timer.destroy()
+                                    self._timer = None
+                            except Exception:
+                                pass
 
                         def init_ui(self):
                             self.setAttribute(Qt.WA_StyledBackground, True)
                             self.setProperty("wid", "color2")
+                            self.layout = QVBoxLayout(self)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setSpacing(0)
+
+                            # 标题栏：标题 + 返回
+                            self.top_bar = QWidget()
+                            self.top_bar.setFixedHeight(44)
+                            self.layout.addWidget(self.top_bar, 0)
+                            self.top_layout = QHBoxLayout(self.top_bar)
+                            self.top_layout.setContentsMargins(15, 0, 10, 0)
+                            self.top_layout.setSpacing(8)
+                            self.title_label = QLabel()
+                            self.title_label.setProperty("wid", "text")
+                            self.title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+                            self.top_layout.addWidget(self.title_label, 1)
+
+                            self.divider = QWidget()
+                            self.divider.setProperty("wid", "line")
+                            self.divider.setFixedHeight(1)
+                            self.layout.addWidget(self.divider, 0)
+
+                            # 任务列表滚动区
+                            self.scroll = QScrollArea()
+                            self.scroll.setWidgetResizable(True)
+                            self.scroll.setFrameShape(QFrame.NoFrame)
+                            self.layout.addWidget(self.scroll, 1)
+                            self.list_container = QWidget()
+                            self.list_container.setAttribute(Qt.WA_StyledBackground, True)
+                            self.list_container.setStyleSheet("background: transparent")
+                            self.list_layout = QVBoxLayout(self.list_container)
+                            self.list_layout.setContentsMargins(12, 12, 12, 12)
+                            self.list_layout.setSpacing(8)
+                            self.list_layout.setAlignment(Qt.AlignTop)
+                            self.scroll.setWidget(self.list_container)
+
+                            # 空状态提示（始终位于列表末尾，任务卡片插入其前）
+                            self.empty_label = QLabel()
+                            self.empty_label.setProperty("wid", "title")
+                            self.empty_label.setStyleSheet("font-size: 14px;")
+                            self.empty_label.setAlignment(Qt.AlignCenter)
+                            self.empty_label.setFixedHeight(120)
+                            self.list_layout.addWidget(self.empty_label)
+
+                        def langing(self):
+                            self.title_label.setText(self.root.langer.get("wid.pages.downloadList.title"))
+                            self.empty_label.setText(self.root.langer.get("wid.pages.downloadList.empty"))
+
+                        def _snapshot_tasks(self, event):
+                            """子线程：收集运行中/暂停中与可续传任务的快照（不触碰 UI）。"""
+                            try:
+                                actives = {}
+                                for task_id, task in QDownloader.get_active_tasks().items():
+                                    done, total = 0, 0
+                                    try:
+                                        done, total = task.get_progress()
+                                    except Exception:
+                                        pass
+                                    actives[task_id] = {
+                                        "id": task_id,
+                                        "kind": "active",
+                                        "dest": task.dest_path or "",
+                                        "title": getattr(task, "title", "") or "",
+                                        "done": done,
+                                        "total": total,
+                                        "paused": bool(getattr(task, "_is_paused", False)),
+                                        "cancel_allowed": bool(getattr(task, "cancel_allowed", True)),
+                                        "pause_allowed": bool(getattr(task, "pause_allowed", True)),
+                                        "task": task,
+                                    }
+                                pendings = {}
+                                for task_id, info in QDownloader.get_pending_tasks().items():
+                                    pendings[task_id] = {
+                                        "id": task_id,
+                                        "kind": "pending",
+                                        "dest": info.get("dest_path") or "",
+                                        "title": info.get("title") or "",
+                                        "done": info.get("done_bytes") or 0,
+                                        "total": info.get("total_size") or 0,
+                                        "paused": False,
+                                        "task": None,
+                                        "state_file": info.get("state_file") or "",
+                                    }
+                                return actives, pendings
+                            except Exception as e:
+                                return e
+
+                        def _render_items(self, result):
+                            if self._closed or isinstance(result, Exception):
+                                return
+                            actives, pendings = result
+                            # Java 下载状态同步：检测循环轮询读取任务实时状态，驱动 Launch 页 label。
+                            # 与 paused_changed 信号互补——信号丢失/时序错乱时，1 秒内轮询自动纠正，
+                            # 避免暂停瞬间被 progress 覆盖成"正在下载"后卡住。
+                            # 只更新 label 文本不切页，避免打断用户当前页面。
+                            try:
+                                for _t in actives.values():
+                                    _dest = _t.get("dest") or ""
+                                    if _dest.startswith(javaDownload.JAVA_TMP_DIR):
+                                        _total = _t.get("total") or 0
+                                        _done = _t.get("done") or 0
+                                        _pct = min(100, int(_done * 100.0 / _total)) if _total > 0 else 0
+                                        _paused = bool(_t.get("paused"))
+                                        _bottom = self.root._java_bottom()
+                                        if _paused:
+                                            _bottom.launch.setStatus("paused", _pct)
+                                        else:
+                                            _bottom.launch.setStatus("downloading", _pct)
+                                        # 检测循环日志：记录读取到的 Java 任务状态（含暂停/恢复切换），
+                                        # 用于排查信号竞争导致的"暂停后被覆盖成正在下载"
+                                        if _paused != self._last_java_paused:
+                                            self.root.logger.info(t(self.root.langer.get("log.dl.java_state"),
+                                                                    "paused" if _paused else "downloading",
+                                                                    _pct,
+                                                                    os.path.basename(_dest) or _dest))
+                                            self._last_java_paused = _paused
+                                        break
+                            except Exception as e:
+                                self.root.logger.warning(t(self.root.langer.get("log.dl.java_sync_error"), repr(e)))
+                            all_tasks = dict(actives)
+                            all_tasks.update(pendings)
+                            # 移除已消失的任务卡片
+                            for task_id in list(self.item_map.keys()):
+                                if task_id not in all_tasks:
+                                    item = self.item_map.pop(task_id)
+                                    self.list_layout.removeWidget(item)
+                                    item.deleteLater()
+                            # 新增或刷新卡片
+                            for task_id, task_info in all_tasks.items():
+                                if task_id not in self.item_map:
+                                    item = self.Item(self, self.root)
+                                    item.continue_requested.connect(self._continue_task)
+                                    item.delete_requested.connect(self._delete_task)
+                                    self.item_map[task_id] = item
+                                    self.list_layout.insertWidget(self.list_layout.count() - 1, item)
+                                else:
+                                    item = self.item_map[task_id]
+                                item.set_data(task_info)
+                            self.empty_label.setVisible(not bool(all_tasks))
+
+                        def _continue_task(self, task_id):
+                            try:
+                                dl = QDownloader.continue_task(task_id)
+                                if not hasattr(self.root, "_mdt_downloads"):
+                                    self.root._mdt_downloads = []
+                                self.root._mdt_downloads.append(dl)
+                                # 用户主动续传：清除 downloading.json 中的暂停状态（恢复下载）
+                                try:
+                                    dest = getattr(dl, "dest_path", "") or ""
+                                    if dest and _is_mdt_download(dest):
+                                        dfile = os.path.join(os.path.dirname(dest), "downloading.json")
+                                        if os.path.isfile(dfile):
+                                            with open(dfile, "r", encoding="utf-8") as f:
+                                                info = json.load(f)
+                                            if info.get("paused"):
+                                                info["paused"] = False
+                                                info["updated_at"] = int(time.time())
+                                                with open(dfile, "w", encoding="utf-8") as f:
+                                                    json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
+                                except Exception:
+                                    pass
+                            except Exception as e:
+                                self.root.logger.error(t(self.root.langer.get("log.dl.resume_failed"), task_id, e))
+
+                        def _delete_task(self, state_file):
+                            task_dir = os.path.dirname(state_file) if state_file else None
+                            if task_dir and os.path.isdir(task_dir):
+                                shutil.rmtree(task_dir, ignore_errors=True)
+                            # 若是 mdt 游戏下载：同时删除目标文件夹（含 downloading.json），
+                            # 避免残留记录导致下次启动又被续传
+                            try:
+                                dest = ""
+                                if state_file and os.path.isfile(state_file):
+                                    with open(state_file, "r", encoding="utf-8") as f:
+                                        dest = (json.load(f) or {}).get("dest_path", "") or ""
+                                if dest and _is_mdt_download(dest):
+                                    mdir = os.path.dirname(dest)
+                                    if os.path.isdir(mdir):
+                                        shutil.rmtree(mdir, ignore_errors=True)
+                                    self.root.logger.info(t(self.root.langer.get("log.dl.mdt_delete_cleaned"),
+                                                            os.path.basename(mdir) or mdir))
+                            except Exception:
+                                pass
+                            # 立即刷新一轮，不必等下一个周期
+                            QThTimer.task(0, lambda e: self._snapshot_tasks(e), result_callback=self._render_items)
+
+                        class Item(QWidget):
+                            continue_requested = pyqtSignal(str)
+                            delete_requested = pyqtSignal(str)
+
+                            def __init__(self, parent=None, root=None):
+                                super().__init__(parent)
+                                self.parent = parent
+                                self.root = root
+                                self.task_id = ""
+                                self.task = None      # 运行中任务的 QDownloader 实例（pending 为 None）
+                                self.state_file = ""
+                                self.task_info = {}
+                                self.init_ui()
+
+                            def init_ui(self):
+                                self.setAttribute(Qt.WA_StyledBackground, True)
+                                self.setProperty("wid", "color2")
+                                self.setStyleSheet("border-radius: 8px;")
+                                layout = QVBoxLayout(self)
+                                layout.setContentsMargins(12, 8, 12, 8)
+                                layout.setSpacing(6)
+
+                                # 第一行：文件名 + 状态
+                                row1 = QHBoxLayout()
+                                row1.setSpacing(8)
+                                self.title_label = QLabel()
+                                self.title_label.setProperty("wid", "text")
+                                self.title_label.setStyleSheet("font-size: 13px;")
+                                row1.addWidget(self.title_label, 1)
+                                self.status_label = QLabel()
+                                self.status_label.setProperty("wid", "title")
+                                self.status_label.setStyleSheet("font-size: 11px;")
+                                row1.addWidget(self.status_label, 0)
+                                layout.addLayout(row1)
+
+                                # 第二行：进度条 + 已下载/总大小
+                                row2 = QHBoxLayout()
+                                row2.setSpacing(8)
+                                self.progress_bar = QProgressBar()
+                                self.progress_bar.setProperty("wid", "progress")
+                                self.progress_bar.setRange(0, 100)
+                                self.progress_bar.setTextVisible(False)
+                                self.progress_bar.setFixedHeight(14)
+                                row2.addWidget(self.progress_bar, 1)
+                                self.size_label = QLabel()
+                                self.size_label.setProperty("wid", "title")
+                                self.size_label.setStyleSheet("font-size: 11px;")
+                                self.size_label.setFixedWidth(120)
+                                row2.addWidget(self.size_label, 0)
+                                layout.addLayout(row2)
+
+                                # 第三行：主操作（暂停/继续/续传）+ 次操作（取消/删除）
+                                row3 = QHBoxLayout()
+                                row3.setSpacing(6)
+                                row3.addStretch(1)
+                                self.btn_primary = QPushButton()
+                                self.btn_primary.setProperty("wid", "btn")
+                                self.btn_primary.setFixedSize(64, 24)
+                                row3.addWidget(self.btn_primary, 0)
+                                self.btn_secondary = QPushButton()
+                                self.btn_secondary.setProperty("wid", "btn")
+                                self.btn_secondary.setFixedSize(64, 24)
+                                row3.addWidget(self.btn_secondary, 0)
+                                layout.addLayout(row3)
+
+                                self.btn_primary.clicked.connect(self._on_primary_clicked)
+                                self.btn_secondary.clicked.connect(self._on_secondary_clicked)
+
+                            @staticmethod
+                            def _fmt_size(size):
+                                size = max(0, int(size or 0))
+                                if size >= 1024 * 1024 * 1024:
+                                    return "%.2f GB" % (size / (1024.0 ** 3))
+                                if size >= 1024 * 1024:
+                                    return "%.2f MB" % (size / (1024.0 ** 2))
+                                if size >= 1024:
+                                    return "%.1f KB" % (size / 1024.0)
+                                return "%d B" % size
+
+                            def set_data(self, task_info):
+                                self.task_info = task_info
+                                self.task_id = task_info.get("id") or ""
+                                task = task_info.get("task")
+                                if task is not self.task:
+                                    self._disconnect_task_signals()
+                                    self.task = task
+                                    self._connect_task_signals()
+                                self.state_file = task_info.get("state_file") or ""
+
+                                # 名称（超长省略）：优先显示 title，回退文件名
+                                name = task_info.get("title") or os.path.basename(task_info.get("dest") or "") or self.task_id
+                                self.title_label.setText(QFontMetrics(self.title_label.font()).elidedText(name, Qt.ElideRight, 460))
+
+                                # 进度条与大小文本
+                                done = task_info.get("done") or 0
+                                total = task_info.get("total") or 0
+                                if total > 0:
+                                    percent = min(100, int(done * 100.0 / total))
+                                    self.progress_bar.setValue(percent)
+                                    self.size_label.setText("%s / %s" % (self._fmt_size(done), self._fmt_size(total)))
+                                else:
+                                    self.progress_bar.setValue(0)
+                                    self.size_label.setText(self._fmt_size(done))
+
+                                # 状态文本与按钮语义
+                                if task_info.get("kind") == "active":
+                                    if task_info.get("paused"):
+                                        self.status_label.setText(self.root.langer.get("wid.pages.downloadList.paused"))
+                                        self.btn_primary.setText(self.root.langer.get("wid.pages.downloadList.resume"))
+                                    else:
+                                        self.status_label.setText(self.root.langer.get("wid.pages.downloadList.active"))
+                                        self.btn_primary.setText(self.root.langer.get("wid.pages.downloadList.pause"))
+                                    self.btn_secondary.setText(self.root.langer.get("wid.pages.downloadList.cancel"))
+                                else:
+                                    self.status_label.setText(self.root.langer.get("wid.pages.downloadList.pending"))
+                                    self.btn_primary.setText(self.root.langer.get("wid.pages.downloadList.continue"))
+                                    self.btn_secondary.setText(self.root.langer.get("wid.pages.downloadList.delete"))
+                                self._update_buttons()
+
+                            def _connect_task_signals(self):
+                                """监听任务允许状态变化，即时刷新按钮。"""
+                                if self.task is not None:
+                                    try:
+                                        self.task.cancel_allowed_changed.connect(self._on_cancel_allowed_changed)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        self.task.pause_allowed_changed.connect(self._on_pause_allowed_changed)
+                                    except Exception:
+                                        pass
+
+                            def _disconnect_task_signals(self):
+                                if self.task is not None:
+                                    try:
+                                        self.task.cancel_allowed_changed.disconnect(self._on_cancel_allowed_changed)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        self.task.pause_allowed_changed.disconnect(self._on_pause_allowed_changed)
+                                    except Exception:
+                                        pass
+
+                            def _on_cancel_allowed_changed(self, allowed):
+                                self.task_info["cancel_allowed"] = bool(allowed)
+                                self._update_buttons()
+
+                            def _on_pause_allowed_changed(self, allowed):
+                                self.task_info["pause_allowed"] = bool(allowed)
+                                self._update_buttons()
+
+                            def _update_buttons(self):
+                                """根据任务允许状态显示/隐藏操作按钮。"""
+                                if self.task_info.get("kind") == "active":
+                                    self.btn_primary.setVisible(bool(self.task_info.get("pause_allowed", True)))
+                                    self.btn_secondary.setVisible(bool(self.task_info.get("cancel_allowed", True)))
+                                else:
+                                    self.btn_primary.setVisible(True)
+                                    self.btn_secondary.setVisible(True)
+
+                            def _on_primary_clicked(self):
+                                # 运行中：暂停/继续；待续传：请求页面续传
+                                if self.task_info.get("kind") == "active":
+                                    if self.task is not None and self.task_info.get("pause_allowed", True):
+                                        if self.task_info.get("paused"):
+                                            self.task.resume()
+                                            self._sync_mdt_paused(False)
+                                        else:
+                                            self.task.pause()
+                                            self._sync_mdt_paused(True)
+                                else:
+                                    self.continue_requested.emit(self.task_id)
+
+                            def _sync_mdt_paused(self, paused):
+                                """暂停/恢复时把状态写入 .Mindustrys/<name>/downloading.json（仅 mdt 游戏下载）。
+
+                                启动时通过 getDownloadingMdts 读取该状态同步暂停。
+                                """
+                                dest = getattr(self.task, "dest_path", "") or ""
+                                if not _is_mdt_download(dest):
+                                    return
+                                dfile = os.path.join(os.path.dirname(dest), "downloading.json")
+                                try:
+                                    info = {}
+                                    if os.path.isfile(dfile):
+                                        with open(dfile, "r", encoding="utf-8") as f:
+                                            info = json.load(f)
+                                    info["paused"] = bool(paused)
+                                    info["updated_at"] = int(time.time())
+                                    os.makedirs(os.path.dirname(dfile), exist_ok=True)
+                                    with open(dfile, "w", encoding="utf-8") as f:
+                                        json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
+                                    _state = self.root.langer.get("log.java.paused_state" if paused else "log.java.resumed_state")
+                                    self.root.logger.info(t(self.root.langer.get("log.dl.mdt_paused_state"),
+                                                            _state,
+                                                            os.path.basename(os.path.dirname(dest)) or ""))
+                                except Exception as e:
+                                    self.root.logger.warning(t(self.root.langer.get("log.dl.mdt_paused_error"), repr(e)))
+
+                            def _on_secondary_clicked(self):
+                                # 运行中：取消（子线程执行阻塞式取消，取消后删除 mdt 目标文件夹）；
+                                # 待续传：请求页面删除
+                                if self.task_info.get("kind") == "active":
+                                    if self.task is not None and self.task_info.get("cancel_allowed", True):
+                                        def _do_cancel(e, t=self.task, dest=self.task_info.get("dest") or ""):
+                                            try:
+                                                t.cancel(timeout=8)
+                                            finally:
+                                                # mdt 游戏下载：取消后删除目标文件夹（含 downloading.json）
+                                                if dest and _is_mdt_download(dest):
+                                                    mdir = os.path.dirname(dest)
+                                                    try:
+                                                        if os.path.isdir(mdir):
+                                                            shutil.rmtree(mdir, ignore_errors=True)
+                                                        self.root.logger.info(t(self.root.langer.get("log.dl.mdt_cancel_cleaned"),
+                                                                                os.path.basename(mdir) or mdir))
+                                                    except Exception:
+                                                        pass
+                                        QThTimer.task(0, _do_cancel, dedicated=True)
+                                else:
+                                    self.delete_requested.emit(self.state_file)
 
                 class TriBtn(QPushButton):
                     def __init__(self, logo: list, parent=None, root=None):
@@ -4277,7 +4831,7 @@ class Main():
                                                 "id": hashlib.md5(dest_path.encode("utf-8")).hexdigest()[:8],
                                                 "name": name,
                                                 "repo": getattr(getattr(self.parent, "template", None), "releaseRepo", None),
-                                                "title": self.data.get("title"),
+                                                "title": name,
                                                 "time": self.data.get("time"),
                                                 "url": url,
                                                 "dest": dest_path,
@@ -4290,7 +4844,7 @@ class Main():
                                                 self.root.logger.error("[mdt-download] 写入 downloading.json 失败: %s" % e)
                                                 return
                                             try:
-                                                dl = QDownloader(url=url, dest_path=dest_path, num_threads=4, chunk_size_mb=4)
+                                                dl = QDownloader(url=url, dest_path=dest_path, num_threads=4, chunk_size_mb=4, title=name)
                                             except Exception as e:
                                                 self.root.logger.error("[mdt-download] 创建下载任务失败: %s" % e)
                                                 return

@@ -1,9 +1,33 @@
 import os
+import logging
 from PyQt5.QtCore import QProcess, QProcessEnvironment, QTimer, pyqtSignal
 
 from .path_utils import getPath
 from .mdtScanner import mdtScanner
 from .javaScanner import javaScanner
+
+_log = logging.getLogger("Main.MdtLauncher")
+
+# i18n：日志文本来自语言文件（main.py 初始化 langer 后注入翻译函数）。
+# 未注入时回退为 key 本身，日志仍可读、不影响运行。
+_tr_func = None
+
+
+def set_tr_func(fn):
+    """注入语言翻译函数（langer.get），供本模块日志 i18n。"""
+    global _tr_func
+    _tr_func = fn
+
+
+def _tr(key, *args):
+    """取翻译文本并替换 $1/$2 占位符；未注入翻译函数时原样返回 key。"""
+    text = _tr_func(key) if _tr_func is not None else key
+    try:
+        for i, arg in enumerate(reversed(args), start=1):
+            text = text.replace("$%d" % i, str(arg))
+    except Exception:
+        pass
+    return text
 
 
 class mdtLauncher(QProcess):
@@ -17,6 +41,8 @@ class mdtLauncher(QProcess):
     java_progress = pyqtSignal(int, int)      # Java 下载进度（已下载字节, 总字节）
     java_extract_progress = pyqtSignal(int, int)  # Java 解压/部署进度
     java_done = pyqtSignal(bool)       # Java 下载流程结束（True 成功 / False 失败）
+    java_cancelled = pyqtSignal()      # Java 下载被用户取消（UI 显示"已取消"而非"失败"）
+    java_paused = pyqtSignal(bool, int)   # Java 下载暂停状态（是否暂停, 当前百分比）
 
     def __init__(self, parent=None, settings=None):
         super().__init__()
@@ -27,6 +53,7 @@ class mdtLauncher(QProcess):
         self._finished_emitted = False
         self._java_flow = None                 # Java 自动下载流程实例
         self._java_download_attempts = 0       # 自动下载尝试次数（防循环；游戏启动/结束时重置）
+        self._java_cancelled = False           # 当前 Java 下载是否被用户取消（决定显示"已取消"还是"失败"）
 
     def _launch(self, mdt_name, java_path=None, args=None, data_path=None):
         """
@@ -174,6 +201,7 @@ class mdtLauncher(QProcess):
             self._emit_finished(-1)
             return
         self._java_download_attempts += 1
+        _log.info(_tr("log.java.autodl_start", self._java_download_attempts))
         self.java_missing.emit()
         try:
             from src.utils import javaDownload
@@ -185,15 +213,23 @@ class mdtLauncher(QProcess):
         flow.progress.connect(self.java_progress)
         flow.extract_progress.connect(self.java_extract_progress)
         flow.finished.connect(self._on_java_download_finished)
-        flow.error.connect(lambda msg: self.log.emit({"type": "error", "text": "[Java下载]" + str(msg)}))
+        flow.cancelled.connect(self._on_java_flow_cancelled)
+        flow.paused_changed.connect(self.java_paused)
+        flow.error.connect(lambda msg: self.log.emit({"type": "error", "text": _tr("log.java.dl_error_prefix", str(msg))}))
         flow.start()
+
+    def _on_java_flow_cancelled(self):
+        """Java 下载被用户取消（下载列表页/退出时）：记录标记，结束时显示"已取消"。"""
+        _log.info(_tr("log.java.autodl_cancelled"))
+        self._java_cancelled = True
 
     def _on_java_download_finished(self, ok):
         """Java 自动下载流程结束。
 
         成功 → 显示"Java部署完成"，一秒后刷新 Java 设置并重新启动游戏
         （重新检测 Java，能扫到新装的 JDK）；
-        失败 → 结束本次启动（由 main 显示"下载失败"并回主界面）。
+        失败 → 结束本次启动（由 main 显示"下载失败"并回主界面）；
+        被用户取消 → 由 main 显示"已取消"并回主界面（不误报"下载失败"）。
         """
         flow = self._java_flow
         self._java_flow = None
@@ -206,17 +242,26 @@ class mdtLauncher(QProcess):
                 flow.deleteLater()
             except Exception:
                 pass
-        self.java_done.emit(ok)
         if not ok:
-            # 失败：不发射 game_finished（避免与 error 状态显示抢切页），
-            # 由 main 的 java_done 处理显示"下载失败"并 1 秒后回主界面
-            self._java_download_attempts = 0   # 下载失败/取消：下次启动可重新尝试自动下载
+            # 失败/取消：不发射 game_finished（避免与状态显示抢切页），
+            # 下次启动可重新尝试自动下载
+            self._java_download_attempts = 0
+            cancelled = self._java_cancelled
+            self._java_cancelled = False
+            _log.info(_tr("log.java.autodl_finished", ok, cancelled))
+            if cancelled:
+                self.java_cancelled.emit()   # main 显示"Java下载已取消"
+            else:
+                self.java_done.emit(False)   # main 显示"下载失败"
             return
+        _log.info(_tr("log.java.autodl_success"))
+        self.java_done.emit(ok)
         # 等待一秒让"Java部署完成"显示后再重新启动游戏
         QTimer.singleShot(1000, self._restart_after_java)
 
     def _restart_after_java(self):
         """Java 下载完成后：刷新 Java 设置并重新启动游戏。"""
+        _log.info(_tr("log.java.autodl_restart"))
         try:
             javas = javaScanner.getJavas()
             if javas:

@@ -242,9 +242,12 @@ class QDownloader(QObject):
     thread_progress = pyqtSignal(int, int, int)
     source_selected = pyqtSignal(str)
     error = pyqtSignal(str)
+    cancel_allowed_changed = pyqtSignal(bool)   # 允许取消状态变化
+    pause_allowed_changed = pyqtSignal(bool)    # 允许暂停状态变化
+    paused_changed = pyqtSignal(bool)           # 实际暂停状态变化（True=已暂停 / False=已恢复）
 
     # ---------- 初始化 ----------
-    def __init__(self, url=None, urls=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None):
+    def __init__(self, url=None, urls=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None, cancel_allowed=True, pause_allowed=True, title=None):
         super().__init__()
         # 支持单源（url）与多源（urls 列表，启动时竞速选优）
         if urls:
@@ -255,6 +258,7 @@ class QDownloader(QObject):
             self.urls = [url] if url else []
         self.url = self.urls[0] if len(self.urls) == 1 else None   # 多源时竞速后确定
         self.dest_path = os.path.abspath(dest_path) if dest_path else None
+        self.title = title or ""        # 显示名称（下载列表直接展示，而非文件名）
         self.num_threads = max(1, min(num_threads, 8))
         self.chunk_size = chunk_size_mb * 1024 * 1024
         self.headers = headers or {}
@@ -274,6 +278,8 @@ class QDownloader(QObject):
         self._is_paused = False
         self._is_cancelled = False
         self._is_running = False
+        self._cancel_allowed = bool(cancel_allowed)
+        self._pause_allowed = bool(pause_allowed)
         self._pause_event = threading.Event()
         self._pause_event.set()   # 默认未暂停
 
@@ -339,6 +345,8 @@ class QDownloader(QObject):
             self.headers = kwargs['headers']
         if 'proxy' in kwargs:
             self.proxy = kwargs['proxy'] if kwargs['proxy'] else _detect_system_proxy()
+        if 'title' in kwargs:
+            self.title = kwargs['title'] or ""
         return self
 
     def start(self):
@@ -359,11 +367,38 @@ class QDownloader(QObject):
         """暂停下载（线程在安全点等待，可 resume 恢复）"""
         self._is_paused = True
         self._pause_event.clear()
+        self.paused_changed.emit(True)
 
     def resume(self):
         """恢复暂停的下载"""
         self._is_paused = False
         self._pause_event.set()
+        self.paused_changed.emit(False)
+
+    # ---------- 允许状态（UI 据此显示/隐藏 暂停/取消 操作） ----------
+    @property
+    def cancel_allowed(self):
+        """是否允许取消该任务（False 时界面隐藏取消按钮）。"""
+        return self._cancel_allowed
+
+    @property
+    def pause_allowed(self):
+        """是否允许暂停/继续该任务（False 时界面隐藏暂停按钮）。"""
+        return self._pause_allowed
+
+    def set_cancel_allowed(self, allowed):
+        """设置是否允许取消，变化时发射 cancel_allowed_changed 信号。"""
+        allowed = bool(allowed)
+        if allowed != self._cancel_allowed:
+            self._cancel_allowed = allowed
+            self.cancel_allowed_changed.emit(allowed)
+
+    def set_pause_allowed(self, allowed):
+        """设置是否允许暂停/继续，变化时发射 pause_allowed_changed 信号。"""
+        allowed = bool(allowed)
+        if allowed != self._pause_allowed:
+            self._pause_allowed = allowed
+            self.pause_allowed_changed.emit(allowed)
 
     def cancel(self, timeout=None):
         """取消下载并清理临时文件（不可恢复）。
@@ -739,7 +774,8 @@ class QDownloader(QObject):
             'block_size': self.block_size,
             'completed_blocks': list(self.completed_blocks),
             'url': self.url,
-            'dest_path': self.dest_path
+            'dest_path': self.dest_path,
+            'title': self.title or ''
         }
         try:
             with open(self.state_file, 'w') as f:
@@ -931,6 +967,7 @@ class QDownloader(QObject):
                     "url": state.get('url', ''),
                     "urls": urls or [state.get('url', '')],
                     "dest_path": state.get('dest_path', ''),
+                    "title": state.get('title', '') or '',
                     "total_size": total,
                     "block_count": state.get('block_count', 0),
                     "completed_blocks": blocks,
@@ -979,7 +1016,8 @@ class QDownloader(QObject):
             dest_path=state['dest_path'],
             num_threads=num_threads,
             headers=headers or {},
-            proxy=proxy
+            proxy=proxy,
+            title=state.get('title', '') or ''
         )
         # 强制覆盖已完成块
         downloader.completed_blocks = set(state.get('completed_blocks', []))
