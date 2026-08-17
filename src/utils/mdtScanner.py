@@ -44,19 +44,19 @@ def _parse_simple_config_typed(content: str) -> dict:
 class mdtScanner:
     base_dir = getPath("BML/.Mindustrys")
 
-    # ---- 缓存系统 (mtime-based) ----
+    # ---- 缓存系统 (sha + size based) ----
     _mdts_cache = None
     _mdts_cache_mtime = 0
-    _mdt_msg_cache = {}       # {subdir_name: ((jar_mtime, png_mtime), data)}
+    _mdt_data_cache = {}       # {subdir_name: (jar_size, data)}  BML.json + version 缓存
 
     @classmethod
     def invalidate_cache(cls, game=None):
         """使缓存失效。game 为 None 时清空全部缓存，否则只清除指定游戏。"""
         if game:
-            cls._mdt_msg_cache.pop(game, None)
+            cls._mdt_data_cache.pop(game, None)
         else:
             cls._mdts_cache = None
-            cls._mdt_msg_cache.clear()
+            cls._mdt_data_cache.clear()
 
     @classmethod
     def preload_all(cls):
@@ -90,49 +90,53 @@ class mdtScanner:
 
     @classmethod
     def getMdtMsg(cls, subdir_name):
-        """返回 version.properties 解析后的字典，失败返回 None。
-        使用 (jar_mtime, png_mtime, png_size) 作为缓存键，避免重复读取 zip。"""
-        # 计算 png 路径与 mtime/size
+        """返回 version.properties 解析后的字典 + icon，失败返回 None。
+
+        version 信息通过 BML.json 持久化缓存（jarSha + jarSize + version），
+        由 _retrieve_mdt_data 以「sha + 文件字节数」校验缓存有效性，
+        避免每次重复打开 jar 读取 version.properties。
+
+        icon 来源（按优先级）：
+            BML.json 的 icon_path 非空（None/空串视为未配置）→ 直接按 getPath
+            解析（相对路径基于 exe 所在目录，绝对路径如 C:/ 直接使用）；
+            解析出的文件必须存在且可读，否则视为不可用，icon 直接返回 None；
+            icon_path 未配置 → 使用副本内 icon.png，缺失时退回全局默认图标
+            src/assets/icons/mdt/mdt.png。
+        """
+        data = cls._retrieve_mdt_data(subdir_name)
+        version = data.get("version")
+        if not version:
+            return None
         png = None
-        png_mtime = 0
-        png_size = 0
+        icon_path = data.get("icon_path")
+        if icon_path:
+            # 用户显式配置：必须存在且可读，不可用 → icon 直接返回 None（不兜底）
+            try:
+                png = getPath(icon_path)
+                if not os.path.isfile(png) or not os.access(png, os.R_OK):
+                    png = None
+            except OSError:
+                png = None
+            result = dict(version)
+            result["icon"] = png
+            return result
+        # 未配置：默认使用副本内 icon.png，缺失时退回全局默认图标
         try:
             png_path = getPath(f"BML/.Mindustrys/{subdir_name}/icon.png")
-            if os.path.isfile(png_path):
+            if os.path.isfile(png_path) and os.access(png_path, os.R_OK):
                 png = png_path
-                png_mtime = os.path.getmtime(png_path)
-                png_size = os.path.getsize(png_path)
         except OSError:
-            png = getPath("src/assets/icons/mdt/mdt.png")
-
-        jar_path = cls._get_mdt_jar_path(subdir_name)
-        jar_mtime = 0
-        try:
-            jar_mtime = os.path.getmtime(jar_path)
-        except OSError:
-            pass
-
-        cache_key = (jar_mtime, png_mtime, png_size)
-        if subdir_name in cls._mdt_msg_cache:
-            cached_key, cached_data = cls._mdt_msg_cache[subdir_name]
-            if cached_key == cache_key:
-                return cached_data
-        if not os.path.isfile(jar_path):
-            cls._mdt_msg_cache.pop(subdir_name, None)
-            return None
-
-        try:
-            with zipfile.ZipFile(jar_path, 'r') as zf:
-                if 'version.properties' not in zf.namelist():
-                    cls._mdt_msg_cache.pop(subdir_name, None)
-                    return None
-                data = zf.read('version.properties').decode('utf-8')
-                result = _parse_simple_config_typed(data) | {"icon": png}
-                cls._mdt_msg_cache[subdir_name] = (cache_key, result)
-                return result
-        except Exception:
-            cls._mdt_msg_cache.pop(subdir_name, None)
-            return None
+            png = None
+        if png is None:
+            try:
+                png = getPath("src/assets/icons/mdt/mdt.png")
+                if not os.path.isfile(png) or not os.access(png, os.R_OK):
+                    png = None
+            except Exception:
+                png = None
+        result = dict(version)
+        result["icon"] = png
+        return result
 
     @classmethod
     def getMdts(cls):
@@ -180,12 +184,71 @@ class mdtScanner:
         return result if result else None
 
     @classmethod
+    def _jar_sha256(cls, jar_path):
+        """计算 jar 文件的 sha256（64KB 分块），失败返回 None。"""
+        sha256 = hashlib.sha256()
+        try:
+            with open(jar_path, "rb") as f:
+                while True:
+                    data = f.read(65536)  # 64KB
+                    if not data:
+                        break
+                    sha256.update(data)
+            return sha256.hexdigest()
+        except OSError:
+            return None
+
+    @classmethod
+    def _read_version_from_jar(cls, jar_path):
+        """从 jar 内读取并解析 version.properties，失败返回 None。"""
+        try:
+            with zipfile.ZipFile(jar_path, 'r') as zf:
+                if 'version.properties' not in zf.namelist():
+                    return None
+                data = zf.read('version.properties').decode('utf-8')
+                return _parse_simple_config_typed(data)
+        except Exception:
+            return None
+
+    @classmethod
     def _retrieve_mdt_data(cls, subdir_name):
-        """读取 data.json，与默认值深度合并后写回。"""
+        """读取/初始化 BML.json，并将 jar 的版本信息（sha256 + 字节数 + 解析结果）持久化。
+
+        缓存校验策略（比较 sha + 文件字节数）：
+            - 先取 jar 当前字节数（os.path.getsize，廉价）；
+            - 与内存缓存 / BML.json 中记录的 jarSize 比较：
+                * 一致 → jar 内容未变（sha 在写入时已计算验证），直接使用缓存的 version；
+                * 不一致 → jar 已变化 → 重新计算 sha256 并重新读取 version.properties，
+                  更新缓存并写回 BML.json。
+        sha256 仅在校验失败（jar 变化）时计算一次，避免每次全量读文件。
+        """
         default_data = {
-            "javaPath": "<:|follow|:>"
+            "javaPath": "<:|follow|:>",
+            "jarSha": "",
+            "jarSize": 0,
+            "version": None,
+            "icon_path": None
         }
         data_path = os.path.join(cls.base_dir, subdir_name, "BML.json")
+        jar_path = cls._get_mdt_jar_path(subdir_name)
+
+        try:
+            jar_size = os.path.getsize(jar_path)
+        except OSError:
+            jar_size = 0
+
+        # 内存缓存命中：size 相同 → jar 未变 → version 有效
+        cached = cls._mdt_data_cache.get(subdir_name)
+        if cached is not None and cached[0] == jar_size:
+            # icon_path 是用户配置项（可能被外部编辑），每次从 BML.json 实时刷新
+            if os.path.isfile(data_path):
+                try:
+                    with open(data_path, "r", encoding="utf-8") as f:
+                        cached[1]["icon_path"] = json.load(f).get("icon_path")
+                except Exception:
+                    pass
+            return cached[1]
+
         file_data = {}
         if os.path.isfile(data_path):
             try:
@@ -195,25 +258,44 @@ class mdtScanner:
                 file_data = {}
         merged = dict(default_data)
         for key, value in file_data.items():
-            if key not in default_data:
-                continue
-            if isinstance(default_data[key], dict) and isinstance(value, dict):
-                for sub_key, sub_value in value.items():
-                    if sub_key in default_data[key]:
-                        merged[key][sub_key] = sub_value
-            else:
+            if key in default_data:
                 merged[key] = value
+
+        if jar_size > 0 and merged["jarSize"] == jar_size and merged["version"]:
+            # 磁盘缓存有效（sha 在写入时已验证），仅回填内存缓存
+            cls._mdt_data_cache[subdir_name] = (jar_size, merged)
+            return merged
+
+        # 缓存无效或缺失 → 重算 sha + 重读 version
+        if jar_size > 0:
+            merged["jarSize"] = jar_size
+            merged["jarSha"] = cls._jar_sha256(jar_path) or ""
+            merged["version"] = cls._read_version_from_jar(jar_path)
+        else:
+            merged["jarSize"] = 0
+            merged["jarSha"] = ""
+            merged["version"] = None
         try:
             os.makedirs(os.path.dirname(data_path), exist_ok=True)
             with open(data_path, "w", encoding="utf-8") as f:
                 json.dump(merged, f, separators=(',', ':'), ensure_ascii=False)
         except Exception:
             pass
+        cls._mdt_data_cache[subdir_name] = (jar_size, merged)
+        return merged
 
 
     @classmethod
     def getMdtData(cls, subdir_name, settings):
-        """返回指定子目录的 BML.json 内容，失败返回默认值。
+        """返回指定子目录的 BML.json 内容（含 jar 的版本信息），失败返回默认值。
+
+        data 结构：
+            javaPath  - Java 配置（见下方取值语义）
+            jarSha    - jar 文件的 sha256（缓存有效性指纹）
+            jarSize   - jar 文件字节数（缓存有效性指纹）
+            version   - jar 内 version.properties 解析后的字典
+            icon_path - 自定义图标路径（None/空串=默认副本内 icon.png，
+                        其余按 getPath 解析）
 
         javaPath 取值语义：
             None           - 自动匹配（settings["javaPath"]=None 时占位，不写入 BML.json）
@@ -221,12 +303,8 @@ class mdtScanner:
             具体路径       - 已选定的 Java
         具体路径不可用（Java 缺失/无效）时直接改为 "<:|follow|:>" 写入并返回，
         """
-        cls._retrieve_mdt_data(subdir_name)
-        data_path = getPath(os.path.join(cls.base_dir, subdir_name, "BML.json"))
-        data = {}
-        if os.path.isfile(data_path):
-            with open(data_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        data = cls._retrieve_mdt_data(subdir_name)
+        data_path = os.path.join(cls.base_dir, subdir_name, "BML.json")
         if (data["javaPath"] == "<:|follow|:>" and settings["javaPath"] is None) or data["javaPath"] is None:
             # 自动选择：优先 17，其次最高版本
             max_vers = -1

@@ -531,7 +531,6 @@ class Main():
         QTimer.singleShot(400, self._resume_mdt_downloads)
 
     def gameRenovate(self, event):
-        mdtScanner.invalidate_cache()
         mdts = mdtScanner.getMdts()
         games = copy.deepcopy(self.settings["gameList"])
         changed = False
@@ -3441,12 +3440,13 @@ class Main():
 
                                     def showEvent(self,event):
                                         super().showEvent(event)
-                                        pngPath = mdtScanner.getMdtMsg(self.game)["icon"]
-                                        if pngPath is not None:
-                                            self.pixmap.setPixmap(QPixmap(pngPath))
-                                        self.text.setText(self.game)
                                         vers = mdtScanner.getMdtMsg(self.game)
-                                        self.version.setText(f"v{vers['number']}.{vers['build']}{vers['modifier']}")
+                                        if vers:
+                                            pngPath = vers.get("icon")
+                                            if pngPath is not None:
+                                                self.pixmap.setPixmap(QPixmap(pngPath))
+                                            self.text.setText(self.game)
+                                            self.version.setText(f"v{vers['number']}.{vers['build']}{vers['modifier']}")
 
 
 
@@ -3866,7 +3866,8 @@ class Main():
                                     self.btns_ = []
 
                                     self.add_page(self.Origin, "wid.pages.download.origin","src/assets/icons/mdt/mdt.png" ,color=False)
-                                    self.add_page(self.MindustryX, "wid.pages.download.mindustryx","src/assets/icons/mdt/mdtx.png" ,color=False)
+                                    self.add_page(self.MindustryX, "MindustryX","src/assets/icons/mdt/mdtx.png" ,color=False)
+                                    self.add_page(self.MindustryARC, "MdtArc","src/assets/icons/mdt/mdtarc.png" ,color=False)
 
                                 def add_page(self, page_cls, text=None, icon=None, color=True):
                                     btn = self.parent.top.add_btn(text, icon, color=color)
@@ -3906,6 +3907,11 @@ class Main():
                                         self.action_bar_layout.setSpacing(5)
                                         self.action_bar_layout.setAlignment(Qt.AlignLeft)
                                         self.layout.addWidget(self.action_bar)
+
+                                        # 统一注册搜索按钮（增量/全量），子类无需重复注册
+                                        self.add_action_btn("wid.pages.download.origin.search", lambda: self.search())
+                                        self.add_action_btn("wid.pages.download.origin.searchAll", lambda: self.searchAll())
+                                        self.action_bar_layout.addStretch()
 
                                         self.scroll = QScrollArea(self)
                                         self.scroll.setWidgetResizable(True)
@@ -4024,11 +4030,23 @@ class Main():
                                                 except Exception:
                                                     return 0.0
                                             return 0.0
+
+                                        def _ver_key(k):
+                                            # 版本号转可比较元组，兼容多段版本（如 146.1.0.0.0）
+                                            s = str(k)
+                                            m = re.match(r'^(\d+)(?:\.(\d+))*$', s)
+                                            if m:
+                                                try:
+                                                    return tuple(int(p) for p in m.groups() if p is not None)
+                                                except ValueError:
+                                                    return (0,)
+                                            return (0,)
+
                                         out = {}
                                         for cls_key in sorted(versions.keys(), key=_key, reverse=True):
                                             out[cls_key] = {
                                                 n: versions[cls_key][n]
-                                                for n in sorted(versions[cls_key].keys(), key=lambda k: float(k) if re.match(r'^\d+(?:\.\d+)*$', str(k)) else 0.0, reverse=True)
+                                                for n in sorted(versions[cls_key].keys(), key=_ver_key, reverse=True)
                                             }
                                         return out
 
@@ -4302,6 +4320,14 @@ class Main():
                                             self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
                                             self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
 
+                                            # 空数据提示：铺满整个滚动区，无条目时显示
+                                            self.empty_label = QLabel(self)
+                                            self.empty_label.setAlignment(Qt.AlignCenter)
+                                            self.empty_label.setProperty("wid", "title")
+                                            self.empty_label.setStyleSheet("font-size:16px;")
+                                            self.empty_label.setText(self.root.langer.get("wid.pages.download.empty"))
+                                            self.empty_label.hide()
+
                                         def setData(self, data: dict, icon_pixmap=None):
                                             self.itemd.clear()
                                             self.item_icon_pixmap = icon_pixmap
@@ -4310,12 +4336,18 @@ class Main():
                                                 self.itemd[idx] = item
                                             self.total_count = len(data)
                                             self.main.setFixedHeight(self.total_count * self.item_h)
+                                            if self.total_count == 0:
+                                                self.empty_label.show()
+                                                self.empty_label.raise_()
+                                            else:
+                                                self.empty_label.hide()
                                             self._update_visible()
 
                                         def resizeEvent(self, event):
                                             self.scroll_slider.setGeometry(
                                                 self.scroll.width() - 5, 0, 5, self.scroll.height()
                                             )
+                                            self.empty_label.setGeometry(0, 0, self.width(), self.height())
                                             super().resizeEvent(event)
                                             self.viewport_h = self.height()
                                             visible = int((self.viewport_h + self.item_h - 1) / self.item_h) + 2
@@ -4831,6 +4863,7 @@ class Main():
                                                 "id": hashlib.md5(dest_path.encode("utf-8")).hexdigest()[:8],
                                                 "name": name,
                                                 "repo": getattr(getattr(self.parent, "template", None), "releaseRepo", None),
+                                                "icon_path": getattr(getattr(self.parent, "template", None), "icon", None),
                                                 "title": name,
                                                 "time": self.data.get("time"),
                                                 "url": url,
@@ -4877,6 +4910,22 @@ class Main():
                                                 mdtScanner._retrieve_mdt_data(name)
                                                 dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
                                                 if os.path.isfile(dfile):
+                                                    # 把下载时记录的类图标路径合并进 BML.json（getMdtMsg 的 icon_path 逻辑会用到）
+                                                    try:
+                                                        with open(dfile, "r", encoding="utf-8") as f:
+                                                            dinfo = json.load(f)
+                                                        icon_path = dinfo.get("icon_path")
+                                                        if icon_path:
+                                                            bfile = getPath("BML/.Mindustrys/%s/BML.json" % name)
+                                                            bdata = {}
+                                                            if os.path.isfile(bfile):
+                                                                with open(bfile, "r", encoding="utf-8") as f:
+                                                                    bdata = json.load(f)
+                                                            bdata["icon_path"] = icon_path
+                                                            with open(bfile, "w", encoding="utf-8") as f:
+                                                                json.dump(bdata, f, ensure_ascii=False, separators=(",", ":"))
+                                                    except Exception:
+                                                        pass
                                                     os.remove(dfile)
                                                 mdtScanner.invalidate_cache()
                                                 self.root.logger.info("[mdt-download] %s 下载完成" % name)
@@ -5161,17 +5210,11 @@ class Main():
                                     def __init__(self, parent=None, root=None, text=None, icon=None):
                                         self.introUrl = "https://raw.githubusercontent.com/Anuken/Mindustry/master/README.md"
                                         self.releaseRepo = "Anuken/Mindustry"
-                                        self.iconPath = getPath("src/assets/icons/mdt/mdt.png")
+                                        self.iconPath = "src/assets/icons/mdt/mdt.png"
                                         self.tmpPath = getPath("BML/.tmp/search/games/.origin.json")
                                         self.classs = {}
                                         super().__init__(parent, root, text, icon)
-                                        self.init_wid()
                                         self.setClasss()
-
-                                    def init_wid(self):
-                                        self.add_action_btn("wid.pages.download.origin.search", lambda: self.search())
-                                        self.add_action_btn("wid.pages.download.origin.searchAll", lambda: self.searchAll())
-                                        self.action_bar_layout.addStretch()
 
                                     def _before_search(self):
                                         for w in self.classs.values():
@@ -5189,8 +5232,9 @@ class Main():
                                         self._clear_scroll_stretch()
                                         # pre-compute icon pixmap once
                                         icon_pixmap = QPixmap()
-                                        if os.path.exists(self.iconPath):
-                                            icon_pixmap.load(self.iconPath)
+                                        icon_full = getPath(self.iconPath)
+                                        if os.path.exists(icon_full):
+                                            icon_pixmap.load(icon_full)
                                         for i, j in self.data["versions"].items():
                                             clss = self.Classs(self, self.root)
                                             clss.setData(i, j, icon_pixmap)
@@ -5234,9 +5278,9 @@ class Main():
 
                                 class MindustryX(Template):
                                     def __init__(self, parent=None, root=None, text=None, icon=None):
-                                        self.introUrl = None
+                                        self.introUrl = "https://raw.githubusercontent.com/TinyLake/MindustryX/refs/heads/main/README.md"
                                         self.releaseRepo = "TinyLake/MindustryX"
-                                        self.iconPath = getPath("src/assets/icons/mdt/mdtx.png")
+                                        self.iconPath = "src/assets/icons/mdt/mdtx.png"
                                         self.tmpPath = getPath("BML/.tmp/search/games/mindustryx.json")
                                         self.classs = {}
                                         super().__init__(parent, root, text, icon)
@@ -5244,10 +5288,6 @@ class Main():
                                         self.setClasss()
 
                                     def init_wid(self):
-                                        self.add_action_btn("wid.pages.download.mindustryx.search", lambda: self.search())
-                                        self.add_action_btn("wid.pages.download.mindustryx.searchAll", lambda: self.searchAll())
-                                        self.action_bar_layout.addStretch()
-
                                         # beta 提示：mindustryX 的 beta 为时效性版本，不写入缓存
                                         self.betaTips = QWidget()
                                         self.betaTips.setStyleSheet(
@@ -5327,8 +5367,9 @@ class Main():
                                         # 清理上次添加的 stretch（遍历移除全部 spacer，防止残留累积）
                                         self._clear_scroll_stretch()
                                         icon_pixmap = QPixmap()
-                                        if os.path.exists(self.iconPath):
-                                            icon_pixmap.load(self.iconPath)
+                                        icon_full = getPath(self.iconPath)
+                                        if os.path.exists(icon_full):
+                                            icon_pixmap.load(icon_full)
                                         # insert beta tip above the first class panel
                                         try:
                                             # remove existing if present
@@ -5431,6 +5472,84 @@ class Main():
 
                                         self._write_cache(write_cache)
                                         return full_cache
+
+                                class MindustryARC(Template):
+                                    def __init__(self, parent=None, root=None, text=None, icon=None):
+                                        self.introUrl = "https://raw.githubusercontent.com/squi2rel/Mindustry-CN-ARC/refs/heads/master/README.md"
+                                        self.releaseRepo = "Jackson11500/Mindustry-CN-ARC-Builds"
+                                        self.iconPath = "src/assets/icons/mdt/mdtarc.png"
+                                        self.tmpPath = getPath("BML/.tmp/search/games/mindustryarc.json")
+                                        self.classs = {}
+                                        super().__init__(parent, root, text, icon)
+                                        self.scroll_layout.setContentsMargins(1, 1, 1, 1)
+                                        self.setClasss()
+
+                                    def _before_search(self):
+                                        old = getattr(self, "_flat_scroll", None)
+                                        if old is not None:
+                                            old.deleteLater()
+                                            self._flat_scroll = None
+
+                                    def _on_data_changed(self):
+                                        self.setClasss()
+
+                                    def setClasss(self):
+                                        # 清理旧的平铺 scroll，避免重建时残留
+                                        old = getattr(self, "_flat_scroll", None)
+                                        if old is not None:
+                                            old.deleteLater()
+                                            self._flat_scroll = None
+                                        # 清理上次添加的 stretch（遍历移除全部 spacer，防止残留累积）
+                                        self._clear_scroll_stretch()
+                                        icon_pixmap = QPixmap()
+                                        icon_full = getPath(self.iconPath)
+                                        if os.path.exists(icon_full):
+                                            icon_pixmap.load(icon_full)
+                                        # 无分区：合并所有分类的版本，直接平铺进单个 Scroll（无折叠面板）
+                                        flat = {}
+                                        for j in self.data["versions"].values():
+                                            flat.update(j)
+                                        scroll = self.Scroll(self, self.root)
+                                        # Scroll.template 默认取 parent.parent（Classs 场景），平铺时需手动指向当前模板
+                                        scroll.template = self
+                                        scroll.setData(copy.deepcopy(flat), icon_pixmap)
+                                        self._flat_scroll = scroll
+                                        # 铺满整个剩余区域，滚动列表内部自行滚动
+                                        self.scroll_layout.addWidget(scroll, 1)
+
+                                    def classify(self, back):
+                                        time_raw = back.get("published_at")
+                                        assets_raw = back.get("assets", [])
+                                        # 游戏包只匹配 Desktop 资产
+                                        game_link = next(
+                                            (a.get("browser_download_url")
+                                             for a in assets_raw
+                                             if "Desktop" in a.get("name", "")),
+                                            None
+                                        )
+                                        assets = {
+                                            a["name"]: {"name": a["name"], "linear": a.get("browser_download_url")}
+                                            for a in assets_raw
+                                            if a.get("name") and a.get("browser_download_url")
+                                        }
+                                        # 如果没有任何可下载的编译包，则跳过该 release（不显示、不缓存）
+                                        if not assets:
+                                            return {
+                                                "class": None,
+                                                "name": None,
+                                            }
+                                        # 版本号全部为 5 位数：name 与 title 统一使用 release 标题字段
+                                        title = back.get("name") or back.get("tag_name") or ""
+                                        return {
+                                            "class": ".",
+                                            "name": title,
+                                            "title": title or None,
+                                            "intro": back.get("body"),
+                                            "time": time_raw.replace("T", " ").replace("Z", "") if time_raw else None,
+                                            "releaseUrl": back.get("html_url"),
+                                            "gameLinear": game_link,
+                                            "assets": assets,
+                                        }
                                         
                                     
                 #TODO: 游戏管理界面

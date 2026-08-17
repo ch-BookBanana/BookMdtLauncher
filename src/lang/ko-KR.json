@@ -91,11 +91,11 @@
     "wid.pages.download.origin": "원본",
     "wid.pages.download.origin.search": "증분 검색",
     "wid.pages.download.origin.searchAll": "전체 검색",
-    "wid.pages.download.mindustryx": "MindustryX",
     "wid.pages.download.mindustryx.search": "증분 검색",
     "wid.pages.download.mindustryx.searchAll": "전체 검색",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.empty": "아직 버전이 없습니다. 위 검색으로 가져오세요",
     "wid.pages.download.mindustryx.betaTips": "알림: MindustryX의 베타는 일시적으로 배포되는 경우가 있어 런처는 베타를 로컬에 캐시하지 않습니다. 검색 후에는 표시되지만 저장되지 않고 필요할 때만 불러옵니다.",
 
     "wid.pages.download.item.download": "다운로드",

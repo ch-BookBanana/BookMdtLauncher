@@ -89,11 +89,11 @@
     "wid.pages.download.origin": "原版",
     "wid.pages.download.origin.search": "増分検索",
     "wid.pages.download.origin.searchAll": "全検索",
-    "wid.pages.download.mindustryx": "MindustryX",
     "wid.pages.download.mindustryx.search": "増分検索",
     "wid.pages.download.mindustryx.searchAll": "全検索",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.empty": "バージョンがまだありません。上の検索で取得してください",
     "wid.pages.download.mindustryx.betaTips": "注意：MindustryX の Beta は短期間で配布されることが多く、ランチャーは Beta をローカルにキャッシュしません。検索時には表示されますが、保存されず必要に応じて読み込まれます。",
 
     "wid.pages.download.item.download": "ダウンロード",

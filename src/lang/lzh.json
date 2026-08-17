@@ -89,11 +89,11 @@
     "wid.pages.download.origin": "原版",
     "wid.pages.download.origin.search": "增搜",
     "wid.pages.download.origin.searchAll": "盡搜",
-    "wid.pages.download.mindustryx": "MindustryX",
     "wid.pages.download.mindustryx.search": "增搜",
     "wid.pages.download.mindustryx.searchAll": "盡搜",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.empty": "尚無版本，可點上搜索得之",
     "wid.pages.download.mindustryx.betaTips": "示：MindustryX 之 Beta 多為短暫放送，器不留其於本地；雖於搜得時見之，然僅當場載入，不存為常。",
 
     "wid.pages.download.item.download": "納之",

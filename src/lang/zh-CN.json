@@ -93,11 +93,11 @@
     "wid.pages.download.origin.search": "增量搜索",
     "wid.pages.download.origin.searchAll": "全量搜索",
 
-    "wid.pages.download.mindustryx": "MindustryX",
     "wid.pages.download.mindustryx.search": "增量搜索",
     "wid.pages.download.mindustryx.searchAll": "全量搜索",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.empty": "暂无版本，点击上方搜索获取",
     "wid.pages.download.mindustryx.betaTips": "注意：MindustryX 的 Beta 通常为短期发布，启动器不会将 Beta 版本写入本地缓存；搜索后可以看到 Beta，但仅做即时加载，不会永久保存。",
 
     "wid.pages.download.item.download": "下载",

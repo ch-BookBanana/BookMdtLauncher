@@ -91,11 +91,11 @@
     "wid.pages.download.origin": "原版",
     "wid.pages.download.origin.search": "增量搜尋",
     "wid.pages.download.origin.searchAll": "全量搜尋",
-    "wid.pages.download.mindustryx": "MindustryX",
     "wid.pages.download.mindustryx.search": "增量搜尋",
     "wid.pages.download.mindustryx.searchAll": "全量搜尋",
     "wid.pages.download.alpha": "Alpha",
     "wid.pages.download.beta": "Beta",
+    "wid.pages.download.empty": "暫無版本，點擊上方搜尋取得",
     "wid.pages.download.mindustryx.betaTips": "提醒：MindustryX 的 Beta 版本通常短暫發布，啟動器不會將 Beta 快取於本機；搜尋後會顯示 Beta，但僅作即時載入，並不會儲存。",
 
     "wid.pages.download.item.download": "下載",
