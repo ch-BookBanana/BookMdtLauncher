@@ -84,6 +84,17 @@
     "wid.pages.start.java.extracting": "正在部署Java... $1%",
     "wid.pages.start.java.done": "Java部署完成",
     "wid.pages.start.java.error": "Java下载失败",
+    "wid.pages.start.finished.save1": "保存游戏数据(1/2)",
+    "wid.pages.start.finished.save2": "保存游戏数据(2/2)",
+    "wid.pages.start.finished.importing": "正在导入数据",
+    "log.appdata.prepared": "[appdataCopy] 已迁移游戏数据到 $2",
+    "log.appdata.prepare_error": "[appdataCopy] 启动前迁移失败: $1",
+    "log.appdata.no_appdata": "[appdataCopy] 未找到 APPDATA 环境变量",
+    "log.appdata.step1_error": "[appdataCopy] 保存步骤1失败: $1",
+    "log.appdata.step2_error": "[appdataCopy] 保存步骤2失败: $1",
+    "log.appdata.resume_drop": "[appdataCopy] 丢弃不完整保存: $1",
+    "log.appdata.resume_error": "[appdataCopy] 续传保存 $1 失败: $2",
+    "log.appdata.resume_scan_error": "[appdataCopy] 扫描续传失败: $1",
 
 
     "wid.pages.download": "下载",

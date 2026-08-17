@@ -530,6 +530,9 @@ class Main():
         # mdt 游戏下载：启动时通过 MdtScanner 获取 downloadingMdts，逐个续传并同步暂停状态
         QTimer.singleShot(400, self._resume_mdt_downloads)
 
+        # appdataCopy：启动时续传未完成的游戏数据保存（step=1 删除 / step=2 重做第二步）
+        QTimer.singleShot(500, self._resume_appdata_saves)
+
     def gameRenovate(self, event):
         mdts = mdtScanner.getMdts()
         games = copy.deepcopy(self.settings["gameList"])
@@ -762,23 +765,39 @@ class Main():
             pass
 
     def _java_cancel_all(self):
-        """取消当前 Java 下载流程（用户手动取消/退出时）。"""
-        self.logger.info(self.langer.get("log.java.cancel_all"), name="Java")
+        """取消当前 Java 下载流程（用户手动取消/退出时）。
+
+        仅当确实存在流程时才打印日志并执行取消，避免退出时产生误导性日志。
+        """
         flow = self.java_flow
         self.java_flow = None
+        lf = None
+        try:
+            lf = self.launcher._java_flow
+            self.launcher._java_flow = None
+        except Exception:
+            pass
+        if flow is None and lf is None:
+            # 没有任何流程，无需打印"取消全部流程"
+            return
+        self.logger.info(self.langer.get("log.java.cancel_all"), name="Java")
         if flow is not None:
             try:
                 flow.cancel()
             except Exception:
                 pass
-        # launcher 内置流程
-        try:
-            lf = self.launcher._java_flow
-            self.launcher._java_flow = None
-            if lf is not None:
+        if lf is not None:
+            try:
                 lf.cancel()
-        except Exception:
-            pass
+            except Exception:
+                pass
+
+    def _resume_appdata_saves(self):
+        """启动时续传未完成的 appdataCopy 保存任务（launcher 内部处理 step=1/step=2）。"""
+        try:
+            self.launcher.resume_appdata_saves()
+        except Exception as e:
+            self.logger.warning(t(self.langer.get("log.appdata.resume_scan_error"), repr(e)))
 
     def _resume_mdt_downloads(self):
         """启动续传所有未完成的 mdt 游戏下载（downloading.json 记录），并同步暂停状态。
@@ -2887,8 +2906,12 @@ class Main():
                         self.root.launcher.game_launched.connect(lambda: self.left.main.setCurrentIndex(3))
                         self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
                         self.root.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
-                        self.root.launcher.game_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
-                        self.root.launcher.game_finished.connect(lambda: self.left.main.setCurrentIndex(0))
+                        self.root.launcher.lifecycle_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
+                        self.root.launcher.lifecycle_finished.connect(lambda: self.left.main.setCurrentIndex(0))
+                        self.root.launcher.appdata_save_step.connect(self._on_appdata_save_step)
+                        self.root.launcher.appdata_save_done.connect(self._on_appdata_save_done)
+                        self.root.launcher.appdata_import_started.connect(self._on_appdata_import_started)
+                        self.root.launcher.appdata_import_done.connect(self._on_appdata_import_done)
                         self.root.launcher.log.connect(lambda dic: (self.root.logger.info("[launcher]"+dic["text"]) if dic["type"] == "info" else self.root.logger.error("[launcher]"+dic["text"])))
 
                     def changeGame(self, game=None):
@@ -2903,6 +2926,43 @@ class Main():
                             self.root.settings["defaultGame"] = game
                         self.root.signals.emit("start_gameChanged", game)
                         QThTimer.task(0, self.left.changeTimer, [self.left.sets])
+
+                    def _on_appdata_save_step(self, step):
+                        """appdataCopy 保存步骤：切换两个界面到 index 5 并设置 finished 文本。"""
+                        try:
+                            self.left.main.setCurrentIndex(5)
+                            self.main.stack.setCurrentIndex(5)
+                            self.left.main.finished.setStatus(step)
+                            self.main.finished.setStatus(step)
+                        except Exception:
+                            pass
+
+                    def _on_appdata_save_done(self):
+                        """appdataCopy 保存完成：两个界面切回 index 0。"""
+                        try:
+                            self.main.stack.setCurrentIndex(0)
+                            self.left.main.setCurrentIndex(0)
+                        except Exception:
+                            pass
+
+                    def _on_appdata_import_started(self):
+                        """appdataCopy 开始导入数据：两个界面切到 finished 页显示"正在导入数据"。"""
+                        try:
+                            text = self.root.langer.get("wid.pages.start.finished.importing")
+                            self.left.main.finished.label.setText(text)
+                            self.main.finished.label.setText(text)
+                            self.left.main.setCurrentIndex(5)
+                            self.main.stack.setCurrentIndex(5)
+                        except Exception:
+                            pass
+
+                    def _on_appdata_import_done(self):
+                        """appdataCopy 导入完成：切回 launch 页等待游戏启动。"""
+                        try:
+                            self.main.stack.setCurrentIndex(3)
+                            self.left.main.setCurrentIndex(3)
+                        except Exception:
+                            pass
 
                             
 
@@ -3017,6 +3077,7 @@ class Main():
                                 self.world = self.World(self,self.root)
                                 self.launch = self.Launch(self,self.root)
                                 self.suspend = self.Suspend(self,self.root)
+                                self.finished = self.Finished(self,self.root)
 
                             class Pages(QWidget):
                                 def __init__(self, parent=None, root=None):
@@ -3138,6 +3199,27 @@ class Main():
                                 def __init__(self, parent=None, root=None):
                                     super().__init__(parent,root)
 
+                            class Finished(Pages):
+                                """保存游戏数据进度页（index 5）。"""
+                                def __init__(self, parent=None, root=None):
+                                    super().__init__(parent,root)
+                                    self.init_wid()
+
+                                def init_wid(self):
+                                    self.layout = QVBoxLayout(self)
+                                    self.layout.setContentsMargins(30,50,30,50)
+                                    self.layout.setSpacing(10)
+                                    self.layout.setAlignment(Qt.AlignCenter)
+                                    self.label = QLabel(self)
+                                    self.label.setProperty("wid", "title")
+                                    self.label.setWordWrap(True)
+                                    self.label.setAlignment(Qt.AlignCenter)
+                                    self.label.setStyleSheet("font-size:14px;")
+                                    self.layout.addWidget(self.label)
+
+                                def setStatus(self, step):
+                                    self.label.setText(self.root.langer.get("wid.pages.start.finished.save%d" % step))
+
                     class Main(Mainw):
                         def __init__(self,parent=None,root=None):
                             super().__init__(parent,root)
@@ -3160,6 +3242,7 @@ class Main():
                             self.world = self.World(self,self.root)
                             self.launch = self.Launch(self,self.root)
                             self.log = self.Log(self,self.root)
+                            self.finished = self.Finished(self,self.root)
 
 
 
@@ -3459,6 +3542,28 @@ class Main():
                             def __init__(self,parent=None,root=None):
                                 super().__init__(parent,root)
                                 self.setAttribute(Qt.WA_StyledBackground,True)
+
+                        class Finished(_Main):
+                            """保存游戏数据进度页（index 5）。"""
+                            def __init__(self,parent=None,root=None):
+                                super().__init__(parent,root)
+                                self.setAttribute(Qt.WA_StyledBackground,True)
+                                self.init_wid()
+
+                            def init_wid(self):
+                                self.layout = QVBoxLayout(self)
+                                self.layout.setContentsMargins(30,30,30,30)
+                                self.layout.setSpacing(10)
+                                self.layout.setAlignment(Qt.AlignCenter)
+                                self.label = QLabel(self)
+                                self.label.setProperty("wid", "title")
+                                self.label.setWordWrap(True)
+                                self.label.setAlignment(Qt.AlignCenter)
+                                self.label.setStyleSheet("font-size:16px;")
+                                self.layout.addWidget(self.label)
+
+                            def setStatus(self, step):
+                                self.label.setText(self.root.langer.get("wid.pages.start.finished.save%d" % step))
 
 
 
@@ -4859,16 +4964,24 @@ class Main():
                                                 self.root.logger.error("[mdt-download] 创建目录失败: %s" % e)
                                                 return
                                             dest_path = os.path.join(target_dir, "mdt.jar")
+                                            # appdataCopy：仅原版（Anuken/Mindustry）且版本号早于 126（不含 126）时置 True
+                                            # （v126 起才支持 MINDUSTRY_DATA_DIR，更早版本数据目录会落在系统 AppData）
+                                            _appdata_copy = False
+                                            _tpl = getattr(self.parent, "template", None)
+                                            if getattr(_tpl, "releaseRepo", None) == "Anuken/Mindustry":
+                                                _ver_m = re.match(r'^(\d+)', str(self.data.get("name") or ""))
+                                                _appdata_copy = bool(_ver_m and int(_ver_m.group(1)) < 126)
                                             info = {
                                                 "id": hashlib.md5(dest_path.encode("utf-8")).hexdigest()[:8],
                                                 "name": name,
-                                                "repo": getattr(getattr(self.parent, "template", None), "releaseRepo", None),
-                                                "icon_path": getattr(getattr(self.parent, "template", None), "icon", None),
+                                                "repo": getattr(_tpl, "releaseRepo", None),
+                                                "icon_path": getattr(_tpl, "icon", None),
                                                 "title": name,
                                                 "time": self.data.get("time"),
                                                 "url": url,
                                                 "dest": dest_path,
                                                 "created_at": int(time.time()),
+                                                "appdataCopy": _appdata_copy,
                                             }
                                             try:
                                                 with open(os.path.join(target_dir, "downloading.json"), "w", encoding="utf-8") as f:
@@ -4910,18 +5023,22 @@ class Main():
                                                 mdtScanner._retrieve_mdt_data(name)
                                                 dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
                                                 if os.path.isfile(dfile):
-                                                    # 把下载时记录的类图标路径合并进 BML.json（getMdtMsg 的 icon_path 逻辑会用到）
+                                                    # 把下载时记录的类图标路径 / appdataCopy 合并进 BML.json
                                                     try:
                                                         with open(dfile, "r", encoding="utf-8") as f:
                                                             dinfo = json.load(f)
                                                         icon_path = dinfo.get("icon_path")
-                                                        if icon_path:
+                                                        appdata_copy = dinfo.get("appdataCopy")
+                                                        if icon_path or appdata_copy is not None:
                                                             bfile = getPath("BML/.Mindustrys/%s/BML.json" % name)
                                                             bdata = {}
                                                             if os.path.isfile(bfile):
                                                                 with open(bfile, "r", encoding="utf-8") as f:
                                                                     bdata = json.load(f)
-                                                            bdata["icon_path"] = icon_path
+                                                            if icon_path:
+                                                                bdata["icon_path"] = icon_path
+                                                            if appdata_copy is not None:
+                                                                bdata["appdataCopy"] = appdata_copy
                                                             with open(bfile, "w", encoding="utf-8") as f:
                                                                 json.dump(bdata, f, ensure_ascii=False, separators=(",", ":"))
                                                     except Exception:

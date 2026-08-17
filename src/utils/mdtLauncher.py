@@ -1,10 +1,13 @@
 import os
+import json
+import shutil
 import logging
 from PyQt5.QtCore import QProcess, QProcessEnvironment, QTimer, pyqtSignal
 
 from .path_utils import getPath
 from .mdtScanner import mdtScanner
 from .javaScanner import javaScanner
+from .QThTimer import QThTimer
 
 _log = logging.getLogger("Main.MdtLauncher")
 
@@ -33,7 +36,8 @@ def _tr(key, *args):
 class mdtLauncher(QProcess):
     game_launched = pyqtSignal()       # 已开始尝试启动
     game_started = pyqtSignal()        # 进程已成功开始运行
-    game_finished = pyqtSignal(int)    # 进程结束，传出退出码
+    lifecycle_finished = pyqtSignal(int)  # 生命周期结束（启动失败/进程退出/错误），传出退出码
+    game_finished = pyqtSignal(int)    # 游戏进程真正结束（仅 QProcess.finished 触发），传出退出码
     game_log = pyqtSignal(dict)        # 进程输出日志，dict: {"type":"info"/"error", "text":...}
     log = pyqtSignal(dict)             # 通用日志信号（启动阶段 info/error）
     java_missing = pyqtSignal()        # Java 缺失/无效（UI 据此切页显示"未检测到Java"）
@@ -43,6 +47,10 @@ class mdtLauncher(QProcess):
     java_done = pyqtSignal(bool)       # Java 下载流程结束（True 成功 / False 失败）
     java_cancelled = pyqtSignal()      # Java 下载被用户取消（UI 显示"已取消"而非"失败"）
     java_paused = pyqtSignal(bool, int)   # Java 下载暂停状态（是否暂停, 当前百分比）
+    appdata_save_step = pyqtSignal(int)   # appdataCopy 保存步骤（1/2），UI 据此切页并设置文本
+    appdata_save_done = pyqtSignal()      # appdataCopy 保存完成（UI 切回主界面）
+    appdata_import_started = pyqtSignal() # appdataCopy 开始导入数据（复制副本 data/ → %APPDATA%）
+    appdata_import_done = pyqtSignal()    # appdataCopy 导入完成（继续启动流程）
 
     def __init__(self, parent=None, settings=None):
         super().__init__()
@@ -80,7 +88,8 @@ class mdtLauncher(QProcess):
             "mdtJar": None,
             "mdtData": None,
             "javaPath": None,
-            "args": None
+            "args": None,
+            "appdataCopy": False
         }
 
         # ---------- 1. 检查 mdt 实例 ----------
@@ -161,10 +170,26 @@ class mdtLauncher(QProcess):
         self.data["args"] = args if args else []
         self.log.emit({"type": "info", "text": "Launch args: " + str(self.data["args"])})
 
+        # ---------- 3.5 appdataCopy：启动前将副本 data/ 迁移到 %APPDATA%/Mindustry/ ----------
+        self.data["appdataCopy"] = self._get_appdata_copy_flag()
+        if self.data["appdataCopy"]:
+            # 提示"正在导入数据"（UI 切 finished 页），复制在子线程执行避免卡界面
+            self.appdata_import_started.emit()
+            QThTimer.task(0, lambda e: self._appdata_copy_to_appdata(),
+                          result_callback=self._on_appdata_imported)
+            return True
+        # 无 appdataCopy 时直接继续启动流程
+        self._launch_continue()
+        return True
+
+    def _launch_continue(self):
+        """appdataCopy 导入完成后的后续启动步骤（原 4/5/6 节）。"""
         # ---------- 4. 设置进程环境 ----------
         self.envs.insert("MINDUSTRY_DATA_DIR", self.data["mdtData"])
         self.setProcessEnvironment(self.envs)
         self.setProcessChannelMode(QProcess.SeparateChannels)
+        # 工作目录改为 jar 所在目录（mdtJar 的同级目录），与启动器所在目录解耦
+        self.setWorkingDirectory(self.data["mdtPath"])
 
         # ---------- 5. 连接信号（先断开避免重复） ----------
         self._disconnect_signals()
@@ -178,11 +203,162 @@ class mdtLauncher(QProcess):
         self.log.emit({"type": "info", "text": "Starting process: " + self.data["javaPath"] + " -jar " + self.data["mdtJar"]})
         self.start(self.data["javaPath"],
                    self.data["args"] + ["-jar", self.data["mdtJar"]])
-        return True
+
+    def _on_appdata_imported(self, result):
+        """appdataCopy 导入完成（主线程回调）：提示结束，继续后续启动流程。"""
+        self.appdata_import_done.emit()
+        self._launch_continue()
 
     def run(self, mdt_name, java_path=None, args=None, data_path=None):
         """对外接口：启动服务端（异步），不阻塞调用线程。"""
         self._launch(mdt_name, java_path, args, data_path)
+
+    # ================== appdataCopy（旧版本数据目录迁移） ==================
+    def _get_appdata_copy_flag(self):
+        """读取当前副本 BML.json 的 appdataCopy 标志（仅原版且主版本 <126 时为 True）。"""
+        try:
+            bml_path = os.path.join(self.data["mdtPath"], "BML.json")
+            with open(bml_path, "r", encoding="utf-8") as f:
+                return bool(json.load(f).get("appdataCopy", False))
+        except Exception:
+            return False
+
+    def _appdata_appdata_dir(self):
+        """返回 %APPDATA%/Mindustry 目录（无 APPDATA 环境变量时返回 None）。"""
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return None
+        return os.path.join(appdata, "Mindustry")
+
+    def _appdata_copy_to_appdata(self):
+        """启动前：清除 %APPDATA%/Mindustry/ 并将副本 data/ 复制过去。"""
+        src = os.path.join(self.data["mdtPath"], "data")
+        dst = self._appdata_appdata_dir()
+        if not dst:
+            self.log.emit({"type": "error", "text": _tr("log.appdata.no_appdata")})
+            return
+        try:
+            # 清除可能存在的 %APPDATA%/Mindustry/
+            if os.path.isdir(dst):
+                shutil.rmtree(dst, ignore_errors=True)
+            # 复制副本 data/ → %APPDATA%/Mindustry/
+            if os.path.isdir(src):
+                os.makedirs(dst, exist_ok=True)
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            self.log.emit({"type": "info", "text": _tr("log.appdata.prepared", src, dst)})
+        except Exception as e:
+            self.log.emit({"type": "error", "text": _tr("log.appdata.prepare_error", str(e))})
+
+    def _appdata_save_flow(self):
+        """游戏结束后：将 %APPDATA%/Mindustry/ 数据两步保存回副本（异步）。"""
+        game = self.data.get("mdtName")
+        if not game:
+            return
+        tmp_root = getPath("BML/.tmp/appdataCopy/%s" % game)
+        tmp_data = os.path.join(tmp_root, "data")
+        data_json = os.path.join(tmp_root, "data.json")
+        appdata_dir = self._appdata_appdata_dir()
+        dst = os.path.join(self.data["mdtPath"], "data")
+
+        def _write_step(step):
+            try:
+                os.makedirs(tmp_root, exist_ok=True)
+                with open(data_json, "w", encoding="utf-8") as f:
+                    json.dump({"step": step}, f)
+            except Exception:
+                pass
+
+        def _step1(event):
+            # ##1: finished 文本"保存游戏数据(1/2)"，step=1，复制 %APPDATA%/Mindustry/ → tmp/data
+            _write_step(1)
+            self.appdata_save_step.emit(1)
+            try:
+                if appdata_dir and os.path.isdir(appdata_dir):
+                    if os.path.isdir(tmp_data):
+                        shutil.rmtree(tmp_data, ignore_errors=True)
+                    os.makedirs(tmp_data, exist_ok=True)
+                    shutil.copytree(appdata_dir, tmp_data, dirs_exist_ok=True)
+            except Exception as e:
+                self.log.emit({"type": "error", "text": _tr("log.appdata.step1_error", str(e))})
+            return True
+
+        def _step2(event):
+            # ##2: finished 文本"保存游戏数据(2/2)"，step=2，复制 tmp/data → 副本 data/ 并删除 %APPDATA%/Mindustry/
+            _write_step(2)
+            self.appdata_save_step.emit(2)
+            try:
+                if os.path.isdir(tmp_data):
+                    if os.path.isdir(dst):
+                        shutil.rmtree(dst, ignore_errors=True)
+                    os.makedirs(dst, exist_ok=True)
+                    shutil.copytree(tmp_data, dst, dirs_exist_ok=True)
+                # 同时删除 %APPDATA%/Mindustry/
+                if appdata_dir and os.path.isdir(appdata_dir):
+                    shutil.rmtree(appdata_dir, ignore_errors=True)
+                # 清理临时目录：防止下次启动 resume 时用过期 tmp 数据覆盖新数据
+                shutil.rmtree(tmp_root, ignore_errors=True)
+            except Exception as e:
+                self.log.emit({"type": "error", "text": _tr("log.appdata.step2_error", str(e))})
+            return True
+
+        def _done(result):
+            self.appdata_save_done.emit()
+
+        # 两步串行执行（子线程复制，避免卡 UI）；step1 完成后自动接 step2
+        QThTimer.task(0, _step1, result_callback=lambda r: QThTimer.task(0, _step2, result_callback=_done))
+
+    def resume_appdata_saves(self):
+        """启动器初始化：遍历 BML/.tmp/appdataCopy/ 处理未完成的保存任务。
+
+        step==1 → 数据未复制完整，直接删除该目录（%APPDATA% 数据仍在，不丢失）；
+        step==2 → 重启第二步（复制 tmp/data → 副本 data/，删除 %APPDATA%/Mindustry/）。
+        """
+        tmp_root = getPath("BML/.tmp/appdataCopy")
+        if not os.path.isdir(tmp_root):
+            return
+        for game in os.listdir(tmp_root):
+            gdir = os.path.join(tmp_root, game)
+            if not os.path.isdir(gdir):
+                continue
+            data_json = os.path.join(gdir, "data.json")
+            try:
+                with open(data_json, "r", encoding="utf-8") as f:
+                    step = json.load(f).get("step")
+            except Exception:
+                continue
+            if step == 1:
+                # 第一步数据不完整：%APPDATA%/Mindustry 还在，直接丢弃临时目录
+                shutil.rmtree(gdir, ignore_errors=True)
+                self.log.emit({"type": "info", "text": _tr("log.appdata.resume_drop", game)})
+            elif step == 2:
+                self._appdata_resume_step2(game, gdir)
+
+    def _appdata_resume_step2(self, game, gdir):
+        """重启第二步：tmp/data → 副本 data/，并删除 %APPDATA%/Mindustry/。"""
+        tmp_data = os.path.join(gdir, "data")
+        dst = os.path.join(getPath("BML/.Mindustrys"), game, "data")
+        appdata_dir = self._appdata_appdata_dir()
+
+        def _step2(event):
+            self.appdata_save_step.emit(2)
+            try:
+                if os.path.isdir(tmp_data):
+                    if os.path.isdir(dst):
+                        shutil.rmtree(dst, ignore_errors=True)
+                    os.makedirs(dst, exist_ok=True)
+                    shutil.copytree(tmp_data, dst, dirs_exist_ok=True)
+                if appdata_dir and os.path.isdir(appdata_dir):
+                    shutil.rmtree(appdata_dir, ignore_errors=True)
+                # 清理临时目录
+                shutil.rmtree(gdir, ignore_errors=True)
+            except Exception as e:
+                self.log.emit({"type": "error", "text": _tr("log.appdata.resume_error", game, str(e))})
+            return True
+
+        def _done(result):
+            self.appdata_save_done.emit()
+
+        QThTimer.task(0, _step2, result_callback=_done)
 
     # ================== Java 自动下载 ==================
     def _auto_java_download(self):
@@ -243,7 +419,7 @@ class mdtLauncher(QProcess):
             except Exception:
                 pass
         if not ok:
-            # 失败/取消：不发射 game_finished（避免与状态显示抢切页），
+            # 失败/取消：不发射 lifecycle_finished（避免与状态显示抢切页），
             # 下次启动可重新尝试自动下载
             self._java_download_attempts = 0
             cancelled = self._java_cancelled
@@ -282,6 +458,14 @@ class mdtLauncher(QProcess):
 
     def _on_finished(self, exitCode, exitStatus):
         self._emit_finished(exitCode)
+        # 游戏进程真正结束：单独发出 game_finished（区别于生命周期结束）
+        try:
+            self.game_finished.emit(exitCode)
+        except Exception:
+            pass
+        # appdataCopy：游戏结束后两步保存 %APPDATA%/Mindustry 数据回副本（异步）
+        if self.data.get("appdataCopy"):
+            self._appdata_save_flow()
         self.going = 0
         self._java_download_attempts = 0   # 游戏进程结束：生命周期结束，下次启动重新允许自动下载
 
@@ -312,10 +496,10 @@ class mdtLauncher(QProcess):
                 pass
 
     def _emit_finished(self, code: int):
-        """内部统一发出 finished 信号（只发一次），并做清理。"""
+        """内部统一发出 lifecycle_finished 信号（只发一次），并做清理。"""
         if not getattr(self, '_finished_emitted', False):
             try:
-                self.game_finished.emit(code)
+                self.lifecycle_finished.emit(code)
             except Exception:
                 pass
             self._finished_emitted = True
