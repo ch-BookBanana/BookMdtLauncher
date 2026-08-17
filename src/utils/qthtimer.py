@@ -70,13 +70,28 @@ QThTimer 使用文档（简洁版，中文）
 import inspect
 import traceback
 
-from PyQt5.Qt import QObject, QTimer, QThread, pyqtSignal, pyqtSlot, Qt
+from PySide6.QtCore import QObject, QTimer, QThread, Qt, Signal, Slot
 
 _qthtimer_thread = None
 _active_timers = set()
 _dedicated_threads = set()
 _zombie_threads = []      # 未能及时停止的线程：保留引用，交给进程退出兜底
-_shutting_down = False    # 全局退出标志（shutdown 时置位）
+_pending_objects = set()  # 已请求销毁的跨线程 QObject：保持 Python 引用，
+                          # 防止在主线程被 GC 而 C++ 对象在线程内被错误销毁
+                          # （否则 Qt 报 "Timers cannot be stopped from another thread"）
+
+
+def _release_pending(obj=None):
+    """跨线程对象的 destroyed 回调：C++ 对象已在其线程内销毁，可安全释放 Python 引用。
+
+    PySide6 的 destroyed 信号直接携带被销毁对象作为参数（勿用 QObject.sender()，
+    它在 PySide6 中是实例方法，模块级函数无法调用）。
+    """
+    if obj is not None:
+        try:
+            _pending_objects.discard(obj)
+        except Exception:
+            pass
 
 
 def _get_qthtimer_thread():
@@ -86,7 +101,7 @@ def _get_qthtimer_thread():
         _qthtimer_thread.setObjectName("QThTimerThread")
         _qthtimer_thread.start()
         try:
-            from PyQt5.QtWidgets import QApplication
+            from PySide6.QtWidgets import QApplication
             app = QApplication.instance()
             if app is not None:
                 app.aboutToQuit.connect(shutdown)
@@ -95,7 +110,7 @@ def _get_qthtimer_thread():
     return _qthtimer_thread
 
 
-def _shutdown_qthtimer_thread(timeout=10000):
+def _shutdown_qthtimer_thread(timeout=15000):
     """安全停止共享子线程。
 
     注意：绝不调用 QThread.terminate()——它会在线程仍持有 Python 对象时
@@ -131,16 +146,16 @@ def _get_callback_arg_count(callback):
 def _make_signal_for_callback(callback):
     arg_count = _get_callback_arg_count(callback)
     if arg_count is None:
-        return pyqtSignal(object)
+        return Signal(object)
     if arg_count <= 0:
-        return pyqtSignal()
-    return pyqtSignal(*([object] * arg_count))
+        return Signal()
+    return Signal(*([object] * arg_count))
 
 
 class _QThTimerWorker(QObject):
-    timeout = pyqtSignal()
-    finished = pyqtSignal(object)
-    requestCleanup = pyqtSignal()                    # ★ 信号：外部（任意线程）请求清理
+    timeout = Signal()
+    finished = Signal(object)
+    requestCleanup = Signal()                    # ★ 信号：外部（任意线程）请求清理
 
     def __init__(self, interval=0, single_shot=False, job=None):
         super().__init__()
@@ -150,10 +165,11 @@ class _QThTimerWorker(QObject):
         self.timer.setSingleShot(bool(single_shot))
         self.job = job
         self.timer.timeout.connect(self._on_timeout)
+        self.destroyed.connect(_release_pending)   # C++ 在线程内销毁后释放 Python 引用
         # ★ 用信号槽连接清理逻辑，不做 invokeMethod
         self.requestCleanup.connect(self._do_cleanup, Qt.QueuedConnection)
 
-    @pyqtSlot()
+    @Slot()
     def _on_timeout(self):
         if self._destroyed:
             return
@@ -171,47 +187,55 @@ class _QThTimerWorker(QObject):
 
         self.finished.emit(result)
 
-    @pyqtSlot()
+    @Slot()
     def start(self):
         self.timer.start()
 
-    @pyqtSlot()
+    @Slot()
     def stop(self):
         try:
             self.timer.stop()
         except RuntimeError:
             pass  # 忽略跨线程警告
 
-    @pyqtSlot()
+    @Slot()
     def _do_cleanup(self):
-        """在 worker 所在线程中安全停止定时器（通过信号槽触发，线程安全）。"""
+        """在 worker 所在线程中安全停止定时器并自我销毁。
+
+        deleteLater 在 worker 线程的事件循环中执行，保证 QTimer（子对象）
+        也由其所属线程析构——否则主线程直接销毁会触发 Qt 跨线程警告。
+        """
         self._destroyed = True
         try:
             self.timer.stop()
         except Exception:
             pass
+        try:
+            self.deleteLater()
+        except Exception:
+            pass
         
-    @pyqtSlot(int)
+    @Slot(int)
     def setInterval(self, interval):
         self.timer.setInterval(int(interval))
 
-    @pyqtSlot(bool)
+    @Slot(bool)
     def setSingleShot(self, single_shot):
         self.timer.setSingleShot(bool(single_shot))
 
-    @pyqtSlot(object)
+    @Slot(object)
     def setJob(self, job):
         self.job = job
 
 
 class QThTimer(QObject):
-    timeout = pyqtSignal()
-    finished = pyqtSignal(object)
-    _request_start = pyqtSignal()
-    _request_stop = pyqtSignal()
-    _request_interval = pyqtSignal(int)
-    _request_single_shot = pyqtSignal(bool)
-    _request_job = pyqtSignal(object)
+    timeout = Signal()
+    finished = Signal(object)
+    _request_start = Signal()
+    _request_stop = Signal()
+    _request_interval = Signal(int)
+    _request_single_shot = Signal(bool)
+    _request_job = Signal(object)
 
     def __init__(self, interval=0, parent=None, dedicated=False):
         super().__init__(parent)
@@ -232,6 +256,10 @@ class QThTimer(QObject):
         _active_timers.add(self)
         self._event = None
         self._parent_obj = None
+        # 自动销毁连接所在的信号（once/singleShot → timeout；task → finished）。
+        # destroy() 只对这个信号做无参 disconnect()：该信号必有连接
+        #（至少包含 _auto_destroy 槽），不会触发 "Failed to disconnect" 警告。
+        self._auto_destroy_signal = None
         # 如果传入 parent，则在 parent 销毁时自动销毁本实例
         if parent is not None:
             try:
@@ -273,35 +301,59 @@ class QThTimer(QObject):
     def stop(self):
         self._request_stop.emit()
 
+    def _auto_destroy(self):
+        """一次性任务完成后的自动销毁入口。
+
+        不在信号（timeout/finished）发射期间直接调用 destroy()：
+        PySide6 在信号发射过程中 disconnect 同一信号的连接会打印
+        "libpyside: Failed to disconnect" RuntimeWarning。这里用
+        QTimer.singleShot(0) 延迟到下一轮事件循环（信号发射已结束）
+        再执行 destroy，disconnect 时不再有警告。
+        """
+        try:
+            QTimer.singleShot(0, self.destroy)
+        except Exception:
+            self.destroy()
+
     def destroy(self):
         """异步安全销毁计时器。"""
         if getattr(self, '_destroyed', False):
             return
         self._destroyed = True
 
+        # 断开自动销毁连接所在的信号。
+        # 注意：无参 disconnect() 在信号无连接时会打印 "Failed to disconnect (None)"
+        # RuntimeWarning（libpyside 直接输出，try/except 捕获不了）。因此只对
+        # 记录过的信号（必有连接）执行；destroy 后信号不再发射，用户回调也已
+        # 执行完毕，断开全部连接无副作用，还能释放用户回调的引用避免泄漏。
+        sig = getattr(self, '_auto_destroy_signal', None)
+        if sig is not None:
+            self._auto_destroy_signal = None
+            try:
+                sig.disconnect()
+            except Exception:
+                pass
+
+        # 事件对象：加入待销毁集合保持 Python 引用，deleteLater 后由线程内 destroyed 释放
         if self._event is not None:
             ev = self._event
             self._event = None
             try:
+                _pending_objects.add(ev)
                 ev.deleteLater()
             except Exception:
                 pass
 
+        # worker：同样保持引用，由 worker 线程内的 _do_cleanup（stop + deleteLater）销毁
         worker = self._worker
         self._worker = None
         if worker is not None:
             worker._destroyed = True
-            if not _shutting_down:
-                # 正常运行期：请求工作线程停止计时器并延迟销毁
-                try:
-                    worker.requestCleanup.emit()
-                except Exception:
-                    pass
-                try:
-                    worker.deleteLater()
-                except Exception:
-                    pass
-            # 退出阶段：线程即将整体停止，跳过跨线程清理，避免 deferred-delete 崩溃
+            try:
+                _pending_objects.add(worker)
+                worker.requestCleanup.emit()
+            except Exception:
+                pass
 
         # 专用线程：退出并等待（绝不 terminate，超时保留引用兜底）
         if self._dedicated and self._thread is not None:
@@ -316,12 +368,6 @@ class QThTimer(QObject):
                 pass
 
         try:
-            if getattr(self, '_parent_obj', None) is not None:
-                self._parent_obj.destroyed.disconnect(self.destroy)
-        except Exception:
-            pass
-
-        try:
             _active_timers.discard(self)
         except Exception:
             pass
@@ -333,6 +379,9 @@ class QThTimer(QObject):
         if callbacks:
             for fn in callbacks:
                 timer.timeout.connect(fn)
+        # 一次性任务：触发后自动销毁，释放线程资源，避免 GC 跨线程析构
+        timer.timeout.connect(timer._auto_destroy)
+        timer._auto_destroy_signal = timer.timeout
         timer.start()
         return timer
 
@@ -341,6 +390,8 @@ class QThTimer(QObject):
         timer = cls(interval)
         timer.setSingleShot(True)
         timer.timeout.connect(callback)
+        timer.timeout.connect(timer._auto_destroy)
+        timer._auto_destroy_signal = timer.timeout
         timer.start()
         return timer
 
@@ -397,6 +448,7 @@ class QThTimer(QObject):
         EventClass = type('QThEvent', (QObject,), cls_dict)
         event = EventClass()
         event.lambdas = [getattr(event, f'lambda{index}') for index in range(len(callbacks))]
+        event.destroyed.connect(_release_pending)
 
         event.moveToThread(_get_qthtimer_thread())
 
@@ -424,6 +476,10 @@ class QThTimer(QObject):
         timer.setJob(_wrapped_job)
         if result_callback is not None:
             timer.finished.connect(result_callback)
+        # 一次性任务：job 完成并回调后自动销毁，释放 dedicated 线程
+        #（防止调用方未持有返回实例时，线程长期存活/GC 跨线程析构）。
+        timer.finished.connect(timer._auto_destroy)
+        timer._auto_destroy_signal = timer.finished
         timer.setSingleShot(True)
         timer.start()
         return timer
@@ -465,6 +521,7 @@ class QThTimer(QObject):
         EventClass = type('QThEvent', (QObject,), cls_dict)
         event = EventClass()
         event.lambdas = [getattr(event, f'lambda{index}') for index in range(len(callbacks))]
+        event.destroyed.connect(_release_pending)
         event.moveToThread(_get_qthtimer_thread())
 
         for index, cb in enumerate(callbacks):
@@ -503,8 +560,6 @@ def shutdown():
     全程不调用 terminate()，避免线程被强杀导致解释器崩溃；
     无法及时停止的线程保留引用，由进程退出（os._exit 兜底）统一处理。
     """
-    global _shutting_down
-    _shutting_down = True
     for t in list(_active_timers):
         try:
             t.destroy()
@@ -513,9 +568,17 @@ def shutdown():
     for thr in list(_dedicated_threads):
         try:
             thr.quit()
-            if not thr.wait(3000):
+            if not thr.wait(15000):
                 _zombie_threads.append(thr)
         except Exception:
             pass
     _dedicated_threads.clear()
     _shutdown_qthtimer_thread()
+    # 兜底：destroy()/quit 超时进入 _zombie_threads 的线程，在进程退出前
+    # 给它们最后的机会结束，避免线程仍在运行时 QThread 对象被销毁而触发
+    # "QThreadStorage: entry destroyed before end of thread" 警告。
+    for thr in list(_zombie_threads):
+        try:
+            thr.wait(15000)
+        except Exception:
+            pass

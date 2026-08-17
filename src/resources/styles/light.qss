@@ -39,6 +39,11 @@ QLabel[wid="text"] {
     border: none;
     color: rgb(0, 0, 0);
 }
+QTextBrowser[wid="text"] {
+    background: transparent;
+    border: none;
+    color: rgb(0, 0, 0);
+}
 QPushButton[wid="btn"] {
     background: transparent;
     border: 1px solid rgb(59, 59, 59);

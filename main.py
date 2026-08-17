@@ -27,19 +27,14 @@ init = {
 }
 
 
-from PyQt5.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QScreen, QPainterPath, QCursor, QImage
-from PyQt5.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QAction, QDialog, QTextEdit, QProgressBar
-from PyQt5.QtNetwork import QLocalServer, QLocalSocket
+from PySide6.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, QUrl, Signal
+from PySide6.QtGui import QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QPainterPath, QCursor, QAction, QTextOption, QImage
+from PySide6.QtWidgets import QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QStackedLayout, QGridLayout, QLineEdit, QPushButton, QLabel, QTextBrowser, QFrame, QScrollArea, QButtonGroup, QSizePolicy, QStyle, QStyleOptionSlider, QStyleOptionComboBox, QSlider, QComboBox, QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 import sys, os, json, copy, winreg, logging, glob, locale, hashlib, base64, re, time, shutil, traceback, webbrowser, threading
 from urllib.parse import urljoin, urlparse
 import requests
-try:
-    import markdown as _markdown
-    _MD_AVAILABLE = True
-except Exception:
-    _markdown = None
-    _MD_AVAILABLE = False
+import markdown
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import ctypes
@@ -147,15 +142,15 @@ def md_to_html(text, base_url=None, session=None, cache_dir=None, on_image=None)
         on_image  : 可选回调 on_image(full, local)。未缓存图片先以占位图显示，
                     后台逐张下载，每成功一张调用一次该回调（下载线程中触发）。
     返回:
-        HTML 字符串；若 markdown 库不可用则原样返回文本。
+        HTML 字符串。
     """
-    if not _MD_AVAILABLE or not text:
+    if not text:
         return text or ""
     try:
         # 预处理：修复表格块（补空行 + 去缩进）
         text = _preprocess_md(text)
         # nl2br：把单个换行（CRLF 等）也转为 <br>，避免 markdown 默认合并为同一行
-        html = _markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists", "nl2br"])
+        html = markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists", "nl2br"])
     except Exception:
         return text
     # 给表格加边框（Qt 富文本渲染表格默认无边框）
@@ -305,22 +300,23 @@ def _html_escape(s):
 def _img_size_attr(local):
     """按本地图片实际尺寸计算 width/height 属性字符串；空串表示不设置。
 
-    普通图片缩小一半；超过 500x400 时等比缩放到限内。
+    只缩放部分过大图片：原始尺寸超过 500x400 的等比缩放到限内；
+    普通大小图片保持原尺寸显示（不写 width/height，Qt 按原图大小渲染）。
     """
-    w = h = 0
     try:
         q = QImage(local)
         if not q.isNull():
-            w, h = q.width() // 2, q.height() // 2
-            # 过大图片进一步缩小：超过最大宽/高时等比缩放
+            w = q.width()
+            h = q.height()
+            # 只对过大图片缩放：超过最大宽/高时等比缩放
             MAX_W, MAX_H = 500, 400
             if w > MAX_W or h > MAX_H:
                 scale = min(MAX_W / w, MAX_H / h)
-                w, h = max(1, int(w * scale)), max(1, int(h * scale))
+                w = max(1, int(w * scale))
+                h = max(1, int(h * scale))
+                return ' width="%d" height="%d"' % (w, h)
     except Exception:
         pass
-    if w > 0 and h > 0:
-        return ' width="%d" height="%d"' % (w, h)
     return ""
 
 
@@ -499,8 +495,8 @@ class Main():
             )
 
 
-        self.signals.register("tokenVerified", pyqtSignal(bool, str, object))
-        self.signals.register("gameRenovated", pyqtSignal())
+        self.signals.register("tokenVerified", Signal(bool, str, object))
+        self.signals.register("gameRenovated", Signal())
         QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
         QThTimer.task(0, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
 
@@ -996,6 +992,16 @@ class Main():
             if event.type() == QEvent.WindowStateChange:
                 if not self.isMinimized():
                     self._last_window_state = self.windowState()
+                    # 同步最大化/还原按钮图标。
+                    # 不依赖 nativeEvent（PySide6 下 eventType 是 QByteArray，
+                    # Windows 消息分支不可靠），Qt 自身的窗口状态变化一定触发这里。
+                    try:
+                        tbt = self.main.top.tbt_max
+                        maximized = self.isMaximized()
+                        self.root.logger.debug(f"window state changed, maximized={maximized}")
+                        tbt.setLogo(1 if maximized else 0)
+                    except Exception:
+                        pass
             super().changeEvent(event)
 
         def restore_from_tray(self):
@@ -1069,8 +1075,11 @@ class Main():
             拦截 Windows 原生消息
             """
             # 判断是否是 Windows 消息
-            if eventType == "windows_generic_MSG":
-                msg = ctypes.wintypes.MSG.from_address(message.__int__())
+            # PySide6: eventType 是 QByteArray（b"windows_generic_MSG"）；PyQt5 是 str。
+            # 直接比较 str 在 PySide6 下恒为 False，导致整个分支（含最大化检测）失效。
+            if eventType in (b"windows_generic_MSG", "windows_generic_MSG"):
+                # PySide6: message 已是 int（内存地址）；PyQt5 是 sip.voidptr，int() 两者通用
+                msg = ctypes.wintypes.MSG.from_address(int(message))
 
                 #
                 if msg.message == 0x0084:
@@ -1908,16 +1917,16 @@ class Main():
                 def mousePressEvent(self, event):
                     self.move_pressed = True
                     self.move_winpos_ = self.root.window.pos()
-                    self.move_mousepos_ = event.globalPos()
+                    self.move_mousepos_ = event.globalPosition().toPoint()
                     super().mousePressEvent(event)
 
                 def mouseMoveEvent(self, event):
                     if self.move_pressed:
                         if self.root.window.isMaximized():
                             self.root.window.showNormal()
-                        self.move_mousepos = event.globalPos()
+                        self.move_mousepos = event.globalPosition().toPoint()
                         self.move_moving = True
-                        screensize = QScreen.availableGeometry(QApplication.primaryScreen())
+                        screensize = QApplication.primaryScreen().availableGeometry()
                         movpos = self.move_winpos_ + self.move_mousepos - self.move_mousepos_
                         if movpos.x() < 0:
                             movpos.setX(0)
@@ -2553,8 +2562,8 @@ class Main():
                             QThTimer.task(0, lambda e: self._snapshot_tasks(e), result_callback=self._render_items)
 
                         class Item(QWidget):
-                            continue_requested = pyqtSignal(str)
-                            delete_requested = pyqtSignal(str)
+                            continue_requested = Signal(str)
+                            delete_requested = Signal(str)
 
                             def __init__(self, parent=None, root=None):
                                 super().__init__(parent)
@@ -2898,7 +2907,7 @@ class Main():
 
                 class Start(Page):
                     def __init__(self, parent=None, root=None, text=None, logo=None):
-                        root.signals.register("start_gameChanged", pyqtSignal(object))
+                        root.signals.register("start_gameChanged", Signal(object))
                         super().__init__(parent, root, text, logo)
                         QThTimer.taskP(1000, self.left.changeTimer, [self.left.sets])
                         QThTimer.task(0, self.left.changeTimer, [self.left.sets])
@@ -3429,7 +3438,7 @@ class Main():
                                     self.topL.addWidget(self.button)
 
                                     class VisiWidget(QWidget):
-                                        visibled = pyqtSignal(bool)
+                                        visibled = Signal(bool)
 
                                         def showEvent(self,event):
                                             self.visibled.emit(True)
@@ -4333,7 +4342,7 @@ class Main():
                                             self.topL.addWidget(self.button)
 
                                             class VisiWidget(QWidget):
-                                                visibled = pyqtSignal(bool)
+                                                visibled = Signal(bool)
 
                                                 def showEvent(self,event):
                                                     self.visibled.emit(True)
@@ -5050,6 +5059,8 @@ class Main():
                                                 self.root.logger.error("[mdt-download] %s 收尾失败: %s" % (name, e))
 
                                     class RepoInfo(QWidget):
+                                        mdImageReady = Signal(object, object)
+
                                         def __init__(self, parent=None, root=None, data=None, pixmap=None): 
                                             super().__init__()
                                             self.parent = parent
@@ -5140,20 +5151,22 @@ class Main():
                                             self.intro_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                                             self.scroll_layout.addWidget(self.intro_area, 0)
 
-                                            self.intro = QLabel()
+                                            self.intro = QTextBrowser()
                                             self.intro.setAlignment(Qt.AlignTop)
-                                            self.intro.setTextFormat(Qt.RichText)
                                             self.intro.setProperty("wid", "text")
                                             self.intro.setStyleSheet("font-size: 14px;")
-                                            self.intro.setWordWrap(True)
+                                            self.intro.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
                                             self.intro.setTextInteractionFlags(Qt.NoTextInteraction)
+                                            self.intro.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                            self.intro.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                                            self.intro.document().setDocumentMargin(0)
                                             self.intro_area.setWidget(self.intro)
 
-                                            # 后台转换 markdown → HTML（含图片缓存），完成后渲染
+                                            # 后台处理 markdown（Qt 原生渲染，含图片缓存），完成后渲染
                                             intro_md = data.get("intro") or ""
                                             base_url = getattr(getattr(self.parent, "template", None), "introUrl", None)
                                             # 图片先全部以占位图显示，后台逐张下载，每成功一张就替换为真实图
-                                            self._intro_html = ""
+                                            self._intro_md = ""
                                             self._mdimg_pending = {}
                                             self._mdimg_flush = None
                                             self._intro_loading = QLabel("...")
@@ -5163,8 +5176,11 @@ class Main():
                                             self._intro_loading.move(0, 0)
 
                                             def _job(event):
+                                                # 图片下载完成的回调不依赖 QThTimer 的 event（task 一次性任务
+                                                # 结束后 event 会被自动销毁，下载线程再 emit 会丢失），改用
+                                                # RepoInfo 自身的 mdImageReady 信号回到主线程。
                                                 try:
-                                                    on_image = event.lambdas[0].emit
+                                                    on_image = self.mdImageReady.emit
                                                 except Exception:
                                                     on_image = None
                                                 return md_to_html(
@@ -5178,10 +5194,14 @@ class Main():
                                             def _done(result):
                                                 try:
                                                     if not isinstance(result, str):
-                                                        result = intro_md
-                                                    self._intro_html = result
-                                                    self.intro.setText(result)
-                                                    self.intro.setTextFormat(Qt.RichText)
+                                                        result = md_to_html(intro_md)
+                                                    self._intro_md = result
+                                                    # _job 已返回 HTML（含图片缓存与 0.2 缩放），直接渲染
+                                                    self.intro.setHtml(result)
+                                                    # 竞态兑底：若下载回调先于本结果到达（_flush 已保留 pending），
+                                                    # 结果就绪后补一次刷新，保证已下载图片一定回填
+                                                    if getattr(self, "_mdimg_pending", None) and self._mdimg_flush is None:
+                                                        self._mdimg_flush = QTimer.singleShot(0, _flush_md_images)
                                                 except Exception:
                                                     pass
                                                 finally:
@@ -5192,7 +5212,8 @@ class Main():
                                                         pass
 
                                             def _on_md_image(full, local):
-                                                # 主线程（QueuedConnection）：收集已下载图片，同帧合并刷新
+                                                # 主线程（mdImageReady 信号 QueuedConnection 回到主线程）：
+                                                # 收集已下载图片，同帧合并刷新
                                                 try:
                                                     self._mdimg_pending[full] = local
                                                     if self._mdimg_flush is None:
@@ -5200,24 +5221,28 @@ class Main():
                                                 except Exception:
                                                     pass
 
+                                            # 下载线程通过 mdImageReady 信号触发本回调；绑定到 self 作为
+                                            # receiver 上下文，保证 QueuedConnection 一定回到主线程
+                                            self.mdImageReady.connect(_on_md_image, Qt.QueuedConnection)
+
                                             def _flush_md_images():
                                                 try:
                                                     self._mdimg_flush = None
                                                     if not self._mdimg_pending:
                                                         return
-                                                    pending, self._mdimg_pending = self._mdimg_pending, {}
-                                                    html = getattr(self, "_intro_html", None)
-                                                    if not html:
+                                                    md = getattr(self, "_intro_md", None)
+                                                    if not md:
+                                                        # 结果尚未就绪：保留待处理项，等 _done 就绪后补触发
                                                         return
+                                                    pending, self._mdimg_pending = self._mdimg_pending, {}
                                                     for full, local in pending.items():
-                                                        html = _apply_md_image(html, full, local)
-                                                    self._intro_html = html
-                                                    self.intro.setText(html)
-                                                    self.intro.setTextFormat(Qt.RichText)
+                                                        md = _apply_md_image(md, full, local)
+                                                    self._intro_md = md
+                                                    self.intro.setHtml(md)
                                                 except Exception:
                                                     pass
 
-                                            QThTimer.task(0, _job, events=[_on_md_image], result_callback=_done, dedicated=True)
+                                            QThTimer.task(0, _job, result_callback=_done, dedicated=True)
 
                                             # ===== 分隔线 =====
                                             line2 = QWidget()
@@ -5902,7 +5927,7 @@ class Main():
                                 self._title.setText(self.root.langer.get(self.text))
                             
                             class Bool(QWidget):
-                                push = pyqtSignal(bool)
+                                push = Signal(bool)
                                 def __init__(self,parent=None,root=None,text=None):
                                     super().__init__()
                                     self.parent = parent
@@ -6044,7 +6069,7 @@ class Main():
                                     self.text.setText(self.root.langer.get(self.text_))
 
                             class Slider(QWidget):
-                                push = pyqtSignal(int)
+                                push = Signal(int)
                                 def __init__(self,parent=None,root=None,text=None):
                                     super().__init__()
                                     self.parent = parent
@@ -6201,10 +6226,10 @@ class Main():
                                         super().mousePressEvent(event)
 
                             class Combo(QWidget):
-                                push = pyqtSignal(str)
+                                push = Signal(str)
 
                                 class _QComboBox(QComboBox):
-                                    popupAboutToShow = pyqtSignal()
+                                    popupAboutToShow = Signal()
                                     def showPopup(self):
                                         self.popupAboutToShow.emit()
                                         super().showPopup()
@@ -6544,7 +6569,7 @@ class Main():
             self.root.logger.info(self.root.langer.get("log.info.trayLoad"))
 
         def on_tray_activated(self, reason):
-            if reason == QSystemTrayIcon.Trigger:
+            if reason == QSystemTrayIcon.ActivationReason.Trigger:
                 self.root.logger.debug("Tray clicked by L-mouse button")
                 self.root.window.restore_from_tray()
 
@@ -6838,11 +6863,11 @@ class Main():
 
     class Signals(QObject):
         """
-        动态信号管理器 —— 所有信号都是真正的 PyQtSignal。
+        动态信号管理器 —— 所有信号都是真正的 PySide6 Signal。
 
         用法:
             signals = Signals()
-            signals.register("dataReady", pyqtSignal(str, int))
+            signals.register("dataReady", Signal(str, int))
             signals.connect("dataReady", lambda s, i: print(s, i))
             signals.emit("dataReady", "hello", 42)
             signals.disconnect("dataReady", callback)
@@ -6858,18 +6883,18 @@ class Main():
 
         @staticmethod
         def _make_holder_cls(sig):
-            """根据 pyqtSignal 签名动态创建一个 QObject 子类，携带一个 signal 属性。"""
+            """根据 Signal 签名动态创建一个 QObject 子类，携带一个 signal 属性。"""
             return type('_SigHolder', (QObject,), {'signal': sig})
 
         def register(self, name, sig=None):
             """
             注册一个信号。
-            sig: pyqtSignal 实例，如 pyqtSignal(), pyqtSignal(str), pyqtSignal(int, bool)
-            返回该 pyqtSignal，可直接 connect。
+            sig: Signal 实例，如 Signal(), Signal(str), Signal(int, bool)
+            返回该 Signal，可直接 connect。
             若同名已存在则返回已有信号。
             """
             if sig is None:
-                sig = pyqtSignal()
+                sig = Signal()
             if name in self._holders:
                 return self._holders[name].signal
             HolderCls = self._make_holder_cls(sig)
@@ -6978,7 +7003,7 @@ if __name__ == "__main__":
         try:
             main = Main(app)
             main.window.show()
-            code = app.exec_()
+            code = app.exec()
             try:
                 sys.stdout.flush()
                 sys.stderr.flush()
@@ -7034,7 +7059,7 @@ if __name__ == "__main__":
             layout.addLayout(btn_layout)
 
             dialog.rejected.connect(QApplication.quit)
-            dialog.exec_()
+            dialog.exec()
             # 出错分支同样强制退出，避免残留线程导致挂起/崩溃弹窗
             os._exit(1)
 

@@ -4,10 +4,10 @@
 
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
-![Language](https://img.shields.io/badge/Language-Python%20%2B%20PyQt5-green)
+![Language](https://img.shields.io/badge/Language-Python%20%2B%20PySide6-green)
 ![Version](https://img.shields.io/badge/Version-V26--T0816-green)
 
-**基于 PyQt5 的 Windows 桌面端 Mindustry 启动器** —— 从 GitHub Release 一键下载、管理并启动多版本 Mindustry 服务端（`mdt.jar`），Java 运行时全自动配置。
+**基于 PySide6 的 Windows 桌面端 Mindustry 启动器** —— 从 GitHub Release 一键下载、管理并启动多版本 Mindustry 服务端（`mdt.jar`），Java 运行时全自动配置。
 
 </div>
 
@@ -72,19 +72,19 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 ## 构建
 
-项目使用 Python 3.13 + PyQt5，支持 **Nuitka** 与 **PyInstaller** 两种打包方式，目前使用 **Nuitka** 打包。
+项目使用 Python 3.13 + PySide6，支持 **Nuitka** 与 **PyInstaller** 两种打包方式，目前使用 **Nuitka** 打包。
 
 ### 前置要求
 
 - [Python 3.13](https://www.python.org/)（Nuitka 打包建议使用 python.org 官方安装版）
-- `pip install pyqt5 requests certifi markdown nuitka`（或 pyinstaller）
+- `pip install pyside6 requests certifi nuitka`（或 pyinstaller）
 
 ### Nuitka（推荐，单文件）
 
 ```bat
 python -m nuitka ^
   --onefile ^
-  --enable-plugin=pyqt5 ^
+  --enable-plugin=pyside6 ^
   --include-data-dir=src=src ^
   --windows-console-mode=disable ^
   --output-filename="BookMindustryLauncher.exe" ^

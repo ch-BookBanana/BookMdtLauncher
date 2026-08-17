@@ -34,7 +34,7 @@ import threading
 import zipfile
 import shutil
 import logging
-from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal
+from PySide6.QtCore import QObject, QThread, Qt, Signal
 
 from .path_utils import getPath
 from .QDownloader import QDownloader
@@ -115,8 +115,8 @@ class _ExtractWorker(QObject):
     自动剥离 zip 顶层目录（如 jdk-17.0.20/），确保最终路径为
     BML/.Java/<version>/bin/java.exe。
     """
-    progress = pyqtSignal(int, int)
-    finished = pyqtSignal(bool)
+    progress = Signal(int, int)
+    finished = Signal(bool)
 
     def __init__(self, zip_path, target_dir, version, parent=None):
         super().__init__(parent)
@@ -206,13 +206,13 @@ class JavaDownloadFlow(QObject):
     （程序启动延续流程）；否则创建新的 javaDownload.json 并开始下载。
     QDownloader 由本流程创建并管理，流程结束（无论成败）都会删除 QDownloader。
     """
-    status_changed = pyqtSignal(str)
-    progress = pyqtSignal(int, int)
-    extract_progress = pyqtSignal(int, int)
-    finished = pyqtSignal(bool)
-    error = pyqtSignal(str)
-    cancelled = pyqtSignal()                 # 下载被用户取消/退出（UI 据此显示"已取消"而非"失败"）
-    paused_changed = pyqtSignal(bool, int)   # (是否暂停, 当前百分比)，UI 据此显示"Java暂停下载 n%"
+    status_changed = Signal(str)
+    progress = Signal(int, int)
+    extract_progress = Signal(int, int)
+    finished = Signal(bool)
+    error = Signal(str)
+    cancelled = Signal()                 # 下载被用户取消/退出（UI 据此显示"已取消"而非"失败"）
+    paused_changed = Signal(bool, int)   # (是否暂停, 当前百分比)，UI 据此显示"Java暂停下载 n%"
 
     def __init__(self, parent=None, resume=False, urls=None, version=None, build=None, major=None):
         super().__init__()

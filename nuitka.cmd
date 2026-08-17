@@ -19,7 +19,7 @@ set PYTHON=C:\Users\Book\Desktop\BookMDTLauncher\python\python.exe
 
 %PYTHON% -m nuitka ^
   --onefile ^
-  --enable-plugin=pyqt5 ^
+  --enable-plugin=pyside6 ^
   --include-data-dir=src=src ^
   --windows-console-mode=disable ^
   --output-filename="Book Mindustry Launcher.exe" ^
@@ -41,7 +41,7 @@ REM                              Want LTO? Install VS2022 Build Tools (C++ workl
 REM                              and let Nuitka pick MSVC (--msvc=latest); MSVC LTCG
 REM                              works. For this Qt launcher (I/O bound) LTO's gain
 REM                              is marginal anyway.
-REM   --enable-plugin=pyqt5      collect PyQt5 Qt plugins/DLLs automatically
+REM   --enable-plugin=pyside6    collect PySide6 Qt plugins/DLLs automatically
 REM   --include-data-dir=src=src pack non-code files under src (json/qss/images);
 REM                              .py files are treated as code and compiled, not copied
 REM   --windows-console-mode=disable  same as PyInstaller -w (GUI, no console)
@@ -64,10 +64,11 @@ REM   "other paths -> exe directory" branch.
 REM
 REM   First compile is slow (downloads/compiles C deps); later builds use cache.
 REM
-REM   KNOWN RISK: Nuitka's pyqt5 plugin has known bugs with callbacks and
-REM   threading (see https://nuitka.net/info/pyqt5.html). This project relies
+REM   KNOWN RISK: Nuitka's pyside6 plugin used to have bugs with callbacks and
+REM   threading (see https://nuitka.net/info/pyside6.html). This project relies
 REM   heavily on QThread + signals (QDownloader/QThTimer). Build succeeds but
-REM   runtime behavior must be verified; PySide6 migration is the official fix.
+REM   runtime behavior must be verified (PySide6 support is the recommended
+REM   replacement for the older pyqt5 plugin).
 REM
 REM   SPEED TUNING:
 REM     - LTO above trades build time for runtime speed (already enabled).

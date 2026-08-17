@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 import logging
-from PyQt5.QtCore import QProcess, QProcessEnvironment, QTimer, pyqtSignal
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
 
 from .path_utils import getPath
 from .mdtScanner import mdtScanner
@@ -34,23 +34,23 @@ def _tr(key, *args):
 
 
 class mdtLauncher(QProcess):
-    game_launched = pyqtSignal()       # 已开始尝试启动
-    game_started = pyqtSignal()        # 进程已成功开始运行
-    lifecycle_finished = pyqtSignal(int)  # 生命周期结束（启动失败/进程退出/错误），传出退出码
-    game_finished = pyqtSignal(int)    # 游戏进程真正结束（仅 QProcess.finished 触发），传出退出码
-    game_log = pyqtSignal(dict)        # 进程输出日志，dict: {"type":"info"/"error", "text":...}
-    log = pyqtSignal(dict)             # 通用日志信号（启动阶段 info/error）
-    java_missing = pyqtSignal()        # Java 缺失/无效（UI 据此切页显示"未检测到Java"）
-    java_status = pyqtSignal(str)      # Java 下载流程状态：downloading/extracting/done/error
-    java_progress = pyqtSignal(int, int)      # Java 下载进度（已下载字节, 总字节）
-    java_extract_progress = pyqtSignal(int, int)  # Java 解压/部署进度
-    java_done = pyqtSignal(bool)       # Java 下载流程结束（True 成功 / False 失败）
-    java_cancelled = pyqtSignal()      # Java 下载被用户取消（UI 显示"已取消"而非"失败"）
-    java_paused = pyqtSignal(bool, int)   # Java 下载暂停状态（是否暂停, 当前百分比）
-    appdata_save_step = pyqtSignal(int)   # appdataCopy 保存步骤（1/2），UI 据此切页并设置文本
-    appdata_save_done = pyqtSignal()      # appdataCopy 保存完成（UI 切回主界面）
-    appdata_import_started = pyqtSignal() # appdataCopy 开始导入数据（复制副本 data/ → %APPDATA%）
-    appdata_import_done = pyqtSignal()    # appdataCopy 导入完成（继续启动流程）
+    game_launched = Signal()       # 已开始尝试启动
+    game_started = Signal()        # 进程已成功开始运行
+    lifecycle_finished = Signal(int)  # 生命周期结束（启动失败/进程退出/错误），传出退出码
+    game_finished = Signal(int)    # 游戏进程真正结束（仅 QProcess.finished 触发），传出退出码
+    game_log = Signal(dict)        # 进程输出日志，dict: {"type":"info"/"error", "text":...}
+    log = Signal(dict)             # 通用日志信号（启动阶段 info/error）
+    java_missing = Signal()        # Java 缺失/无效（UI 据此切页显示"未检测到Java"）
+    java_status = Signal(str)      # Java 下载流程状态：downloading/extracting/done/error
+    java_progress = Signal(int, int)      # Java 下载进度（已下载字节, 总字节）
+    java_extract_progress = Signal(int, int)  # Java 解压/部署进度
+    java_done = Signal(bool)       # Java 下载流程结束（True 成功 / False 失败）
+    java_cancelled = Signal()      # Java 下载被用户取消（UI 显示"已取消"而非"失败"）
+    java_paused = Signal(bool, int)   # Java 下载暂停状态（是否暂停, 当前百分比）
+    appdata_save_step = Signal(int)   # appdataCopy 保存步骤（1/2），UI 据此切页并设置文本
+    appdata_save_done = Signal()      # appdataCopy 保存完成（UI 切回主界面）
+    appdata_import_started = Signal() # appdataCopy 开始导入数据（复制副本 data/ → %APPDATA%）
+    appdata_import_done = Signal()    # appdataCopy 导入完成（继续启动流程）
 
     def __init__(self, parent=None, settings=None):
         super().__init__()
@@ -456,7 +456,8 @@ class mdtLauncher(QProcess):
         self._java_download_attempts = 0   # 游戏成功启动：本次尝试结束，下次启动重新允许自动下载
         self.game_started.emit()
 
-    def _on_finished(self, exitCode, exitStatus):
+    def _on_finished(self, exitCode):
+        # Qt6: QProcess.finished(int exitCode)，仅一个参数（Qt5 的 ExitStatus 已移除）
         self._emit_finished(exitCode)
         # 游戏进程真正结束：单独发出 game_finished（区别于生命周期结束）
         try:

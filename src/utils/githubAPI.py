@@ -17,7 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import requests, json, time, copy, os, base64, ssl, tempfile, atexit
 
-from PyQt5.QtCore import pyqtSignal, QObject, QTimer
+from PySide6.QtCore import Signal, QObject, QTimer
 
 # ---------------------------------------------------------------
 # CA bundle：certifi + Windows 系统证书库（加速器/抓包工具根证书）
@@ -85,8 +85,8 @@ def _get_ca_bundle():
 
 
 class GithubAPI(QObject):
-    refreshed = pyqtSignal()
-    timesreset = pyqtSignal(str)
+    refreshed = Signal()
+    timesreset = Signal(str)
 
     def __init__(self, token=None):
         super().__init__()

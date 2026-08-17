@@ -20,7 +20,7 @@ QDownloader 模块文档说明
 ========================
 
 本模块提供了一个支持多线程、断点续传和代理配置的文件下载器类。
-它基于 PyQt5 的信号槽机制设计，适合在 GUI 应用程序中异步执行下载任务。
+它基于 PySide6 的信号槽机制设计，适合在 GUI 应用程序中异步执行下载任务。
 
 主要特性:
 1. **多线程下载**: 支持将文件分块，使用线程池并行下载，提高大文件下载速度。
@@ -65,7 +65,7 @@ from threading import Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 
 import requests
-from PyQt5.QtCore import QObject, QThread, Qt, pyqtSignal
+from PySide6.QtCore import QObject, QThread, Qt, Signal
 
 from .path_utils import getPath
 
@@ -235,16 +235,16 @@ class QDownloader(QObject):
         下载线程每 1 秒遍历各分线程实时更新的已下载字节量，
         汇总为总进度发射 progress 信号；get_progress() 返回字节进度。
     """
-    started = pyqtSignal()
-    finished = pyqtSignal(bool)
-    cancelled = pyqtSignal()
-    progress = pyqtSignal(int, int)
-    thread_progress = pyqtSignal(int, int, int)
-    source_selected = pyqtSignal(str)
-    error = pyqtSignal(str)
-    cancel_allowed_changed = pyqtSignal(bool)   # 允许取消状态变化
-    pause_allowed_changed = pyqtSignal(bool)    # 允许暂停状态变化
-    paused_changed = pyqtSignal(bool)           # 实际暂停状态变化（True=已暂停 / False=已恢复）
+    started = Signal()
+    finished = Signal(bool)
+    cancelled = Signal()
+    progress = Signal(int, int)
+    thread_progress = Signal(int, int, int)
+    source_selected = Signal(str)
+    error = Signal(str)
+    cancel_allowed_changed = Signal(bool)   # 允许取消状态变化
+    pause_allowed_changed = Signal(bool)    # 允许暂停状态变化
+    paused_changed = Signal(bool)           # 实际暂停状态变化（True=已暂停 / False=已恢复）
 
     # ---------- 初始化 ----------
     def __init__(self, url=None, urls=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None, cancel_allowed=True, pause_allowed=True, title=None):
