@@ -72,32 +72,10 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 ## 构建
 
-项目使用 Python 3.13 + PySide6，支持 **Nuitka** 与 **PyInstaller** 两种打包方式，目前使用 **Nuitka** 打包。
+项目使用 Python 3.13 + PySide6，目前使用 **Pyinstaller** 打包。
 
-### 前置要求
+> 由于在使用Nutika打包本项目时经常出现在开发者使用的设备上不可复现且难以排查的报错，故舍弃Nuitka转而使用Pyinstaller打包。即使Nuitka打包的产物体积更小且运行速度更快，但是排查问题所耗费的时间也绝非一个高中开发者所能承受的，如果能有大佬发现并指出我在代码、打包程序中任何可能影响Nutika使用的漏洞或不良编码习惯，麻烦提个Issue，谢谢！
 
-- [Python 3.13](https://www.python.org/)（Nuitka 打包建议使用 python.org 官方安装版）
-- `pip install pyside6 requests certifi nuitka`（或 pyinstaller）
-
-### Nuitka（推荐，单文件）
-
-```bat
-python -m nuitka ^
-  --onefile ^
-  --enable-plugin=pyside6 ^
-  --include-data-dir=src=src ^
-  --windows-console-mode=disable ^
-  --output-filename="BookMindustryLauncher.exe" ^
-  main.py
-```
-
-详见仓库根目录 `nuitka.cmd`（内含 zig / MSVC 编译器选型与 LTO 兼容性说明）。
-
-### PyInstaller
-
-```
-pyinstaller --onefile -w --add-data "src;src" main.py
-```
 
 ## 项目结构
 

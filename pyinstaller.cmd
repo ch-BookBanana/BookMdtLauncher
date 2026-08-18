@@ -1,1 +1,11 @@
-C:\Users\Book\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\Scripts\pyinstaller.exe --onefile -w --add-data "src;src" main.py
+@echo off
+python\Scripts\pyinstaller.exe ^
+    --noconfirm ^
+    --clean ^
+    --onefile ^
+    --windowed ^
+    --name "BookMdtLauncher" ^
+    --add-data "src;src" ^
+    main.py
+
+pause

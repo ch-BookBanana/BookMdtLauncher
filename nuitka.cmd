@@ -18,10 +18,11 @@ REM Point PYTHON at your python.org install; or use "python" if in PATH
 set PYTHON=C:\Users\Book\Desktop\BookMDTLauncher\python\python.exe
 
 %PYTHON% -m nuitka ^
-  --onefile ^
+  --standalone ^
   --enable-plugin=pyside6 ^
+  --include-qt-plugins=sensible ^
   --include-data-dir=src=src ^
-  --windows-console-mode=disable ^
+  --windows-console-mode=attach ^
   --output-filename="Book Mindustry Launcher.exe" ^
   main.py
 

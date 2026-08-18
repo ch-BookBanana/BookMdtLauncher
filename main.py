@@ -22,8 +22,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 init = {
-    "version": "26-T0816",
-    "BuildCode": "10000.00"
+    "version": "26-T0818",
+    "BuildCode": "10000.01"
 }
 
 
@@ -3843,7 +3843,7 @@ class Main():
                                     self.bthGroup = QButtonGroup(self)
 
                                 def add_btn(self, text=None, icon=None, color=True):
-                                    btn = self.Btns(text, icon, self, self.root, color)
+                                    btn = self.Btns(text, getPath(icon), self, self.root, color)
                                     self.scroll_layout.addWidget(btn)
                                     self.bthGroup.addButton(btn)
                                     self.barShow()
