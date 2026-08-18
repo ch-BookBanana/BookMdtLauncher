@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QFrame, QScrollArea, QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-import sys, os, json, copy, winreg, logging, locale, hashlib, base64, time, shutil, traceback, webbrowser
+import sys, os, json, copy, winreg, logging, locale, base64, time, shutil, traceback, webbrowser
 from datetime import datetime
 import ctypes
 import ctypes.wintypes
@@ -48,6 +48,7 @@ from src.utils import javaDownload
 from src.utils.QDownloader import QDownloader
 
 from src.utils.utils import _is_mdt_download, change_color, t
+from src.utils.on_start import startup
 
 try:
     class Main():
@@ -164,30 +165,18 @@ try:
 
             # 后台预加载所有游戏数据到缓存，加速后续切换
             QThTimer.task(100, lambda event: mdtScanner.preload_all())
+            # 周期检查游戏图标（icon_path/icon.png）是否有变化，变化时刷新 UI
+            QThTimer.taskP(5000, lambda event: mdtScanner.check_icons(), result_callback=self._on_icons_checked)
 
             # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
             app.aboutToQuit.connect(self._cleanup_on_quit)
 
-            # Java 自动下载：启动时检索未完成的 Java 下载（.tmp/javaDownload.json）
-            self.java_flow = None      # 启动延续流程实例（run 触发的下载由 launcher 内置管理）
-            self._java_flow_cancelled = False   # 启动延续流程是否被用户取消（决定显示"已取消"还是"失败"）
-            # launcher 内置 Java 自动下载：其信号直接驱动 UI 切页与状态显示
-            self.launcher.java_missing.connect(lambda: self._java_show_status("missing"))
-            self.launcher.java_status.connect(self._on_java_status)
-            self.launcher.java_progress.connect(self._on_java_progress)
-            self.launcher.java_extract_progress.connect(self._on_java_extract_progress)
-            self.launcher.java_done.connect(self._on_java_download_done)
-            self.launcher.java_cancelled.connect(self._on_java_cancelled)
-            self.launcher.java_paused.connect(self._on_java_paused_changed)
-            if javaDownload.get_status() in ("downloading", "extracting"):
-                QTimer.singleShot(300, self._java_startup_resume)
+            startup.register(self)
 
-
-            # mdt 游戏下载：启动时通过 MdtScanner 获取 downloadingMdts，逐个续传并同步暂停状态
-            QTimer.singleShot(400, self._resume_mdt_downloads)
-
-            # appdataCopy：启动时续传未完成的游戏数据保存（step=1 删除 / step=2 重做第二步）
-            QTimer.singleShot(500, self._resume_appdata_saves)
+        def _on_icons_checked(self, changed):
+            """图标检查任务回调：检测到图标变化时刷新开始页游戏列表。"""
+            if changed:
+                self.signals.emit("gameRenovated")
 
         def gameRenovate(self, event):
             mdts = mdtScanner.getMdts()
@@ -249,63 +238,6 @@ try:
         def _java_stack(self):
             """Start 页主区 stack（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Log。"""
             return self.window.main.main.start.main.stack
-
-        def _java_startup_resume(self):
-            """程序启动时发现未完成的 Java 下载：切页并同步状态，接管续传。
-
-            左 stacked（left.bottom）显示"正在下载未完成的Java..."，
-            主区（right.main）同步切到 Launch 页，等待一秒后
-            切换"正在下载Java"并拉起 QDownloader 实例，继续流程。
-            """
-            status = javaDownload.get_status()
-            if status not in ("downloading", "extracting"):
-                return
-            self.logger.info(t(self.langer.get("log.java.resume_takeover"), status), name="Java")
-            info = javaDownload.load_info() or {}
-            # 同时切 left.bottom 与 right.main 到 Launch 页（唯一状态 label）
-            try:
-                bottom = self._java_bottom()
-                bottom.setCurrentIndex(3)
-                self._java_stack().setCurrentIndex(3)
-                if status == "downloading":
-                    bottom.launch.setStatus("resume")      # 正在下载未完成的Java...
-                else:
-                    bottom.launch.setStatus("extracting")  # 正在解压/部署Java...
-            except Exception:
-                pass
-            # 等待一秒后，切换"正在下载Java"并拉起 QDownloader 续传
-            def _resume_once():
-                # 防重入：已有延续流程或 launcher 内置流程在下载时，不重复创建
-                # （相同 dest 的 QDownloader 会因 task_id 冲突抛错）
-                if self.java_flow is not None:
-                    return
-                try:
-                    if self.launcher._java_flow is not None:
-                        return
-                except Exception:
-                    pass
-                self._java_begin(resume=True)
-            QTimer.singleShot(1000, _resume_once)
-
-        def _java_begin(self, resume=False):
-            """拉起 Java 下载流程（仅启动延续流程使用）。
-
-            resume=True: 从 javaDownload.json 续传（程序启动延续流程）；
-            点击开始游戏触发的自动下载由 launcher 内置管理。
-            """
-            if self.java_flow is not None:
-                return
-            self.logger.info(t(self.langer.get("log.java.flow_create"), resume), name="Java")
-            flow = javaDownload.JavaDownloadFlow(resume=resume)
-            self.java_flow = flow
-            flow.status_changed.connect(self._on_java_status)
-            flow.progress.connect(self._on_java_progress)
-            flow.extract_progress.connect(self._on_java_extract_progress)
-            flow.finished.connect(self._on_java_finished)
-            flow.cancelled.connect(self._on_java_flow_cancelled)
-            flow.paused_changed.connect(self._on_java_paused_changed)
-            flow.error.connect(lambda msg: self.logger.error(t(self.langer.get("log.java.dl_error_prefix"), str(msg))))
-            flow.start()
 
         def _on_java_status(self, status):
             """Java 下载/解压状态变化：left.bottom 与 right.main 都切到 Launch 页并更新 label。"""
@@ -454,70 +386,6 @@ try:
                 self.launcher.resume_appdata_saves()
             except Exception as e:
                 self.logger.warning(t(self.langer.get("log.appdata.resume_scan_error"), repr(e)))
-
-        def _resume_mdt_downloads(self):
-            """启动续传所有未完成的 mdt 游戏下载（downloading.json 记录），并同步暂停状态。
-
-            通过 mdtScanner.getDownloadingMdts() 获取下载中列表；
-            有 .tmp/<task_id>/state.json → continue_task 续传；否则用 downloading.json
-            的 url/dest 新建任务；downloading.json 记录 paused=true 时创建后立即暂停。
-            """
-            try:
-                downloading = mdtScanner.getDownloadingMdts() or {}
-            except Exception as e:
-                self.logger.warning(t(self.langer.get("log.dl.mdt_scan_error"), repr(e)))
-                return
-            if not downloading:
-                return
-            if not hasattr(self, "_mdt_downloads"):
-                self._mdt_downloads = []
-            for name, info in downloading.items():
-                dest = info.get("dest") or ""
-                url = info.get("url") or ""
-                if not (dest and url):
-                    continue
-                task_id = hashlib.md5(dest.encode("utf-8")).hexdigest()
-                paused = bool(info.get("paused"))
-                try:
-                    if task_id in QDownloader.get_active_tasks():
-                        continue
-                    try:
-                        dl = QDownloader.continue_task(task_id)
-                    except Exception:
-                        dl = QDownloader(url=url, dest_path=dest, num_threads=4, chunk_size_mb=4, title=info.get("title") or name)
-                        dl.start()
-                    if paused:
-                        dl.pause()   # 同步暂停状态：线程进入下载循环后在安全点等待
-                    dl.finished.connect(lambda ok, d=dl, n=name: self._on_mdt_download_finished(d, n, ok))
-                    self._mdt_downloads.append(dl)
-                    self.logger.info(t(self.langer.get("log.dl.mdt_resume_start"), name, paused))
-                except Exception as e:
-                    self.logger.warning(t(self.langer.get("log.dl.mdt_resume_error"), name, repr(e)))
-
-        def _on_mdt_download_finished(self, dl, name, ok):
-            """启动续传任务收尾：释放 QDownloader；成功后刷新 BML.json 并删除 downloading.json。"""
-            try:
-                dl.wait_thread(5000)
-                dl.deleteLater()
-            except Exception:
-                pass
-            try:
-                if dl in self._mdt_downloads:
-                    self._mdt_downloads.remove(dl)
-            except Exception:
-                pass
-            if not ok:
-                self.logger.error(t(self.langer.get("log.dl.mdt_finished_fail"), name))
-                return
-            try:
-                mdtScanner._retrieve_mdt_data(name)
-                dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
-                if os.path.isfile(dfile):
-                    os.remove(dfile)
-                mdtScanner.invalidate_cache()
-                self.logger.info(t(self.langer.get("log.dl.mdt_finished_ok"), name))
-            except Exception as e:
-                self.logger.error(t(self.langer.get("log.dl.mdt_finished_clean_err"), name, repr(e)))
 
         _OBF_BYTE = 0x5A
 
