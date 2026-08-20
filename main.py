@@ -43,7 +43,7 @@ from src.utils.path_utils import getPath
 from src.utils.mdtScanner import mdtScanner
 from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
 from src.utils.QThTimer import QThTimer
-from src.utils.githubAPI import GithubAPI
+from src.utils.api.githubAPI import GithubAPI
 from src.utils import javaDownload
 from src.utils.QDownloader import QDownloader
 

@@ -20,11 +20,9 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout
 
 from ..path_utils import getPath
 
-
 from ._init import *
 
 
-#TODO: 游戏管理界面
 class Game(Page):
     def __init__(self, parent=None, root=None, text=None, logo=None):
         super().__init__(parent, root, text, logo)

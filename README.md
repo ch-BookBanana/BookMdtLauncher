@@ -100,7 +100,9 @@ BookMDTLauncher/
         ├── javaScanner.py    # Java 并发嗅探
         ├── javaDownload.py   # Java 自动下载 / 解压
         ├── mdtServer.py      # Mindustry 服务器 UDP 查询
-        ├── githubAPI.py      # GitHub REST API 封装
+        ├── api/              # 网络 API 封装
+        │   ├── githubAPI.py      # GitHub REST API 封装
+        │   └── wayzer_mapAPI.py  # WayZer 地图站 (www.mindustry.top) API
         ├── QDownloader.py    # 多线程断点续传下载器
         ├── QThTimer.py       # 跨线程定时器框架
         └── path_utils.py     # 多环境（开发 / PyInstaller / Nuitka）路径解析
