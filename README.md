@@ -7,7 +7,7 @@
 ![Language](https://img.shields.io/badge/Language-Python%20%2B%20PySide6-green)
 ![Version](https://img.shields.io/badge/Version-V26--T0816-green)
 
-**基于 PySide6 的 Windows 桌面端 Mindustry 启动器** —— 从 GitHub Release 一键下载、管理并启动多版本 Mindustry 服务端（`mdt.jar`），Java 运行时全自动配置。
+**基于 PySide6 的 Windows 桌面端 Mindustry 启动器**
 
 </div>
 
@@ -19,7 +19,7 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 - 游戏本体与 Java 运行时均**自动下载**，开箱即用；
 - 每个游戏副本**相互隔离**（独立数据目录），多版本可并存、互不干扰；
-- 同时支持 **原版（Anuken/Mindustry）** 与 **MindustryX（TinyLake/MindustryX）** 两个上游的 Release 下载；
+- 同时支持多个上游的 Release 下载；
 - 内置多线程断点续传、GitHub API 集成、6 种界面语言与深浅双主题。
 
 ## 功能特性
@@ -43,8 +43,9 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 | 来源 | 仓库 | 说明 |
 | --- | --- | --- |
-| 原版 | [Anuken/Mindustry](https://github.com/Anuken/Mindustry) | 按版本号分类（如 v146 / v147 / v159 等） |
+| 原版 | [Anuken/Mindustry](https://github.com/Anuken/Mindustry) | 按版本号分类（如 v5 / v6 等） |
 | MindustryX | [TinyLake/MindustryX](https://github.com/TinyLake/MindustryX) | 名称含 `X` 为 alpha、含 `B` 为 beta |
+| MindustryARC | [TinyLake/MindustryARC](https://github.com/TinyLake/MindustryARC) | 无分类 |
 
 已安装的游戏副本会被自动扫描并加入列表（每 2 秒刷新），删除副本目录后也会自动移除。
 
@@ -137,8 +138,8 @@ BookMDTLauncher/
 | 原版游戏 | [Anuken](https://github.com/Anuken) | [GitHub](https://github.com/Anuken/Mindustry) |
 | MindustryX | [wayzer](https://github.com/Way-zer) | [GitHub](https://github.com/TinyLake/MindustryX) |
 | MindustryARC | [squi2rel](https://github.com/squi2rel) | [GitHub](https://github.com/squi2rel/MindustryARC) |
-| Mindustry地图站 | [WayZer](https://github.com/Way-zer) | [Mindustry地图站](https://www.mindustry.top/) |
-| STNG 蓝图工坊 | --- | [STNG 蓝图工坊](https://www.stng.pw/) | 
+| Mindustry地图站(未集成) | [wayzer](https://github.com/Way-zer) | [Mindustry地图站](https://www.mindustry.top/) |
+| STNG 蓝图工坊(未集成) | --- | [STNG 蓝图工坊](https://www.stng.pw/) | 
 
 ## Star History
 
