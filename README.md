@@ -91,18 +91,19 @@ BookMDTLauncher/
 │   ├── logs/                 # 日志
 │   └── settings.json         # 用户设置
 └── src/
-    ├── assets/               # 图标与背景资源
-    ├── lang/                 # 6 种语言翻译
+    ├── assets/               # 图标资源
+    ├── lang/                 # 语言翻译
     ├── resources/            # 主题样式（dark.qss / light.qss）
     └── utils/                # 核心工具模块
         ├── mdtScanner.py     # 游戏副本扫描与版本解析
         ├── mdtLauncher.py    # 游戏进程启动器（QProcess）
-        ├── javaScanner.py    # Java 并发嗅探
+        ├── javaScanner.py    # 本地 Java 并发嗅探（轻量）
         ├── javaDownload.py   # Java 自动下载 / 解压
         ├── mdtServer.py      # Mindustry 服务器 UDP 查询
         ├── api/              # 网络 API 封装
-        │   ├── githubAPI.py      # GitHub REST API 封装
-        │   └── wayzer_mapAPI.py  # WayZer 地图站 (www.mindustry.top) API
+        │   ├── githubAPI.py         # GitHub REST API 封装
+        │   ├── wayzer_mapAPI.py     # WayZer 地图站 (www.mindustry.top) API
+        │   └── stng_blueprintAPI.py # STNG 蓝图工坊 (www.stng.pw) API
         ├── QDownloader.py    # 多线程断点续传下载器
         ├── QThTimer.py       # 跨线程定时器框架
         └── path_utils.py     # 多环境（开发 / PyInstaller / Nuitka）路径解析
@@ -121,11 +122,23 @@ BookMDTLauncher/
 
 ## 参与贡献
 
+### 提交
+
 欢迎提交 Issue 与 Pull Request！
 
 - 功能建议 / Bug 反馈：请在 [Issues](https://github.com/ch-BookBanana/BookMdtLauncher/issues) 中提出；
 - 翻译补充：直接修改 `src/lang/` 下对应语言的 JSON 文件；
 - 代码风格：模块职责清晰、保持 `src/utils/` 各模块独立可复用。
+
+### 贡献者
+
+| 资源 | 贡献者 | 来源 |
+| --- | --- | --- |
+| 原版游戏 | [Anuken](https://github.com/Anuken) | [GitHub](https://github.com/Anuken/Mindustry) |
+| MindustryX | [wayzer](https://github.com/Way-zer) | [GitHub](https://github.com/TinyLake/MindustryX) |
+| MindustryARC | [squi2rel](https://github.com/squi2rel) | [GitHub](https://github.com/squi2rel/MindustryARC) |
+| Mindustry地图站 | [WayZer](https://github.com/Way-zer) | [Mindustry地图站](https://www.mindustry.top/) |
+| STNG 蓝图工坊 | --- | [STNG 蓝图工坊](https://www.stng.pw/) | 
 
 ## Star History
 
@@ -134,5 +147,3 @@ BookMDTLauncher/
 ## 许可证
 
 本项目基于 **GNU General Public License v3.0** 开源，详见 [LICENSE](LICENSE)。
-
-> Mindustry 及其资源版权归 [Anuken](https://github.com/Anuken) 所有，MindustryX 版权归 [TinyLake(wayzer)](https://github.com/TinyLake) 所有；本项目为独立的第三方启动器，与上述项目无直接关联，版权归[BookBanana](https://github.com/ch-BookBanana)所有。

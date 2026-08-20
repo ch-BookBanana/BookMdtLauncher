@@ -19,8 +19,8 @@ main.spec
 nuitka-crash-report.xml
 
 # pycache
-/__pycache__/*
-/src/utils/__pycache__/*
-/src/utils/pages/__pycache__/*
-/src/utils/on_start/__pycache__/*
-/src/utils/api/__pycache__/*
+/__pycache__/
+/src/utils/__pycache__/
+/src/utils/pages/__pycache__/
+/src/utils/on_start/__pycache__/
+/src/utils/api/__pycache__/
