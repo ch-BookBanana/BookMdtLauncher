@@ -20,37 +20,37 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 本程序的发布目的是希望它能有用，但不提供任何保证，包括但不限于适销性或特定用途的适用性的隐含保证。有关更多细节，请参阅GNU通用公共许可证。
 您应该已经收到GNU通用公共许可证的副本，如果没有，请访问http://www.gnu.org/licenses/。
 """
-
-init = {
-    "version": "26-T0818",
-    "BuildCode": "10000.01"
-}
-
-from PySide6.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, Signal
-from PySide6.QtGui import (
-    QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QPainterPath, QCursor, QAction, QTextOption
-)
-from PySide6.QtWidgets import (
-    QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QLineEdit, QPushButton, QLabel,
-    QFrame, QScrollArea, QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
-)
-from PySide6.QtNetwork import QLocalServer, QLocalSocket
-import sys, os, json, copy, winreg, logging, locale, base64, time, shutil, traceback, webbrowser
-from datetime import datetime
-import ctypes
-import ctypes.wintypes
-from src.utils.path_utils import getPath
-from src.utils.mdtScanner import mdtScanner
-from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
-from src.utils.QThTimer import QThTimer
-from src.utils.api.githubAPI import GithubAPI
-from src.utils import javaDownload
-from src.utils.QDownloader import QDownloader
-
-from src.utils.utils import _is_mdt_download, change_color, t
-from src.utils.on_start import startup
-
 try:
+    init = {
+        "version": "26-T0818",
+        "BuildCode": "10000.01"
+    }
+
+    from PySide6.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, Signal
+    from PySide6.QtGui import (
+        QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QPainterPath, QCursor, QAction, QTextOption
+    )
+    from PySide6.QtWidgets import (
+        QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QLineEdit, QPushButton, QLabel,
+        QFrame, QScrollArea, QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
+    )
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    import sys, os, json, copy, winreg, logging, locale, base64, time, shutil, traceback, webbrowser
+    from datetime import datetime
+    import ctypes
+    import ctypes.wintypes
+    from src.utils.path_utils import getPath
+    from src.utils.mdtScanner import mdtScanner
+    from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
+    from src.utils.QThTimer import QThTimer
+    from src.utils.api.githubAPI import GithubAPI
+    from src.utils import javaDownload
+    from src.utils.QDownloader import QDownloader
+
+    from src.utils.utils import _is_mdt_download, change_color, t
+    from src.utils.on_start import startup
+
+
     class Main():
         def __init__(self,app):
             self.app = app
