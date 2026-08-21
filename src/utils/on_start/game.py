@@ -33,7 +33,7 @@ def resume_mdt_downloads(root):
     的 url/dest 新建任务；downloading.json 记录 paused=true 时创建后立即暂停。
     """
     try:
-        downloading = mdtScanner.getDownloadingMdts() or {}
+        downloading = root.mdtScanner.getDownloadingMdts() or {}
     except Exception as e:
         root.logger.warning(t(root.langer.get("log.dl.mdt_scan_error"), repr(e)))
         return
@@ -81,11 +81,11 @@ def on_mdt_download_finished(root, dl, name, ok):
         root.logger.error(t(root.langer.get("log.dl.mdt_finished_fail"), name))
         return
     try:
-        mdtScanner._retrieve_mdt_data(name)
+        root.mdtScanner._retrieve_mdt_data(name)
         dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
         if os.path.isfile(dfile):
             os.remove(dfile)
-        mdtScanner.invalidate_cache()
+        root.mdtScanner.invalidate_cache()
         root.logger.info(t(root.langer.get("log.dl.mdt_finished_ok"), name))
     except Exception as e:
         root.logger.error(t(root.langer.get("log.dl.mdt_finished_clean_err"), name, repr(e)))

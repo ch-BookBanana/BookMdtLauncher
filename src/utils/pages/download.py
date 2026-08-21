@@ -1261,8 +1261,8 @@ class Download(Page):
                             if template is not None:
                                 interface_name = self.root.langer.get(getattr(template, "text", "")) or ""
                             base = interface_name + "-" + (self.data.get("name") or "")
-                            existing = set(mdtScanner.getMdts())
-                            existing |= set((mdtScanner.getDownloadingMdts() or {}).keys())
+                            existing = set(self.root.mdtScanner.getMdts())
+                            existing |= set((self.root.mdtScanner.getDownloadingMdts() or {}).keys())
                             self.input.setText(self._unique_name(base, existing))
                             self.input.textChanged.connect(self._on_text_changed)
 
@@ -1270,8 +1270,8 @@ class Download(Page):
                         def _collect_mdts(self, event):
                             """子线程：收集已安装/下载中的游戏名列表（纯文件/缓存操作，线程安全）。"""
                             try:
-                                mdts = set(mdtScanner.getMdts())
-                                downloading = set((mdtScanner.getDownloadingMdts() or {}).keys())
+                                mdts = set(self.root.mdtScanner.getMdts())
+                                downloading = set((self.root.mdtScanner.getDownloadingMdts() or {}).keys())
                                 return {"mdts": mdts, "downloading": downloading}
                             except Exception as e:
                                 return e
@@ -1436,7 +1436,7 @@ class Download(Page):
                                 self.root.logger.error("[mdt-download] %s 下载失败（downloading.json 已保留）" % name)
                                 return
                             try:
-                                mdtScanner._retrieve_mdt_data(name)
+                                self.root.mdtScanner._retrieve_mdt_data(name)
                                 dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
                                 if os.path.isfile(dfile):
                                     # 把下载时记录的类图标路径 / appdataCopy 合并进 BML.json
@@ -1460,7 +1460,7 @@ class Download(Page):
                                     except Exception:
                                         pass
                                     os.remove(dfile)
-                                mdtScanner.invalidate_cache()
+                                self.root.mdtScanner.invalidate_cache()
                                 self.root.logger.info("[mdt-download] %s 下载完成" % name)
                             except Exception as e:
                                 self.root.logger.error("[mdt-download] %s 收尾失败: %s" % (name, e))

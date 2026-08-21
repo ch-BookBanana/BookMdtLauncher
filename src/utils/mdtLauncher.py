@@ -54,6 +54,7 @@ class mdtLauncher(QProcess):
 
     def __init__(self, parent=None, settings=None):
         super().__init__()
+        self.root = parent  # Main 实例（mdtScanner 等工具经此访问）
         self.envs = QProcessEnvironment.systemEnvironment()
         self.going = 0   # 0: 空闲, 1: 校验中/准备启动, 2: 进程运行中
         self.data = {}   # 本次启动的关键路径信息
@@ -93,7 +94,7 @@ class mdtLauncher(QProcess):
         }
 
         # ---------- 1. 检查 mdt 实例 ----------
-        if mdt_name not in mdtScanner.getMdts():
+        if mdt_name not in self.root.mdtScanner.getMdts():
             self.log.emit({"type": "error", "text": "mdtNotFound"})
             self.going = 0
             self._emit_finished(-1)
@@ -140,7 +141,7 @@ class mdtLauncher(QProcess):
             # 从 mdtScanner 获取 BML 配置（含 javaPath 解析与回退）
             self.log.emit({"type": "info", "text": "Reading BML config via mdtScanner for: " + mdt_name})
             try:
-                mdt_data = mdtScanner.getMdtData(mdt_name, self.settings)
+                mdt_data = self.root.mdtScanner.getMdtData(mdt_name, self.settings)
                 java_from_config = mdt_data.get("javaPath")
                 # follow 表示无可用的 Java（mdtScanner 已校验并写回），按缺失处理
                 if not java_from_config or java_from_config == "<:|follow|:>":

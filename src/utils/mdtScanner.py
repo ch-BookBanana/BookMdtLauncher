@@ -15,9 +15,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from PySide6.QtCore import QObject, Signal, Qt
+from PySide6.QtGui import QPixmap
+
 import os, zipfile, json
 from .path_utils import getPath
 from .javaScanner import javaScanner
+from .QThTimer import QThTimer
 
 def _parse_simple_config_typed(content: str) -> dict:
     """解析 version.properties 内容为字典"""
@@ -41,23 +45,44 @@ def _parse_simple_config_typed(content: str) -> dict:
             config[key] = val
     return config
 
-class mdtScanner:
+class mdtScanner(QObject):
     base_dir = getPath("BML/.Mindustrys")
     DEFAULT_ICON = "src/assets/icons/mdt/mdt.png"
+    on_game_changed = Signal(dict)
+
+    # ---- 游戏图标全局缓存表（引用计数，仅主线程操作） ----
+    # QPixmaps: {game: QPixmap}；_pixmap_refs: {game: int}
+    # 有任一引用即常驻内存；引用归零立即删除释放资源
+    QPixmaps = {}
+    _pixmap_refs = {}
 
     # ---- 缓存系统 (mtime-based) ----
     _mdts_cache = None
     _mdts_cache_mtime = 0
-    _mdt_msg_cache = {}       # {subdir_name: (cache_key, data)}
+    _mdt_msg_cache = {}
+    # 图标变化检测的键记录：独立于 _mdt_msg_cache（缓存被 pop 后仍能继续比较）
+    _icon_check_keys = {}
+
+    def __init__(self, settings, parent=None, root=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.timer = QThTimer.taskP(3000, lambda e: self.checkGame())
+        self.timer.setParent(self)
+        # 图标周期检查自管理：检测到变化 emit on_game_changed("iconChanged")
+        self.icon_timer = QThTimer.taskP(1000, lambda e: self.check_icons())
+        self.icon_timer.setParent(self)
+        self.on_game_changed.connect(print)
 
     @classmethod
     def invalidate_cache(cls, game=None):
         """使缓存失效。game 为 None 时清空全部缓存，否则只清除指定游戏。"""
         if game:
             cls._mdt_msg_cache.pop(game, None)
+            cls._icon_check_keys.pop(game, None)
         else:
             cls._mdts_cache = None
             cls._mdt_msg_cache.clear()
+            cls._icon_check_keys.clear()
 
     @classmethod
     def _is_valid_image(cls, path):
@@ -80,15 +105,25 @@ class mdtScanner:
             return False
 
     @classmethod
-    def _write_icon_path(cls, subdir_name, icon_path):
-        """把 icon_path 写回 BML.json（保留其他字段），失败时静默。"""
+    def setData(cls, subdir_name, keys, value):
+        """通用写 BML.json 字段：keys 为键路径列表（支持嵌套如 ["a","b"]），失败时静默。
+
+        setData(subdir_name, ["icon_path"], icon_path) 等价于旧的 _write_icon_path。
+        """
         bml_path = getPath(f"BML/.Mindustrys/{subdir_name}/BML.json")
         try:
             with open(bml_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 data = {}
-            data["icon_path"] = icon_path
+            node = data
+            for k in keys[:-1]:
+                child = node.get(k)
+                if not isinstance(child, dict):
+                    child = {}
+                    node[k] = child
+                node = child
+            node[keys[-1]] = value
             with open(bml_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
         except Exception:
@@ -149,7 +184,7 @@ class mdtScanner:
         # icon_path 为 null/空 → 写回默认图标
         if not icon_path:
             icon_path = cls.DEFAULT_ICON
-            cls._write_icon_path(subdir_name, icon_path)
+            cls.setData(subdir_name, ["icon_path"], icon_path)
             try:
                 bml_mtime = os.path.getmtime(bml_path)
             except OSError:
@@ -159,7 +194,7 @@ class mdtScanner:
         if os.path.isfile(cand) and cls._is_valid_image(cand):
             png = cand
         else:
-            cls._write_icon_path(subdir_name, cls.DEFAULT_ICON)
+            cls.setData(subdir_name, ["icon_path"], cls.DEFAULT_ICON)
             png = getPath(cls.DEFAULT_ICON)
             try:
                 bml_mtime = os.path.getmtime(bml_path)
@@ -206,15 +241,14 @@ class mdtScanner:
             cls._mdt_msg_cache.pop(subdir_name, None)
             return None
 
-    @classmethod
-    def check_icons(cls):
-        """随 getMdts 检索周期检查各游戏图标状态。
+    def check_icons(self):
+        """随周期检查各游戏图标状态（子线程执行）。
 
         - icon_path 为 null/空或指向无效图片 → 写回默认图标
         - BML.json 或 icon.png 变化 → 使对应游戏的消息缓存失效
-        返回发生变化的游戏名称列表（供 UI 刷新）；无变化返回 []。"""
-        changed = []
-        for mdt in cls.getMdts():
+        检测到变化时 emit on_game_changed({"type": "iconChanged", "game": ...})；
+        QPixmaps 缓存的失效由主线程收到事件后处理（GUI 资源禁止跨线程操作）。"""
+        for mdt in self.getMdts():
             bml_path = getPath(f"BML/.Mindustrys/{mdt}/BML.json")
             bml_mtime = 0
             icon_path = None
@@ -229,12 +263,12 @@ class mdtScanner:
             resolved = None
             if icon_path:
                 cand = getPath(icon_path) if not os.path.isabs(icon_path) else icon_path
-                if os.path.isfile(cand) and cls._is_valid_image(cand):
+                if os.path.isfile(cand) and self._is_valid_image(cand):
                     resolved = cand
             if resolved is None:
-                cls._write_icon_path(mdt, cls.DEFAULT_ICON)
-                cls._mdt_msg_cache.pop(mdt, None)
-                changed.append(mdt)
+                self.setData(mdt, ["icon_path"], self.DEFAULT_ICON)
+                self._mdt_msg_cache.pop(mdt, None)
+                self.on_game_changed.emit({"type": "iconChanged", "game": mdt})
                 continue
             # icon.png 存在则优先
             png_path = getPath(f"BML/.Mindustrys/{mdt}/icon.png")
@@ -246,17 +280,61 @@ class mdtScanner:
                 png_size = os.path.getsize(png_path)
             jar_mtime = 0
             try:
-                jar_mtime = os.path.getmtime(cls._get_mdt_jar_path(mdt))
+                jar_mtime = os.path.getmtime(self._get_mdt_jar_path(mdt))
             except OSError:
                 pass
             new_key = (jar_mtime, bml_mtime, resolved, png_mtime, png_size)
-            cached = cls._mdt_msg_cache.get(mdt)
-            if cached:
-                cached_key, _ = cached
-                if cached_key != new_key:
-                    cls._mdt_msg_cache.pop(mdt, None)
-                    changed.append(mdt)
-        return changed
+            if self._icon_check_keys.get(mdt) != new_key:
+                # 首次检查只建立基线不通知（启动时 UI 自行加载图标，无需全量刷）
+                first = mdt not in self._icon_check_keys
+                self._icon_check_keys[mdt] = new_key
+                if not first:
+                    self._mdt_msg_cache.pop(mdt, None)
+                    self.on_game_changed.emit({"type": "iconChanged", "game": mdt})
+
+    @classmethod
+    def get_icon_pixmap(cls, game, size=None):
+        """获取游戏图标 QPixmap 并 +1 引用（主线程调用）。
+
+        缓存未命中时按 getMdtMsg 的图标解析结果加载；
+        size 指定时返回缩放副本（缓存保留原始尺寸，供多次不同尺寸复用）。
+        调用方不再需要时必须成对调用 release_icon_pixmap(game)。"""
+        pix = cls.QPixmaps.get(game)
+        if pix is None:
+            path = None
+            try:
+                msg = cls.getMdtMsg(game)
+                path = msg.get("icon") if msg else None
+            except Exception:
+                path = None
+            if not path or not os.path.isfile(path):
+                path = getPath(cls.DEFAULT_ICON)
+            pix = QPixmap(path)
+            if pix.isNull():
+                pix = QPixmap(getPath(cls.DEFAULT_ICON))
+            cls.QPixmaps[game] = pix
+            cls._pixmap_refs[game] = 0
+        cls._pixmap_refs[game] += 1
+        if size:
+            return pix.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        return pix
+
+    @classmethod
+    def release_icon_pixmap(cls, game):
+        """释放游戏图标引用（主线程调用）。引用计数归零时从 QPixmaps 删除并释放资源。"""
+        refs = cls._pixmap_refs.get(game, 0)
+        if refs <= 1:
+            cls._pixmap_refs.pop(game, None)
+            cls.QPixmaps.pop(game, None)
+        else:
+            cls._pixmap_refs[game] = refs - 1
+
+    @classmethod
+    def invalidate_icon_pixmap(cls, game):
+        """图标文件变化后使 QPixmaps 缓存失效（主线程调用）。
+
+        删除表条目（保留引用计数），下次 get_icon_pixmap 时重新加载新图标。"""
+        cls.QPixmaps.pop(game, None)
 
     @classmethod
     def getMdts(cls):
@@ -321,6 +399,8 @@ class mdtScanner:
         merged = dict(default_data)
         for key, value in file_data.items():
             if key not in default_data:
+                # 保留未知字段（name、icon_path 等），避免写回时被清掉
+                merged[key] = value
                 continue
             if isinstance(default_data[key], dict) and isinstance(value, dict):
                 for sub_key, sub_value in value.items():
@@ -328,6 +408,10 @@ class mdtScanner:
                         merged[key][sub_key] = sub_value
             else:
                 merged[key] = value
+        # 内容无变化则不写回：避免每次 checkGame 刷新 BML.json mtime，
+        # 否则 check_icons 的缓存键(bml_mtime)永远不匹配，每秒全量误报 iconChanged
+        if merged == file_data:
+            return
         try:
             os.makedirs(os.path.dirname(data_path), exist_ok=True)
             with open(data_path, "w", encoding="utf-8") as f:
@@ -381,3 +465,48 @@ class mdtScanner:
                 pass
             return data
         return data   
+
+    def checkGame(self):
+        mdts = self.getMdts()
+        setting = []
+        for _, value in self.settings["gameList"].items():
+            setting += value.copy()
+        for mdt in mdts:
+            data = self.getMdtData(mdt, self.settings)
+            # 1. 目录名与 BML.json 的 name 不一致 → 重命名
+            old_name = data.get("name", None)
+            if old_name is not None and old_name != mdt:
+                self.on_game_changed.emit({"type": "nameChanged", "game": mdt, "old_name": old_name})
+                self.setData(mdt, ["name"], mdt)
+                for _, value in self.settings["gameList"].items():
+                    if old_name in value:
+                        value[value.index(old_name)] = mdt
+                for i, v in enumerate(setting):
+                    if v == old_name:
+                        setting[i] = mdt
+                if self.settings["defaultGame"] == old_name:
+                    self.settings["defaultGame"] = mdt
+            # 2. 目录存在但不在 gameList → 新游戏
+            if mdt not in setting:
+                self.settings["gameList"].setdefault("<:|default|:>", []).append(mdt)
+                self.on_game_changed.emit({"type": "newGame", "game": mdt})
+            # 3. 图片检测：BML.json 的 icon_path 缺失或指向无效图片 → 写回默认并通知
+            icon_path = data.get("icon_path", None)
+            cand = getPath(icon_path) if icon_path and not os.path.isabs(icon_path) else icon_path
+            if not (icon_path and os.path.isfile(cand) and self._is_valid_image(cand)):
+                self.setData(mdt, ["icon_path"], self.DEFAULT_ICON)
+                self.on_game_changed.emit({"type": "iconChanged", "game": mdt})
+        # 4. 在 gameList 但目录已不存在 → 删除
+        for dat in setting:
+            if dat not in mdts:
+                self.on_game_changed.emit({"type": "deleteGame", "game": dat})
+                for _, value in self.settings["gameList"].items():
+                    if dat in value:
+                        value.remove(dat)
+                        break
+        # 5. 维护 defaultGame：缺失/失效时回退到第一个有效副本
+        if not mdts:
+            self.settings["defaultGame"] = None
+        elif self.settings["defaultGame"] not in mdts:
+            self.settings["defaultGame"] = mdts[0]
+        return self.settings["defaultGame"]

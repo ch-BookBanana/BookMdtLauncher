@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import os, copy
+import os
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPixmap
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBut
 from src.utils.path_utils import getPath
 
 from ..mdtScanner import mdtScanner
-from ..QThTimer import QThTimer
 from ..utils import change_color, t
 
 from ._init import *
@@ -34,8 +33,9 @@ class Start(Page):
     def __init__(self, parent=None, root=None, text=None, logo=None):
         root.signals.register("start_gameChanged", Signal(object))
         super().__init__(parent, root, text, logo)
-        QThTimer.taskP(1000, self.left.changeTimer, [self.left.sets])
-        QThTimer.task(0, self.left.changeTimer, [self.left.sets])
+        # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtScanner 事件（替代 1 秒轮询）
+        self.left.refresh()
+        self.root.mdtScanner.on_game_changed.connect(self.left._on_game_changed)
         self.root.launcher.game_launched.connect(lambda: self.main.stack.setCurrentIndex(3))
         self.root.launcher.game_launched.connect(lambda: self.left.main.setCurrentIndex(3))
         self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
@@ -49,17 +49,11 @@ class Start(Page):
         self.root.launcher.log.connect(lambda dic: (self.root.logger.info("[launcher]"+dic["text"]) if dic["type"] == "info" else self.root.logger.error("[launcher]"+dic["text"])))
 
     def changeGame(self, game=None):
-        mdts = mdtScanner.getMdts()
         if game == self.root.settings["defaultGame"]: return
-        if game not in mdts:
-            if len(mdts) == 0:
-                self.root.settings["defaultGame"] = None
-            else:
-                self.root.settings["defaultGame"] = mdts[0]
-        else:
-            self.root.settings["defaultGame"] = game
+        mdts = self.root.mdtScanner.getMdts()
+        self.root.settings["defaultGame"] = game if game in mdts else (mdts[0] if mdts else None)
         self.root.signals.emit("start_gameChanged", game)
-        QThTimer.task(0, self.left.changeTimer, [self.left.sets])
+        self.left.refresh()
 
     def _on_appdata_save_step(self, step):
         """appdataCopy 保存步骤：切换两个界面到 index 5 并设置 finished 文本。"""
@@ -106,7 +100,6 @@ class Start(Page):
             self.resize_(250)
             self.init_wid()
             self.game = {
-                "icon": None,
                 "name": None,
                 "vers": None,
                 "icon_key": None
@@ -153,50 +146,45 @@ class Start(Page):
             if versTxt[0]:
                 self.versTxt.setText(QFontMetrics(self.versTxt.font()).elidedText(versTxt[1], Qt.ElideRight, 130))
 
-        def changeTimer(self,event):
-            i = [(False,None),(False,None),(False,None)]
-            mdts = mdtScanner.getMdts()
-            if len(mdts) == 0:
-                if self.root.settings["defaultGame"] is not None:
-                    self.root.settings["defaultGame"] = None
-            elif self.root.settings["defaultGame"] is None or self.root.settings["defaultGame"] not in mdts:
-                self.root.settings["defaultGame"] = mdts[0]
-            default_game = self.root.settings["defaultGame"]
-            game_msg = mdtScanner.getMdtMsg(default_game) if default_game else None
+        def refresh(self):
+            """defaultGame 或其图标/版本变化时刷新左侧信息（主线程调用）。
+
+            替代旧 changeTimer：不再 1 秒轮询，由 mdtScanner 事件驱动触发；
+            直接调用 sets 更新 UI（主线程安全，无需 QThTimer 中转）。"""
+            default_game = self.root.mdtScanner.ensure_default_game()
+            game_msg = self.root.mdtScanner.getMdtMsg(default_game) if default_game else None
             if self.game["name"] != default_game:
                 if default_game is None:
-                    i[1] = (True,self.root.langer.get("wid.pages.start.left.noGame"))
-                    i[2] = (True,self.root.langer.get("wid.pages.start.left.DGame"))
                     self.game["name"] = self.game["vers"] = self.game["icon_key"] = None
+                    self.sets((False,None),(True,self.root.langer.get("wid.pages.start.left.noGame")),(True,self.root.langer.get("wid.pages.start.left.DGame")))
                 else:
                     self.game["name"] = default_game
-                    if game_msg:
-                        self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}"
-                    i[1] = (True,default_game)
-                    i[2] = (True,self.game["vers"])
-            elif self.game["name"] is not None and game_msg:
+                    self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}" if game_msg else None
+                    self.sets((False,None),(True,default_game),(True,self.game["vers"] or ""))
+            elif self.game["name"] and game_msg:
                 new_vers = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}"
                 if self.game["vers"] != new_vers:
                     self.game["vers"] = new_vers
-                    i[2] = (True,new_vers)
-            if self.game["name"] is not None and game_msg and game_msg["icon"]:
-                icon_path = game_msg["icon"]
+                    self.sets((False,None),(False,None),(True,new_vers))
+            # 图标：icon_key 由 路径+mtime+size 构成，变化才重载
+            if self.game["name"] and game_msg:
                 try:
-                    icon_key = f"{icon_path}:{os.path.getmtime(icon_path)}:{os.path.getsize(icon_path)}"
+                    icon_key = f"{game_msg['icon']}:{os.path.getmtime(game_msg['icon'])}:{os.path.getsize(game_msg['icon'])}"
                 except OSError:
                     icon_key = None
             else:
                 icon_key = None
-
-            if self.game.get("icon_key") != icon_key:
+            if self.game["icon_key"] != icon_key:
                 self.game["icon_key"] = icon_key
-                if icon_key is not None:
-                    i[0] = (True, QPixmap(game_msg["icon"]))
-                else:
-                    i[0] = (True, QPixmap())
+                self.sets((True, QPixmap(game_msg["icon"]) if icon_key else QPixmap()),(False,None),(False,None))
 
-            if i[0][0] or i[1][0] or i[2][0]:
-                event.lambdas[0].emit(i[0],i[1],i[2])
+        def _on_game_changed(self, data):
+            """mdtScanner 事件：defaultGame 受影响时刷新左侧信息。"""
+            etype = data["type"]
+            if etype in ("newGame", "deleteGame", "nameChanged"):
+                self.refresh()
+            elif etype == "iconChanged" and data["game"] == self.game["name"]:
+                self.refresh()
             
         class Bottom(QStackedWidget):
             def __init__(self, parent=None, root=None):
@@ -469,14 +457,17 @@ class Start(Page):
                 self.setAttribute(Qt.WA_StyledBackground,True)
 
         class World(_Main):
+            """游戏分组列表：订阅 mdtScanner 事件增量更新，不做整页重建。"""
+
             def __init__(self,parent=None,root=None):
                 super().__init__(parent,root)
                 self.setAttribute(Qt.WA_StyledBackground,True)
-                self.games = {}
+                self.groups = {}
                 self.init_wid()
-                self.renovate()
-                self.games["<:|default|:>"].gameW.show()
-                self.root.signals.connect("gameRenovated", self.renovate)
+                self.rebuild()
+                self.groups["<:|default|:>"].show_items()
+                # 订阅 mdtScanner 事件，按类型精确更新对应条目
+                self.root.mdtScanner.on_game_changed.connect(self._on_game_changed)
 
             def init_wid(self):
                 self.layout = QVBoxLayout(self)
@@ -488,135 +479,183 @@ class Start(Page):
                 self.scroll.setFrameShape(QFrame.NoFrame)
                 self.layout.addWidget(self.scroll)
 
-                self.main = QWidget()
-                self.main.setProperty("wid","color2")
-                self.scroll_layout = QVBoxLayout(self.main)
-                self.scroll_layout.setContentsMargins(10,10,10,10)
-                self.scroll_layout.setSpacing(10)
-                self.scroll_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-                self.scroll.setWidget(self.main)
+                self.box = QWidget()
+                self.box.setProperty("wid","color2")
+                self.box_l = QVBoxLayout(self.box)
+                self.box_l.setContentsMargins(10,10,10,10)
+                self.box_l.setSpacing(10)
+                self.box_l.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+                self.scroll.setWidget(self.box)
 
-            def renovate(self):
-                games = copy.deepcopy(self.root.settings["gameList"])
-                keys_to_delete = []
-                for key, value in list(self.games.items()):
-                    if key not in games:
-                        value.deleteLater()
-                        keys_to_delete.append(key)
-                    else:
-                        if set(value.games) != set(games[key]):
-                            value.renovate(key)
-                        del games[key]
-                for key in keys_to_delete:
-                    del self.games[key]
-                for key, value in games.items():
-                    self.games[key] = self.Lists(self, self.root)
-                    self.games[key].renovate(key)
-                
+            def rebuild(self):
+                """按 settings.gameList 全量重建分组（仅初始构建）。"""
+                for group in self.groups.values():
+                    group.release_all()
+                    group.deleteLater()
+                self.groups = {}
+                for name, games in self.root.settings["gameList"].items():
+                    self.groups[name] = self.Group(self, self.root, name, games)
 
-            class Lists(QWidget):
-                def __init__(self,parent=None,root=None):
+            def _on_game_changed(self, data):
+                """newGame/deleteGame/nameChanged/iconChanged → 精确更新对应条目。"""
+                etype = data["type"]
+                game = data["game"]
+                if etype == "newGame":
+                    # checkGame 总是把新游戏追加到 default 组
+                    group = self.groups.get("<:|default|:>")
+                    if group:
+                        group.add(game)
+                elif etype == "deleteGame":
+                    for group in self.groups.values():
+                        if group.remove(game):
+                            break
+                elif etype == "nameChanged":
+                    for group in self.groups.values():
+                        if group.rename(data["old_name"], game):
+                            break
+                elif etype == "iconChanged":
+                    for group in self.groups.values():
+                        if group.refresh_icon(game):
+                            break
+
+            class Group(QWidget):
+                """一个游戏分组：标题栏 + 可折叠的条目列表。"""
+
+                def __init__(self,parent=None,root=None,name="",games=()):
                     super().__init__()
                     self.parent = parent
                     self.root = root
+                    self.name = name
+                    self.items = {}
                     self.light = None
-                    self.game = ""
-                    self.btnPix = [QPixmap(),QPixmap()]
+                    self.foldPix = [QPixmap(), QPixmap()]
                     self.setAttribute(Qt.WA_StyledBackground, True)
-                    self.games = {}
-                    self.launch = False
                     self.setStyleSheet("border-radius:10px;max-width:600px;")
                     self.init_wid()
-                    
-                    self.parent.scroll_layout.addWidget(self)
+                    self.parent.box_l.addWidget(self)
+                    self.body.hide()
+                    self.langing()
+                    self.add_many(games)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
                     self.layout.setContentsMargins(10,10,10,10)
                     self.layout.setSpacing(5)
 
-                    self.top = QWidget()
-                    self.top.setFixedHeight(40)
-                    self.layout.addWidget(self.top)
+                    # 标题栏：分组名 + 数量 + 折叠按钮
+                    self.head = QWidget()
+                    self.head.setFixedHeight(40)
+                    self.layout.addWidget(self.head)
+                    self.head_l = QHBoxLayout(self.head)
+                    self.head_l.setContentsMargins(15,0,0,0)
+                    self.head_l.setSpacing(5)
+                    self.head_l.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
 
-                    self.topL = QHBoxLayout(self.top)
-                    self.topL.setContentsMargins(15,0,0,0)
-                    self.topL.setSpacing(5)
-                    self.topL.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+                    self.title = QLabel()
+                    self.title.setProperty("wid","text")
+                    self.title.setStyleSheet("font-size:16px;")
+                    self.head_l.addWidget(self.title, 0)
 
-                    self.label = QLabel()
-                    self.label.setProperty("wid","text")
-                    self.label.setStyleSheet("font-size:16px;")
-                    self.topL.addWidget(self.label,0)
+                    self.count = QLabel()
+                    self.count.setProperty("wid","lbtn")
+                    self.count.setStyleSheet("font-size:14px;")
+                    self.head_l.addWidget(self.count, 0)
+                    self.head_l.addStretch(1)
 
-                    self.label2 = QLabel()
-                    self.label2.setProperty("wid","lbtn")
-                    self.label2.setStyleSheet("font-size:14px;")
-                    self.topL.addWidget(self.label2,0)
+                    self.fold_btn = QPushButton()
+                    self.fold_btn.setFixedSize(40,40)
+                    self.fold_btn.setProperty("wid","lbtn")
+                    self.fold_btn.setStyleSheet("border-radius:20px;")
+                    self.fold_btn.clicked.connect(self.toggle)
+                    self.head_l.addWidget(self.fold_btn)
 
-                    self.topL.addStretch(1)
-
-                    self.button = QPushButton()
-                    self.button.setFixedSize(40,40)
-                    self.button.setProperty("wid","lbtn")
-                    self.button.setStyleSheet("border-radius:20px;")
-                    self.topL.addWidget(self.button)
-
-                    class VisiWidget(QWidget):
-                        visibled = Signal(bool)
-
-                        def showEvent(self,event):
-                            self.visibled.emit(True)
-                            super().showEvent(event)
-
-                        def hideEvent(self,event):
-                            self.visibled.emit(False)
-                            super().hideEvent(event)
-
-                    self.gameW = VisiWidget()
-                    self.gameW.visibled.connect(lambda i:self.button.setIcon(QIcon(self.btnPix[int(i)])))
-                    self.layout.addWidget(self.gameW)
-                    self.gameW.hide()
-
-                    self.gameL = QVBoxLayout(self.gameW)
-                    self.gameL.setContentsMargins(0,0,0,0)
-                    self.gameL.setSpacing(5)
+                    # 条目容器（可折叠）
+                    self.body = QWidget()
+                    self.layout.addWidget(self.body)
+                    self.body_l = QVBoxLayout(self.body)
+                    self.body_l.setContentsMargins(0,0,0,0)
+                    self.body_l.setSpacing(5)
                     self.line = QWidget()
                     self.line.setFixedHeight(1)
                     self.line.setProperty("wid","line")
-                    self.gameL.addWidget(self.line)
-
-                    self.button.clicked.connect(lambda:self.gameW.setVisible(not self.gameW.isVisible()))
-
-
-                def renovate(self, games):
-                    self.game = games
-                    gamelist = copy.deepcopy(self.root.settings["gameList"][games])
-                    for key, value in list(self.games.items()):
-                        value.deleteLater()
-                    self.games.clear()
-                    for game_name in gamelist:
-                        self.games[game_name] = self.Item(self, self.root, game_name)
-                    self.langing()
-                    self.label2.setText(f"({len(gamelist)})")
+                    self.body_l.addWidget(self.line)
 
                 def langing(self):
-                    self.label.setText(self.game if self.game != "<:|default|:>" else self.root.langer.get("text.default"))
+                    self.title.setText(self.name if self.name != "<:|default|:>" else self.root.langer.get("text.default"))
+
+                def toggle(self):
+                    self.body.setVisible(not self.body.isVisible())
+                    self._sync_fold_icon()
+
+                def show_items(self):
+                    """展开条目（default 组初始展开用）。"""
+                    self.body.show()
+                    self._sync_fold_icon()
+
+                def _sync_fold_icon(self):
+                    self.fold_btn.setIcon(QIcon(self.foldPix[int(self.body.isVisible())]))
 
                 def lighting(self,light):
                     if self.light != light:
                         self.light = light
-                        self.btnPix[1] = change_color(getPath("src/assets/actions/eye.png"),QColor(25,25,25) if light else QColor(220,220,220))
-                        self.btnPix[0] = change_color(getPath("src/assets/actions/eye-off.png"),QColor(25,25,25) if light else QColor(220,220,220))
-                    self.button.setIcon(QIcon(self.btnPix[int(self.gameW.isVisible())]))
+                        color = QColor(25,25,25) if light else QColor(220,220,220)
+                        self.foldPix[1] = change_color(getPath("src/assets/actions/eye.png"), color)
+                        self.foldPix[0] = change_color(getPath("src/assets/actions/eye-off.png"), color)
+                    self._sync_fold_icon()
+
+                def add_many(self, names):
+                    for name in names:
+                        self.add(name)
+
+                def add(self, name):
+                    """新增条目（幂等，newGame 事件用）。"""
+                    if name not in self.items:
+                        self.items[name] = self.Item(self, self.root, name)
+                        self.count.setText(f"({len(self.items)})")
+
+                def remove(self, name):
+                    """移除条目（deleteGame 事件用）；命中返回 True。"""
+                    item = self.items.pop(name, None)
+                    if item is not None:
+                        item.release()
+                        item.deleteLater()
+                        self.count.setText(f"({len(self.items)})")
+                    return item is not None
+
+                def rename(self, old, new):
+                    """改名：换 key 与显示文本（nameChanged 事件用）；命中返回 True。"""
+                    item = self.items.pop(old, None)
+                    if item is not None:
+                        item.release()
+                        item.game = new
+                        item.title.setText(new)
+                        item.acquire()
+                        self.items[new] = item
+                    return item is not None
+
+                def refresh_icon(self, name):
+                    """图标文件变化：重取条目图标（iconChanged 事件用）；命中返回 True。"""
+                    item = self.items.get(name)
+                    if item is not None:
+                        item.acquire(force=True)
+                    return item is not None
+
+                def release_all(self):
+                    """释放本组所有条目图标引用（分组销毁前调用）。"""
+                    for item in self.items.values():
+                        item.release()
+                    self.items.clear()
 
                 class Item(QPushButton):
+                    """单个游戏条目：图标 + 名称 + 版本。"""
+
                     def __init__(self,parent=None,root=None,game=None):
                         super().__init__()
                         self.parent = parent
                         self.root = root
                         self.game = game
-                        self.parent.gameL.addWidget(self)
+                        self._held = False
+                        self.parent.body_l.addWidget(self)
                         self.setFixedHeight(40)
                         self.setProperty("wid","lbtn")
                         self.init_wid()
@@ -627,44 +666,57 @@ class Start(Page):
                         self.layout.setContentsMargins(5,5,5,5)
                         self.layout.setSpacing(10)
 
-                        self.pixmap = QLabel()
-                        self.pixmap.setFixedSize(30,30)
-                        self.pixmap.setStyleSheet("width:30px;")
-                        self.pixmap.setScaledContents(True)
-                        self.layout.addWidget(self.pixmap,0)
+                        self.icon = QLabel()
+                        self.icon.setFixedSize(30,30)
+                        self.icon.setScaledContents(True)
+                        self.layout.addWidget(self.icon,0)
 
                         self.textW = QWidget()
                         self.textW.setStyleSheet("background:transparent;")
                         self.layout.addWidget(self.textW)
-
                         self.textL = QVBoxLayout(self.textW)
                         self.textL.setContentsMargins(0,0,0,0)
                         self.textL.setSpacing(0)
 
-                        self.text = QLabel()
-                        self.text.setStyleSheet("background:transparent;font-size:14px;")
-                        self.text.setProperty("wid","text")
-                        self.textL.addWidget(self.text,0)
-                        self.text.setFixedHeight(20)
+                        self.title = QLabel()
+                        self.title.setStyleSheet("background:transparent;font-size:14px;")
+                        self.title.setProperty("wid","text")
+                        self.title.setFixedHeight(20)
+                        self.textL.addWidget(self.title,0)
 
                         self.version = QLabel()
                         self.version.setStyleSheet("background:transparent;")
                         self.version.setProperty("wid","lbtn")
-                        self.textL.addWidget(self.version)
                         self.version.setFixedHeight(10)
+                        self.textL.addWidget(self.version,0)
 
                         self.layout.addStretch(1)
 
                     def showEvent(self,event):
                         super().showEvent(event)
-                        vers = mdtScanner.getMdtMsg(self.game)
+                        vers = self.root.mdtScanner.getMdtMsg(self.game)
                         if vers:
-                            pngPath = vers.get("icon")
-                            if pngPath is not None:
-                                self.pixmap.setPixmap(QPixmap(pngPath))
-                            self.text.setText(self.game)
+                            self.acquire()
+                            self.title.setText(self.game)
                             self.version.setText(f"v{vers['number']}.{vers['build']}{vers['modifier']}")
 
+                    def acquire(self, force=False):
+                        """取图标 +1 引用；force 先释放旧引用再重取（iconChanged 用）。"""
+                        if force and self._held:
+                            mdtScanner.release_icon_pixmap(self.game)
+                            self._held = False
+                        if not self._held:
+                            pix = mdtScanner.get_icon_pixmap(self.game, 30)
+                            self._held = True
+                            if not pix.isNull():
+                                self.icon.setPixmap(pix)
+
+                    def release(self):
+                        """释放图标引用（-1，归零自动清缓存）；条目销毁前调用。"""
+                        if self._held:
+                            mdtScanner.release_icon_pixmap(self.game)
+                            self._held = False
+                            self.icon.clear()
 
 
         class Launch(_Main):

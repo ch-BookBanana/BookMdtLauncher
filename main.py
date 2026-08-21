@@ -143,6 +143,12 @@ try:
 
             self.launcher = mdtLauncher(self, self.settings)
             self.githubAPI = GithubAPI()
+            # settings 传 dict；parent 必须 QObject（Main 不是，传 None）；root 存 Main 引用
+            self.mdtScanner = mdtScanner(self.settings, parent=None, root=self)
+            # checkGame 变更 gameList（newGame/deleteGame/nameChanged）后自动落盘
+            self.mdtScanner.on_game_changed.connect(self._on_game_changed)
+            # 启动立即同步一次游戏列表，避免等首个 3 秒周期
+            QThTimer.task(0, lambda e: self.mdtScanner.checkGame())
             if self.settings["github"]["token_enc"]:
                 raw = self._decrypt_settings_token()
                 if raw:
@@ -156,46 +162,34 @@ try:
 
 
             self.signals.register("tokenVerified", Signal(bool, str, object))
-            self.signals.register("gameRenovated", Signal())
-            QThTimer.taskP(2000, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
-            QThTimer.task(0, self.gameRenovate, events=[lambda:self.signals.emit("gameRenovated"),self.saveSettings])
 
             self.tray = self.Tray(self, self)
             self.window = self.Window(self, self)
 
             # 后台预加载所有游戏数据到缓存，加速后续切换
-            QThTimer.task(100, lambda event: mdtScanner.preload_all())
-            # 周期检查游戏图标（icon_path/icon.png）是否有变化，变化时刷新 UI
-            QThTimer.taskP(5000, lambda event: mdtScanner.check_icons(), result_callback=self._on_icons_checked)
+            QThTimer.task(100, lambda event: self.mdtScanner.preload_all())
+            # 图标周期检查与 QPixmaps 引用计数缓存已由 mdtScanner 自管理（icon_timer）
 
             # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
             app.aboutToQuit.connect(self._cleanup_on_quit)
 
+            # Java 下载流程的 UI 回调/辅助函数由 src/utils/on_start/java.py 挂载（保持 self._java_* 调用点不变）
+            from src.utils.on_start.java import attach as _attach_java_ui
+            _attach_java_ui(self)
+
             startup.register(self)
 
-        def _on_icons_checked(self, changed):
-            """图标检查任务回调：检测到图标变化时刷新开始页游戏列表。"""
-            if changed:
-                self.signals.emit("gameRenovated")
+        def _on_game_changed(self, data):
+            """mdtScanner 事件回调（主线程）。
 
-        def gameRenovate(self, event):
-            mdts = mdtScanner.getMdts()
-            games = copy.deepcopy(self.settings["gameList"])
-            changed = False
-            for key, game_list in games.items():
-                for game in list(game_list):
-                    if game in mdts:
-                        mdts.remove(game)
-                    else:
-                        game_list.remove(game)
-                        changed = True
-            if mdts:
-                games.setdefault("<:|default|:>", []).extend(mdts)
-                changed = True
-            if changed:
-                self.settings["gameList"] = games
-                event.lambdas[0].emit()
-                event.lambdas[1].emit()
+            newGame/deleteGame/nameChanged → gameList 变化，落盘；
+            iconChanged → 图标文件变化，失效 QPixmaps 缓存（下次引用重新加载）。
+            UI 刷新由 start.py 直接订阅 on_game_changed 完成，不经 signals 中转。"""
+            etype = data.get("type")
+            if etype in ("newGame", "deleteGame", "nameChanged"):
+                self.saveSettings()
+            elif etype == "iconChanged":
+                mdtScanner.invalidate_icon_pixmap(data.get("game"))
 
         def _cleanup_on_quit(self):
             """应用退出前的统一清理（aboutToQuit 时执行）。
@@ -229,163 +223,6 @@ try:
                     shutil.rmtree(mdimg, ignore_errors=True)
             except Exception:
                 pass
-
-        # ==================== Java 自动下载流程 ====================
-        def _java_bottom(self):
-            """Start 页左栏 Bottom（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Suspend。"""
-            return self.window.main.main.start.left.main
-
-        def _java_stack(self):
-            """Start 页主区 stack（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Log。"""
-            return self.window.main.main.start.main.stack
-
-        def _on_java_status(self, status):
-            """Java 下载/解压状态变化：left.bottom 与 right.main 都切到 Launch 页并更新 label。"""
-            try:
-                self.logger.info(t(self.langer.get("log.java.status_change"), status), name="Java")
-                bottom = self._java_bottom()
-                bottom.setCurrentIndex(3)
-                self._java_stack().setCurrentIndex(3)
-                bottom.launch.setStatus(status)
-            except Exception as e:
-                print("[java_ui_status]", status, "ERR:", repr(e))
-
-        def _on_java_progress(self, done, total):
-            """下载字节进度 → label 显示百分比（如 正在下载Java... 45%）。"""
-            try:
-                pct = int(done * 100 / total) if total else 0
-                bottom = self._java_bottom()
-                bottom.setCurrentIndex(3)
-                self._java_stack().setCurrentIndex(3)
-                bottom.launch.setStatus("downloading", pct)
-            except Exception as e:
-                print("[java_ui_progress]", done, total, "ERR:", repr(e))
-
-        def _on_java_extract_progress(self, done, total):
-            """解压进度 → label 显示百分比（如 正在解压Java... 45%）。"""
-            try:
-                pct = int(done * 100 / total) if total else 0
-                bottom = self._java_bottom()
-                bottom.setCurrentIndex(3)
-                self._java_stack().setCurrentIndex(3)
-                bottom.launch.setStatus("extracting", pct)
-            except Exception as e:
-                print("[java_ui_extract]", done, total, "ERR:", repr(e))
-
-        def _on_java_paused_changed(self, paused, pct):
-            """Java 下载暂停/恢复 → label 显示"Java暂停下载 n%"或恢复"正在下载Java n%"。"""
-            try:
-                _state = self.langer.get("log.java.paused_state" if paused else "log.java.resumed_state")
-                self.logger.info(t(self.langer.get("log.java.paused_change"), _state, pct), name="Java")
-                bottom = self._java_bottom()
-                bottom.setCurrentIndex(3)
-                self._java_stack().setCurrentIndex(3)
-                if paused:
-                    bottom.launch.setStatus("paused", pct)
-                else:
-                    bottom.launch.setStatus("downloading", pct)
-            except Exception as e:
-                print("[java_ui_paused]", paused, pct, "ERR:", repr(e))
-
-        def _on_java_flow_cancelled(self):
-            """启动延续流程的下载被用户取消（下载列表页/退出）：记录标记。"""
-            self.logger.info(self.langer.get("log.java.flow_cancelled"), name="Java")
-            self._java_flow_cancelled = True
-
-        def _on_java_cancelled(self):
-            """launcher 内置 Java 下载被用户取消：显示"已取消"，一秒后回主界面。"""
-            self.logger.info(self.langer.get("log.java.dl_cancelled_show"), name="Java")
-            self._java_show_status("cancelled")
-            QTimer.singleShot(1000, self._java_go_home)
-
-        def _on_java_finished(self, ok):
-            """启动延续流程结束：显示"Java部署完成/失败/已取消"，等待一秒后返回主界面。
-
-            （run 触发的下载由 launcher 内置管理，其 java_done 信号走 _on_java_download_done）
-            """
-            flow = self.java_flow
-            self.java_flow = None   # 释放流程引用（QDownloader 已完成并注销）
-            if flow is not None:
-                try:
-                    flow.shutdown()   # 确保下载/解压线程完全退出后再释放
-                except Exception:
-                    pass
-            cancelled = self._java_flow_cancelled
-            self._java_flow_cancelled = False
-            self.logger.info(t(self.langer.get("log.java.flow_finished"), ok, cancelled), name="Java")
-            if ok:
-                self._java_show_status("done")
-            elif cancelled:
-                self._java_show_status("cancelled")   # 用户主动取消，不误报"下载失败"
-            else:
-                self._java_show_status("error")
-            QTimer.singleShot(1000, self._java_go_home)
-
-        def _on_java_download_done(self, ok):
-            """launcher 内置 Java 下载流程结束：显示结果，一秒后由 launcher 自动重新 run 或回主界面。
-
-            ok=True：launcher 内部已刷新 Java 设置并重新启动游戏（game_launched 信号会切页）；
-            ok=False：显示失败，一秒后回主界面。
-            """
-            self.logger.info(t(self.langer.get("log.java.dl_finished_show"), ok), name="Java")
-            if ok:
-                self._java_show_status("done")
-            else:
-                self._java_show_status("error")
-                QTimer.singleShot(1000, self._java_go_home)
-
-        def _java_show_status(self, status):
-            """left.bottom 与 right.main 都切到 Launch 页并更新唯一状态 label。"""
-            try:
-                bottom = self._java_bottom()
-                bottom.setCurrentIndex(3)
-                self._java_stack().setCurrentIndex(3)
-                bottom.launch.setStatus(status)
-            except Exception as e:
-                print("[java_ui_show]", status, "ERR:", repr(e))
-
-        def _java_go_home(self):
-            """返回主界面（左 stacked 与主区均回到 Start 页）。"""
-            try:
-                self._java_bottom().setCurrentIndex(0)
-                self._java_stack().setCurrentIndex(0)
-            except Exception:
-                pass
-
-        def _java_cancel_all(self):
-            """取消当前 Java 下载流程（用户手动取消/退出时）。
-
-            仅当确实存在流程时才打印日志并执行取消，避免退出时产生误导性日志。
-            """
-            flow = self.java_flow
-            self.java_flow = None
-            lf = None
-            try:
-                lf = self.launcher._java_flow
-                self.launcher._java_flow = None
-            except Exception:
-                pass
-            if flow is None and lf is None:
-                # 没有任何流程，无需打印"取消全部流程"
-                return
-            self.logger.info(self.langer.get("log.java.cancel_all"), name="Java")
-            if flow is not None:
-                try:
-                    flow.cancel()
-                except Exception:
-                    pass
-            if lf is not None:
-                try:
-                    lf.cancel()
-                except Exception:
-                    pass
-
-        def _resume_appdata_saves(self):
-            """启动时续传未完成的 appdataCopy 保存任务（launcher 内部处理 step=1/step=2）。"""
-            try:
-                self.launcher.resume_appdata_saves()
-            except Exception as e:
-                self.logger.warning(t(self.langer.get("log.appdata.resume_scan_error"), repr(e)))
 
         _OBF_BYTE = 0x5A
 
