@@ -505,6 +505,14 @@ class mdtScanner(QObject):
                         value.remove(dat)
                         break
         # 5. 维护 defaultGame：缺失/失效时回退到第一个有效副本
+        self.ensure_default_game()
+
+    def ensure_default_game(self):
+        """修正 settings['defaultGame']：无副本 → None；失效/缺失 → 第一个有效副本。
+
+        返回修正后的 defaultGame（可能为 None）。在 checkGame 周期与
+        事件驱动刷新（start.py Left.refresh）中调用，保证引用始终有效。"""
+        mdts = self.getMdts()
         if not mdts:
             self.settings["defaultGame"] = None
         elif self.settings["defaultGame"] not in mdts:
