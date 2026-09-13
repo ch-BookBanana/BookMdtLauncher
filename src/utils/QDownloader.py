@@ -87,10 +87,7 @@ def _ssl_retry_request(sess, method, url, **kwargs):
     except requests.exceptions.SSLError:
         try:
             import warnings
-            try:
-                from requests.packages.urllib3.exceptions import InsecureRequestWarning
-            except Exception:
-                from urllib3.exceptions import InsecureRequestWarning
+            from urllib3.exceptions import InsecureRequestWarning
             warnings.simplefilter("ignore", InsecureRequestWarning)
         except Exception:
             pass

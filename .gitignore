@@ -1,8 +1,8 @@
-/BML/
-/python/
-/test.py
 /.vscode/
+/python/
 /scripts/
+/BML/
+/test.py
 
 
 # pyinstaller
@@ -10,13 +10,14 @@
 /dist/
 /installer.cmd
 /BookMdtLauncher.spec
-main.spec
+/main.spec
 
 # nuitka
 /main.build/
 /main.dist/
 /main.onefile-build/
-nuitka-crash-report.xml
+/nuitka-crash-report.xml
+
 
 # pycache
 /__pycache__/
@@ -24,3 +25,5 @@ nuitka-crash-report.xml
 /src/utils/pages/__pycache__/
 /src/utils/on_start/__pycache__/
 /src/utils/api/__pycache__/
+
+/nuitka_bisect/

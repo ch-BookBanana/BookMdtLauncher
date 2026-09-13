@@ -66,9 +66,8 @@ class mdtScanner(QObject):
     def __init__(self, settings, parent=None, root=None):
         super().__init__(parent)
         self.settings = settings
-        self.timer = QThTimer.taskP(3000, lambda e: self.checkGame())
-        self.timer.setParent(self)
-        # 图标周期检查自管理：检测到变化 emit on_game_changed("iconChanged")
+        self.timer = None
+        self.checkGame()
         self.icon_timer = QThTimer.taskP(1000, lambda e: self.check_icons())
         self.icon_timer.setParent(self)
         self.on_game_changed.connect(print)
@@ -466,7 +465,7 @@ class mdtScanner(QObject):
             return data
         return data   
 
-    def checkGame(self):
+    def _checkGame(self):
         mdts = self.getMdts()
         setting = []
         for _, value in self.settings["gameList"].items():
@@ -506,6 +505,15 @@ class mdtScanner(QObject):
                         break
         # 5. 维护 defaultGame：缺失/失效时回退到第一个有效副本
         self.ensure_default_game()
+
+    def checkGame(self):
+        """立即检查一次。"""
+        QThTimer.task(0, lambda e: self._checkGame())
+        if self.timer is None:
+            self.timer = QThTimer.taskP(3000, lambda e: self._checkGame())
+            self.timer.setParent(self)
+        else:
+            self.timer.start()
 
     def ensure_default_game(self):
         """修正 settings['defaultGame']：无副本 → None；失效/缺失 → 第一个有效副本。

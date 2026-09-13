@@ -42,3 +42,21 @@ class Game(Page):
             self.todoText.setAlignment(Qt.AlignCenter)
             self.todoText.setStyleSheet("font-size: 20px;")
             self.layout.addWidget(self.todoText,1)
+
+        def open_manage(self, game):
+            page = self.gameManage(game, self, self.root)
+
+        class gameManage(QWidget):
+            def __init__(self, game, parent=None, root=None):
+                super().__init__()
+                self.parent = parent
+                self.root = root
+                self.game = game
+                self.init_wid()
+
+            def init_wid(self):
+                self.layout = QVBoxLayout(self)
+                self.layout.setContentsMargins(0, 0, 0, 0)
+                self.layout.setSpacing(0)
+
+

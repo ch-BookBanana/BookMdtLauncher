@@ -812,6 +812,7 @@ class Download(Page):
                             self.viewport_h = 0
                             self.total_count = 0
                             self.start_index = 0
+                            self._hidden = False
                             self.init_wid()
                             self._update_visible()
                             self._app_state_conn = None
@@ -886,10 +887,20 @@ class Download(Page):
 
                         def showEvent(self, event):
                             super().showEvent(event)
+                            self._hidden = False
                             self.scroll_slider.setVisible(
                                 self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
                             )
                             self._update_visible()
+
+                        def hideEvent(self, event):
+                            super().hideEvent(event)
+                            self._hidden = True
+                            # 隐藏时销毁 item 池，释放图片等资源；显示时由 showEvent 重建
+                            for it in self.itemw:
+                                it.setParent(None)
+                                it.deleteLater()
+                            self.itemw.clear()
 
                         def _check_all_hover(self):
                             for w in self.itemw:
@@ -909,6 +920,8 @@ class Download(Page):
                             super().deleteLater()
 
                         def _update_visible(self):
+                            if self._hidden:
+                                return
                             if self.total_count == 0:
                                 for w in self.itemw:
                                     w.hide()
