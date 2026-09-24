@@ -42,10 +42,6 @@ class Start(Page):
         self.root.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
         self.root.launcher.lifecycle_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
         self.root.launcher.lifecycle_finished.connect(lambda: self.left.main.setCurrentIndex(0))
-        self.root.launcher.appdata_save_step.connect(self._on_appdata_save_step)
-        self.root.launcher.appdata_save_done.connect(self._on_appdata_save_done)
-        self.root.launcher.appdata_import_started.connect(self._on_appdata_import_started)
-        self.root.launcher.appdata_import_done.connect(self._on_appdata_import_done)
         self.root.launcher.log.connect(lambda dic: (self.root.logger.info("[launcher]"+dic["text"]) if dic["type"] == "info" else self.root.logger.error("[launcher]"+dic["text"])))
 
     def changeGame(self, game=None):
@@ -54,45 +50,6 @@ class Start(Page):
         self.root.settings["defaultGame"] = game if game in mdts else (mdts[0] if mdts else None)
         self.root.signals.emit("start_gameChanged", game)
         self.left.refresh()
-
-    def _on_appdata_save_step(self, step):
-        """appdataCopy 保存步骤：切换两个界面到 index 5 并设置 finished 文本。"""
-        try:
-            self.left.main.setCurrentIndex(5)
-            self.main.stack.setCurrentIndex(5)
-            self.left.main.finished.setStatus(step)
-            self.main.finished.setStatus(step)
-        except Exception:
-            pass
-
-    def _on_appdata_save_done(self):
-        """appdataCopy 保存完成：两个界面切回 index 0。"""
-        try:
-            self.main.stack.setCurrentIndex(0)
-            self.left.main.setCurrentIndex(0)
-        except Exception:
-            pass
-
-    def _on_appdata_import_started(self):
-        """appdataCopy 开始导入数据：两个界面切到 finished 页显示"正在导入数据"。"""
-        try:
-            text = self.root.langer.get("wid.pages.start.finished.importing")
-            self.left.main.finished.label.setText(text)
-            self.main.finished.label.setText(text)
-            self.left.main.setCurrentIndex(5)
-            self.main.stack.setCurrentIndex(5)
-        except Exception:
-            pass
-
-    def _on_appdata_import_done(self):
-        """appdataCopy 导入完成：切回 launch 页等待游戏启动。"""
-        try:
-            self.main.stack.setCurrentIndex(3)
-            self.left.main.setCurrentIndex(3)
-        except Exception:
-            pass
-
-            
 
     class Left(Leftw):
         def __init__(self, parent=None, root=None):
@@ -199,7 +156,6 @@ class Start(Page):
                 self.world = self.World(self,self.root)
                 self.launch = self.Launch(self,self.root)
                 self.suspend = self.Suspend(self,self.root)
-                self.finished = self.Finished(self,self.root)
 
             class Pages(QWidget):
                 def __init__(self, parent=None, root=None):
@@ -321,27 +277,6 @@ class Start(Page):
                 def __init__(self, parent=None, root=None):
                     super().__init__(parent,root)
 
-            class Finished(Pages):
-                """保存游戏数据进度页（index 5）。"""
-                def __init__(self, parent=None, root=None):
-                    super().__init__(parent,root)
-                    self.init_wid()
-
-                def init_wid(self):
-                    self.layout = QVBoxLayout(self)
-                    self.layout.setContentsMargins(30,50,30,50)
-                    self.layout.setSpacing(10)
-                    self.layout.setAlignment(Qt.AlignCenter)
-                    self.label = QLabel(self)
-                    self.label.setProperty("wid", "title")
-                    self.label.setWordWrap(True)
-                    self.label.setAlignment(Qt.AlignCenter)
-                    self.label.setStyleSheet("font-size:14px;")
-                    self.layout.addWidget(self.label)
-
-                def setStatus(self, step):
-                    self.label.setText(self.root.langer.get("wid.pages.start.finished.save%d" % step))
-
     class Main(Mainw):
         def __init__(self,parent=None,root=None):
             super().__init__(parent,root)
@@ -364,7 +299,6 @@ class Start(Page):
             self.world = self.World(self,self.root)
             self.launch = self.Launch(self,self.root)
             self.log = self.Log(self,self.root)
-            self.finished = self.Finished(self,self.root)
 
 
 
@@ -728,31 +662,6 @@ class Start(Page):
             def __init__(self,parent=None,root=None):
                 super().__init__(parent,root)
                 self.setAttribute(Qt.WA_StyledBackground,True)
-
-        class Finished(_Main):
-            """保存游戏数据进度页（index 5）。"""
-            def __init__(self,parent=None,root=None):
-                super().__init__(parent,root)
-                self.setAttribute(Qt.WA_StyledBackground,True)
-                self.init_wid()
-
-            def init_wid(self):
-                self.layout = QVBoxLayout(self)
-                self.layout.setContentsMargins(30,30,30,30)
-                self.layout.setSpacing(10)
-                self.layout.setAlignment(Qt.AlignCenter)
-                self.label = QLabel(self)
-                self.label.setProperty("wid", "title")
-                self.label.setWordWrap(True)
-                self.label.setAlignment(Qt.AlignCenter)
-                self.label.setStyleSheet("font-size:16px;")
-                self.layout.addWidget(self.label)
-
-            def setStatus(self, step):
-                self.label.setText(self.root.langer.get("wid.pages.start.finished.save%d" % step))
-
-
-
 
         class Backg(QWidget):
             def __init__(self,parent=None,root=None):

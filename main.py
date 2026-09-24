@@ -69,6 +69,7 @@ try:
             for i in [
                 "BML",
                 "BML/logs",
+                "BML/badSettings",
                 "BML/.Mindustrys"
             ]:
                 os.makedirs(getPath(i), exist_ok=True)
@@ -105,34 +106,7 @@ try:
             }
             self.settings = copy.deepcopy(self.defsettings)
             app.aboutToQuit.connect(self.saveSettings)
-
-            def deep_merge_settings(default, file_settings):
-                for key, value in file_settings.items():
-                    if key not in default:
-                        continue
-                    if isinstance(default[key], dict) and isinstance(value, dict):
-                        deep_merge_settings(default[key], value)
-                    else:
-                        default[key] = value
-
-            try:
-                settings_path = getPath("BML/settings.json")
-                if not os.path.exists(settings_path):
-                    self.logger.warning("settings file not found, using default settings")
-                else:
-                    with open(settings_path, "r", encoding="utf-8") as f:
-                        self.logger.info("loading settings...")
-                        file_settings = json.load(f)
-                        deep_merge_settings(self.settings, file_settings)
-            except Exception as e:
-                self.logger.error("ERR:Fail to load settings, using default setting"
-                                "\n--Exception: " + str(e), exc_info=True)
-                self.settings = copy.deepcopy(self.defsettings)
-                try:
-                    with open(settings_path, "r", encoding="utf-8") as f:
-                        self.logger.warning("Error setting: \n" + str(e), exc_info=True)
-                except:
-                    pass
+            self.loadSettings()
 
             self.langer = self.Langer(self, self)
             # 工具模块日志 i18n：注入 langer.get 翻译函数（未注入时日志回退为 key 本身）
@@ -272,19 +246,166 @@ try:
             self.settings["theme"] = 1 if theme else 0
             self.apply_theme()
 
+        # ==================== settings 读写 ====================
+        # settings.json 的读写统一走这里：
+        #   写 → 临时文件 + os.replace 原子替换（不会留下写了一半的文件）
+        #   读 → 失败时原件备份到 BML/badSettings/，再回退默认值
+        _SETTINGS_PATH = "BML/settings.json"
+        _BAD_DIR = "BML/badSettings"   # 损坏 settings 的备份目录
+        _BAD_KEEP = 5                  # 损坏备份最多保留份数
+
+        @staticmethod
+        def _atomic_write_json(path, data):
+            """原子写入 JSON：写同目录唯一临时文件并刷盘，再 os.replace 覆盖目标。
+
+            任意时刻磁盘上的目标文件要么是旧内容、要么是新内容；
+            临时名带 pid 与纳秒时间戳，多线程同时保存也不会互相踩踏。
+            """
+            tmp = f"{path}.{os.getpid()}-{time.time_ns()}.tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                Main._replace_with_retry(tmp, path)
+            except BaseException:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+
+        @staticmethod
+        def _replace_with_retry(src, dst, attempts=4):
+            """os.replace 在 Windows 上可能被杀毒/索引临时占用，短重试以躲开瞬时锁。"""
+            for i in range(attempts):
+                try:
+                    os.replace(src, dst)
+                    return
+                except PermissionError:
+                    if i == attempts - 1:
+                        raise
+                    time.sleep(0.05)
+
+        @staticmethod
+        def _read_settings_file(path):
+            """读取 settings.json 并返回 dict；内容为空或不是对象时抛异常。"""
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("root is not a JSON object")
+            return data
+
+        @classmethod
+        def _merge_settings(cls, default, file_settings, path=""):
+            """把文件里的设置合并进默认设置（就地），返回被拒绝的键说明列表。
+
+            只接受默认值里已有的键（多余键丢弃，用于淘汰已删除的设置项）；
+            类型不符的键保留默认值并记录；dict 递归合并，其余叶子直接覆盖。
+            默认值为 None 的键推不出类型（如 language/defaultGame），一律放行。
+            """
+            issues = []
+            for key, value in file_settings.items():
+                if key not in default:
+                    continue
+                cur = default[key]
+                if isinstance(cur, dict):
+                    if isinstance(value, dict):
+                        issues += cls._merge_settings(cur, value, f"{path}{key}.")
+                    else:
+                        issues.append(f"{path}{key}: object -> {type(value).__name__}")
+                elif cls._accepts_value(cur, value):
+                    default[key] = value
+                else:
+                    issues.append(f"{path}{key}: {type(cur).__name__} -> {type(value).__name__}")
+            return issues
+
+        @staticmethod
+        def _accepts_value(default_value, value):
+            """判断文件里的值能否覆盖默认值（None 默认值放行；bool 与 int 严格区分）。"""
+            if default_value is None:
+                return True
+            if isinstance(default_value, bool) or isinstance(value, bool):
+                return isinstance(default_value, bool) and isinstance(value, bool)
+            if isinstance(default_value, (int, float)):
+                return isinstance(value, (int, float))
+            return isinstance(value, type(default_value))
+
+        def _clean_settings_tmp(self):
+            """清理上次写盘中断残留的临时文件（settings.json.<pid>-<ns>.tmp）。"""
+            try:
+                head = os.path.basename(self._SETTINGS_PATH) + "."
+                folder = getPath("BML")
+                for name in os.listdir(folder):
+                    if name.startswith(head) and name.endswith(".tmp"):
+                        os.remove(os.path.join(folder, name))
+            except Exception:
+                pass
+
+        def _backup_bad_settings(self, path, reason):
+            """把有问题的 settings 备份到 BML/badSettings/settings.<时间戳>.json，返回备份路径。"""
+            try:
+                if not os.path.isfile(path):
+                    return None
+                folder = getPath(self._BAD_DIR)
+                os.makedirs(folder, exist_ok=True)
+                name = "settings.%s.json" % datetime.now().strftime("%Y%m%d-%H%M%S")
+                dest = os.path.join(folder, name)
+                shutil.copy2(path, dest)
+                self.logger.warning("bad settings backed up: %s/%s --%s" % (self._BAD_DIR, name, reason))
+                self._prune_bad_settings()
+                return dest
+            except Exception as e:
+                try:
+                    self.logger.error("Failed to back up settings\n--Exception: " + str(e))
+                except Exception:
+                    pass
+                return None
+
+        def _prune_bad_settings(self):
+            """只保留最近 _BAD_KEEP 份损坏备份，避免目录堆积（文件名按时间戳排序即时间序）。"""
+            try:
+                folder = getPath(self._BAD_DIR)
+                names = sorted(n for n in os.listdir(folder)
+                               if n.startswith("settings.") and n.endswith(".json"))
+                for name in names[:-self._BAD_KEEP]:
+                    os.remove(os.path.join(folder, name))
+            except Exception:
+                pass
+
+        def loadSettings(self):
+            """加载 settings.json：合并进默认值；解析失败或存在非法值时备份原文件。"""
+            self._clean_settings_tmp()
+            path = getPath(self._SETTINGS_PATH)
+            if not os.path.exists(path):
+                self.logger.warning("settings file not found, using default settings")
+                return
+            try:
+                self.logger.info("loading settings...")
+                file_settings = self._read_settings_file(path)
+            except Exception as e:
+                self.logger.error("ERR:Fail to load settings, using default setting"
+                                  "\n--Exception: " + str(e), exc_info=True)
+                self.settings = copy.deepcopy(self.defsettings)
+                self._backup_bad_settings(path, (str(e).splitlines() or ["unreadable"])[0])
+                return
+            issues = self._merge_settings(self.settings, file_settings)
+            if issues:
+                self.logger.warning("settings has invalid values, fallback to default: " + "; ".join(issues))
+                self._backup_bad_settings(path, "invalid values")
+
         def saveSettings(self):
             try:
-                settings_path = getPath("BML/settings.json")
-                with open(settings_path, "w", encoding="utf-8") as f:
-                    json.dump(self.settings, f, separators=(',', ':'), ensure_ascii=False)
+                Main._atomic_write_json(getPath(self._SETTINGS_PATH), self.settings)
                 try:
                     self.logger.info(self.langer.get("log.info.savesettings"))
-                except:
+                except Exception:
                     self.logger.info("Settings saved")
             except Exception as e:
                 try:
                     self.logger.error(self.langer.get("log.error.savesettings") + "\n--Exception: " + str(e), exc_info=True)
-                except:
+                except Exception:
                     self.logger.error("Failed to save settings\n--Exception: " + str(e), exc_info=True)
 
         def apply_theme(self):

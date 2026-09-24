@@ -1393,13 +1393,7 @@ class Download(Page):
                                 self.root.logger.error("[mdt-download] 创建目录失败: %s" % e)
                                 return
                             dest_path = os.path.join(target_dir, "mdt.jar")
-                            # appdataCopy：仅原版（Anuken/Mindustry）且版本号早于 126（不含 126）时置 True
-                            # （v126 起才支持 MINDUSTRY_DATA_DIR，更早版本数据目录会落在系统 AppData）
-                            _appdata_copy = False
                             _tpl = getattr(self.parent, "template", None)
-                            if getattr(_tpl, "releaseRepo", None) == "Anuken/Mindustry":
-                                _ver_m = re.match(r'^(\d+)', str(self.data.get("name") or ""))
-                                _appdata_copy = bool(_ver_m and int(_ver_m.group(1)) < 126)
                             info = {
                                 "id": hashlib.md5(dest_path.encode("utf-8")).hexdigest()[:8],
                                 "name": name,
@@ -1410,7 +1404,6 @@ class Download(Page):
                                 "url": url,
                                 "dest": dest_path,
                                 "created_at": int(time.time()),
-                                "appdataCopy": _appdata_copy,
                             }
                             try:
                                 with open(os.path.join(target_dir, "downloading.json"), "w", encoding="utf-8") as f:
@@ -1452,22 +1445,18 @@ class Download(Page):
                                 self.root.mdtScanner._retrieve_mdt_data(name)
                                 dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
                                 if os.path.isfile(dfile):
-                                    # 把下载时记录的类图标路径 / appdataCopy 合并进 BML.json
+                                    # 把下载时记录的类图标路径合并进 BML.json
                                     try:
                                         with open(dfile, "r", encoding="utf-8") as f:
                                             dinfo = json.load(f)
                                         icon_path = dinfo.get("icon_path")
-                                        appdata_copy = dinfo.get("appdataCopy")
-                                        if icon_path or appdata_copy is not None:
+                                        if icon_path:
                                             bfile = getPath("BML/.Mindustrys/%s/BML.json" % name)
                                             bdata = {}
                                             if os.path.isfile(bfile):
                                                 with open(bfile, "r", encoding="utf-8") as f:
                                                     bdata = json.load(f)
-                                            if icon_path:
-                                                bdata["icon_path"] = icon_path
-                                            if appdata_copy is not None:
-                                                bdata["appdataCopy"] = appdata_copy
+                                            bdata["icon_path"] = icon_path
                                             with open(bfile, "w", encoding="utf-8") as f:
                                                 json.dump(bdata, f, ensure_ascii=False, separators=(",", ":"))
                                     except Exception:

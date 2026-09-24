@@ -253,14 +253,6 @@ def _java_cancel_all(root):
             pass
 
 
-def _resume_appdata_saves(root):
-    """启动时续传未完成的 appdataCopy 保存任务（launcher 内部处理 step=1/step=2）。"""
-    try:
-        root.launcher.resume_appdata_saves()
-    except Exception as e:
-        root.logger.warning(t(root.langer.get("log.appdata.resume_scan_error"), repr(e)))
-
-
 def attach(root):
     """把 Java 下载流程的 UI 回调/辅助函数绑定为 root（Main）实例方法。
 
@@ -273,6 +265,5 @@ def attach(root):
         _on_java_paused_changed, _on_java_flow_cancelled, _on_java_cancelled,
         _on_java_finished, _on_java_download_done,
         _java_show_status, _java_go_home, _java_cancel_all,
-        _resume_appdata_saves,
     ):
         setattr(root, fn.__name__, types.MethodType(fn, root))

@@ -85,12 +85,6 @@ BookMDTLauncher/
 ├── main.py                   # 主程序（UI 与全部主逻辑）
 ├── nuitka.cmd                # Nuitka 打包脚本
 ├── pyinstaller.cmd           # PyInstaller 打包脚本
-├── BML/                      # 运行时数据（exe 同目录）
-│   ├── .Java/                # 自动下载的 JDK
-│   ├── .Mindustrys/          # 游戏副本（每实例含 mdt.jar / icon.png / BML.json）
-│   ├── .tmp/                 # 缓存与下载任务状态
-│   ├── logs/                 # 日志
-│   └── settings.json         # 用户设置
 └── src/
     ├── assets/               # 图标资源
     ├── lang/                 # 语言翻译

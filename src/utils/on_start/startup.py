@@ -24,7 +24,7 @@ from .java import startup_resume_java
 
 
 def register(root):
-    """注册 Java、游戏和 appdataCopy 的启动恢复流程。"""
+    """注册 Java 与游戏的启动恢复流程。"""
     root.java_flow = None
     root._java_flow_cancelled = False
 
@@ -41,4 +41,3 @@ def register(root):
         QTimer.singleShot(300, lambda: startup_resume_java(root))
 
     QTimer.singleShot(400, lambda: resume_mdt_downloads(root))
-    QTimer.singleShot(500, root._resume_appdata_saves)
