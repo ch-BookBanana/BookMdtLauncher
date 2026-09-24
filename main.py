@@ -646,22 +646,25 @@ try:
                 self._drag_mousepos = event.globalPosition().toPoint()
 
             def drag_move(self, event):
-                # 拖动中：按鼠标位移移动窗口（越界限制在可用桌面内）
+                # 拖动中：按鼠标位移移动窗口（越界限制在多屏可用桌面内）
                 if not self._drag_pressed or self._drag_mousepos is None:
                     return
                 if self.isMaximized():
                     self.showNormal()
                 self._drag_moving = True
-                screensize = QApplication.primaryScreen().availableGeometry()
+                # 多屏：取所有屏幕可用区域的并集，避免用主屏尺寸把窗口夹在单屏内
+                area = None
+                for screen in QApplication.screens():
+                    g = screen.availableGeometry()
+                    area = g if area is None else area.united(g)
+                if area is None:
+                    area = QApplication.primaryScreen().availableGeometry()
+                # 至少保留 40px 在桌面范围内，防止窗口被拖出视野
+                min_x, max_x = area.left(), area.right() + 1 - 40
+                min_y, max_y = area.top(), area.bottom() + 1 - 40
                 movpos = self._drag_winpos + event.globalPosition().toPoint() - self._drag_mousepos
-                if movpos.x() < 0:
-                    movpos.setX(0)
-                elif movpos.x() > screensize.width() - 40:
-                    movpos.setX(screensize.width() - 40)
-                if movpos.y() < 0:
-                    movpos.setY(0)
-                elif movpos.y() > screensize.height() - 40:
-                    movpos.setY(screensize.height() - 40)
+                movpos.setX(max(min_x, min(movpos.x(), max_x)))
+                movpos.setY(max(min_y, min(movpos.y(), max_y)))
                 self.move(movpos)
 
             def drag_end(self, event=None):
@@ -1719,6 +1722,18 @@ try:
                             self.root.window.hide()
                         else:
                             self.root.window.close()
+
+                    def mousePressEvent(self, event):
+                        self.root.window.drag_begin(event)
+                        super().mousePressEvent(event)
+
+                    def mouseMoveEvent(self, event):
+                        self.root.window.drag_move(event)
+                        super().mouseMoveEvent(event)
+
+                    def mouseReleaseEvent(self, event):
+                        self.root.window.drag_end(event)
+                        super().mouseReleaseEvent(event)
 
                     class GitHub(QPushButton):
                         def __init__(self, parent=None, root=None):

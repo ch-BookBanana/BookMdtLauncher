@@ -540,36 +540,51 @@ class Download(Page):
                             return None
 
                     @staticmethod
-                    def _sort_versions(versions):
-                        def _key(k):
-                            if not isinstance(k, str):
-                                return float(k) if isinstance(k, (int, float)) else 0.0
-                            m = re.match(r'v?(\d+(?:\.\d+)*)', k)
-                            if m:
-                                try:
-                                    return float(m.group(1))
-                                except Exception:
-                                    return 0.0
-                            return 0.0
+                    def _time_of(item):
+                        """条目时间戳：classify 时把 published_at 归一为 'YYYY-MM-DD HH:MM:SS'，字典序即时间序。"""
+                        return (item.get("time") or "") if isinstance(item, dict) else ""
 
-                        def _ver_key(k):
-                            # 版本号转可比较元组，兼容多段版本（如 146.1.0.0.0）
-                            s = str(k)
-                            m = re.match(r'^(\d+)(?:\.(\d+))*$', s)
-                            if m:
-                                try:
-                                    return tuple(int(p) for p in m.groups() if p is not None)
-                                except ValueError:
-                                    return (0,)
-                            return (0,)
-
+                    @classmethod
+                    def _sort_versions(cls, versions):
+                        """分类与组内条目全部按时间倒序（分类取组内最新时间）。"""
                         out = {}
-                        for cls_key in sorted(versions.keys(), key=_key, reverse=True):
+                        for cls_key in sorted(
+                            versions.keys(),
+                            key=lambda k: max((cls._time_of(v) for v in versions[k].values()), default=""),
+                            reverse=True,
+                        ):
+                            bucket = versions[cls_key]
                             out[cls_key] = {
-                                n: versions[cls_key][n]
-                                for n in sorted(versions[cls_key].keys(), key=_ver_key, reverse=True)
+                                n: bucket[n]
+                                for n in sorted(bucket.keys(), key=lambda n: cls._time_of(bucket[n]), reverse=True)
                             }
                         return out
+
+                    @classmethod
+                    def _merge_releases(cls, versions, fetched):
+                        """按时间窗合并本次抓取结果（fetched: [(分类, 条目), ...]）。
+
+                        以本次抓取结果覆盖的 [最旧, 最新] 时间区间为界：
+                        该区间内的缓存条目全部删除，换成刚抓到的内容
+                        （release 可能被编辑、撤回或重发，区间内的旧条目不可信）；
+                        区间外（更早的历史版本）保持不动，增量搜索不会丢历史。
+                        抓取结果为空时不做任何删除。
+                        """
+                        if not fetched:
+                            return versions
+                        times = [t for t in (cls._time_of(d) for _, d in fetched) if t]
+                        if times:
+                            lo, hi = min(times), max(times)
+                            for cls_key in list(versions.keys()):
+                                bucket = versions[cls_key]
+                                for name in [n for n, d in bucket.items()
+                                             if lo <= cls._time_of(d) <= hi]:
+                                    del bucket[name]
+                                if not bucket:
+                                    del versions[cls_key]
+                        for category, d in fetched:
+                            versions.setdefault(category, {})[d["name"]] = d
+                        return versions
 
                     def _fetch_and_merge(self, pages, per_page, cache):
                         api = self.root.githubAPI
@@ -600,6 +615,7 @@ class Download(Page):
                                 except Exception as e:
                                     self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] intro fetch failed: {e}")
 
+                        fetched = []
                         for r in releases_all:
                             try:
                                 d = self.classify(r)
@@ -609,7 +625,10 @@ class Download(Page):
                             category = self._normalize_class(d.get('class'))
                             if category is None or d.get('name') is None:
                                 continue
-                            cache["versions"].setdefault(category, {})[d["name"]] = d
+                            fetched.append((category, d))
+
+                        cache.setdefault("versions", {})
+                        self._merge_releases(cache["versions"], fetched)
 
                         cache["intro"] = cache.get("intro", "")
                         if intro_resp is not None and getattr(intro_resp, 'status_code', None) == 200:
@@ -1065,7 +1084,7 @@ class Download(Page):
                                 # right-side action buttons
                                 self.btn_download = self.RBtn(getPath("src/assets/buttons/download.png"), "wid.pages.download.item.download", self, self.root)
                                 self.layout.addWidget(self.btn_download, 0)
-                                self.btn_download.clicked.connect(lambda:self.root.window.floatingStack.add_page(self.template.Download(self,self.root,self.data,self.pixmap)))
+                                self.btn_download.clicked.connect(lambda:self.root.window.floatingOverlay.add_page(self.template.Download(self,self.root,self.data)))
 
                                 self.btn_repoInfo = self.RBtn(getPath("src/assets/nav/menu.png"), "wid.pages.download.item.repoInfo", self, self.root)
                                 self.layout.addWidget(self.btn_repoInfo, 0)
@@ -1128,17 +1147,22 @@ class Download(Page):
                                     btn.lighting(light)
 
                     class Download(QWidget):
-                        def __init__(self, parent=None, root=None, data=None, pixmap=None):
+                        """下载命名弹窗：作为叠加浮层（FloatingOverlay）页面显示。
+
+                        只保留「名称输入 + 校验提示 + 确定/关闭」；release 的图标、标题、
+                        发布时间由调用方 Item 自行呈现，此处不再重复展示。"""
+
+                        def __init__(self, parent=None, root=None, data=None):
                             super().__init__()
                             self.parent = parent
                             self.root = root
                             self.data = data
-                            self.pixmap = pixmap
                             self._final_name = None
                             self._validate_key = None
                             self._closed = False
                             self._dl_timer = None
                             self._task_list = []
+                            # 遮罩与居中由叠加浮层统一提供，本页自身即弹窗面板
                             self.setAttribute(Qt.WA_StyledBackground, True)
                             self.setProperty("wid","color2")
                             self.init_wid()
@@ -1148,83 +1172,70 @@ class Download(Page):
                             self._start_validation()
 
                         def init_wid(self):
-                            self.lay = QVBoxLayout(self)
-                            self.lay.setSpacing(0)
-                            self.lay.setContentsMargins(0, 0, 0, 0)
-                            self.lay.setAlignment(Qt.AlignCenter)
+                            # 弹窗尺寸：仅「关闭行 + 分割线 + 名称输入框 + 提示/确定行」，
+                            # 宽度取 320、高度 190，避免 400x130 时过于扁长
+                            self.setFixedSize(320, 190)
 
-                            self.main = QWidget()
-                            self.main.setAttribute(Qt.WA_StyledBackground, True)
-                            self.main.setFixedSize(400, 300)
-                            self.lay.addWidget(self.main,0)
-
-                            self.layout = QVBoxLayout(self.main)
+                            self.layout = QVBoxLayout(self)
                             self.layout.setSpacing(0)
-                            self.layout.setContentsMargins(15, 15, 15, 15)
-                            self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+                            self.layout.setContentsMargins(0, 0, 0, 0)
+                            self.layout.setAlignment(Qt.AlignTop)
 
+                            # 关闭按钮行：release 标题 + ×（不再展示图标/发布时间）
+                            self.top = QWidget()
+                            self.top.setProperty("wid", "color2")
+                            self.top.setFixedHeight(30)
+                            self.layout.addWidget(self.top, 0)
+                            self.top_layout = QHBoxLayout(self.top)
+                            self.top_layout.setContentsMargins(15, 0, 3, 0)
+                            self.top_layout.setSpacing(0)
 
-                            self.h1 = QWidget()
-                            self.h1.setStyleSheet("background: transparent")
-                            self.layout.addWidget(self.h1, 0)
-                            self.h1_layout = QHBoxLayout(self.h1)
-                            self.h1_layout.setContentsMargins(0, 0, 0, 0)
-                            self.h1_layout.setSpacing(15)
-                            self.h1_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-                            self.icon = QLabel()
-                            self.icon.setFixedSize(48, 48)
-                            self.h1_layout.addWidget(self.icon, 0)
-
-                            self.h1w = QWidget()
-                            self.h1w.setStyleSheet("background: transparent")
-                            self.h1_layout.addWidget(self.h1w, 1)
-                            self.h1w_layout = QVBoxLayout(self.h1w)
-                            self.h1w_layout.setContentsMargins(0, 0, 0, 0)
-                            self.h1w_layout.setSpacing(4)
-                            self.h1w_layout.setAlignment(Qt.AlignVCenter)
-
+                            # 标题：占满剩余宽度，过长时裁切（悬停看全文）
                             self.title = QLabel(self.data.get("title") or self.data.get("name") or "")
-                            self.title.setProperty("wid", "text")
-                            self.title.setStyleSheet("font-size: 18px; font-weight: bold;")
-                            self.title.setWordWrap(True)
-                            self.h1w_layout.addWidget(self.title, 0)
+                            self.title.setProperty("wid", "title")
+                            self.title.setStyleSheet("font-size: 16px;")
+                            self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+                            self.title.setToolTip(self.title.text())
+                            self.top_layout.addWidget(self.title, 1)
 
-                            self.time = QLabel()
-                            self.time.setProperty("wid", "title")
-                            self.time.setStyleSheet("font-size: 13px;")
-                            self.h1w_layout.addWidget(self.time, 0)
+                            self.btn_close = QPushButton()
+                            self.btn_close.setFixedSize(24, 24)
+                            self.btn_close.setProperty("wid", "tbtn")
+                            self.btn_close.clicked.connect(lambda: self._close())
+                            self.top_layout.addWidget(self.btn_close, 0)
 
-
-                            self.layout.addSpacing(15)
-
-
-                            self.line = QWidget()
-                            self.line.setProperty("wid", "line")
+                            # 分割线（同 GithubSetting：贯穿整宽）
+                            self.line = QWidget(self)
                             self.line.setFixedHeight(1)
+                            self.line.setProperty("wid", "line")
                             self.layout.addWidget(self.line, 0)
 
-                            self.layout.addStretch(1)
+                            # 内容区：输入框 + 提示/确定行
+                            self.body = QWidget()
+                            self.body.setProperty("wid", "color2")
+                            self.body.setStyleSheet("background: transparent")
+                            self.layout.addWidget(self.body, 1)
+                            self.body_layout = QVBoxLayout(self.body)
+                            self.body_layout.setSpacing(0)
+                            self.body_layout.setContentsMargins(15, 0, 15, 15)
+                            self.body_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
-                            self.label = QLabel()
-                            self.label.setFixedHeight(40)
-                            self.label.setStyleSheet("font-size: 18px;")
-                            self.label.setProperty("wid", "text")
-                            self.layout.addWidget(self.label, 0)
+                            # 上方弹性空隙：输入框靠下、提示/确定行贴右下角
+                            self.body_layout.addStretch(1)
 
                             # 名称输入框：默认 "界面名-版本"（自动去重 (1)(2)...）
                             self.input = QLineEdit()
                             self.input.setProperty("wid", "input")
                             self.input.setFixedHeight(32)
                             self.input.setClearButtonEnabled(True)
-                            self.layout.addWidget(self.input, 0)
+                            self.body_layout.addWidget(self.input, 0)
 
-                            self.layout.addSpacing(6)
+                            self.body_layout.addStretch(1)
 
-                            # 提示标签 + 确定按钮一行
+                            # 提示标签 + 确定按钮一行（确定按钮靠右）
                             self.bottom = QWidget()
                             self.bottom.setStyleSheet("background: transparent")
-                            self.layout.addWidget(self.bottom, 0)
+                            self.body_layout.addWidget(self.bottom, 0)
                             self.bottom_layout = QHBoxLayout(self.bottom)
                             self.bottom_layout.setContentsMargins(0, 0, 0, 0)
                             self.bottom_layout.setSpacing(8)
@@ -1244,19 +1255,15 @@ class Download(Page):
                             self.btn_ok.clicked.connect(self._on_ok)
                             self.bottom_layout.addWidget(self.btn_ok, 0)
 
-                            self.layout.addStretch(1)
-
                         def langing(self):
-                            time_str = (self.data or {}).get("time") or ""
-                            self.time.setText(t(self.root.langer.get("wid.pages.download.item.repoInfo.publish"), time_str))
-                            self.label.setText(self.root.langer.get("wid.pages.download"))
                             self.btn_ok.setText(self.root.langer.get("text.yes"))
+                            self.btn_close.setToolTip(self.root.langer.get("wid.top.close"))
                         
-                        def lighting(self, light):
-                            if self.pixmap is not None and not self.pixmap.isNull():
-                                self.icon.setPixmap(self.pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                            else:
-                                self.icon.clear()
+                        def lighting(self, light: bool):
+                            # 关闭按钮图标：随主题取色（本页其余控件由全局 qss 控制）
+                            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                            icon = change_color("src/assets/tribtns/close.png", color)
+                            self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
 
                         # ---------- 名称默认值与去重 ----------
                         @staticmethod
@@ -1276,8 +1283,12 @@ class Download(Page):
                             base = interface_name + "-" + (self.data.get("name") or "")
                             existing = set(self.root.mdtScanner.getMdts())
                             existing |= set((self.root.mdtScanner.getDownloadingMdts() or {}).keys())
-                            self.input.setText(self._unique_name(base, existing))
+                            default = self._unique_name(base, existing)
+                            self.input.setText(default)
+                            # 背景提示与默认名称一致：清空后仍能看到原名
+                            self.input.setPlaceholderText(default)
                             self.input.textChanged.connect(self._on_text_changed)
+                            self._apply_existing(existing)
 
                         # ---------- 名称校验：子线程收集 / 主线程应用 ----------
                         def _collect_mdts(self, event):
@@ -1302,8 +1313,12 @@ class Download(Page):
                             except Exception:
                                 pass
 
+                        def _close(self):
+                            """关闭弹窗：从叠加浮层出叠并销毁（on_close 会停止周期检测）。"""
+                            self.root.window.floatingOverlay.pop_page(self)
+
                         def on_close(self):
-                            """FloatingStack 出栈时同步调用：停止周期检测，防止对已销毁对象回调。"""
+                            """浮层出叠（或被清空）时同步调用：停止周期检测，防止对已销毁对象回调。"""
                             self._closed = True
                             self._stop_validation()
 
@@ -1328,8 +1343,11 @@ class Download(Page):
                         def _apply_validation(self, result):
                             if self._closed or isinstance(result, Exception):
                                 return
+                            self._apply_existing(result["mdts"] | result["downloading"])
+
+                        def _apply_existing(self, existing):
+                            """按现有游戏名集合校验输入框，并同步更新按钮/提示状态。"""
                             text = self.input.text().strip()
-                            existing = result["mdts"] | result["downloading"]
                             if not text:
                                 state, final, msg = "empty", None, ""
                             elif re.search(r'[\\/:*?"<>|]', text):
@@ -1423,8 +1441,8 @@ class Download(Page):
                             dl.error.connect(lambda err, d=dl: self.root.logger.error("[mdt-download:%s] %s" % (getattr(d, "task_id", "?"), err)))
                             dl.start()
                             self.root.logger.info("[mdt-download] 开始下载 %s: %s" % (name, url))
-                            # 删除自身，下载在后台由 QDownloader 自行处理
-                            self.root.window.floatingStack.pop_page()
+                            # 关闭弹窗，下载在后台由 QDownloader 自行处理
+                            self.root.window.floatingOverlay.pop_page(self)
 
                         def _on_dl_finished(self, dl, name, ok):
                             """下载完成收尾：释放 QDownloader；成功后刷新 BML.json 并删除 downloading.json。"""
@@ -1899,16 +1917,18 @@ class Download(Page):
 
                         self._search(job, on_done)
 
-                    @staticmethod
-                    def _sort_versions(versions):
+                    @classmethod
+                    def _sort_versions(cls, versions):
+                        # 分类仍是 alpha/beta 的固定顺序（它们只是分组标签），
+                        # 分组内部一律按发布时间倒序
                         order = {"alpha": 0, "beta": 1}
                         out = {}
                         for cls_key in sorted(versions.keys(), key=lambda k: order.get(k, 99)):
-                            out[cls_key] = dict(sorted(
-                                versions[cls_key].items(),
-                                key=lambda kv: kv[0],
-                                reverse=True
-                            ))
+                            bucket = versions[cls_key]
+                            out[cls_key] = {
+                                n: bucket[n]
+                                for n in sorted(bucket.keys(), key=lambda n: cls._time_of(bucket[n]), reverse=True)
+                            }
                         return out
 
                     def setClasss(self):
@@ -2001,6 +2021,7 @@ class Download(Page):
 
                         # Build full cache (including beta) for rendering
                         full_cache = cache or {"intro": "", "versions": {}}
+                        fetched = []
                         for r in releases_all:
                             try:
                                 d = self.classify(r)
@@ -2010,9 +2031,11 @@ class Download(Page):
                             category = self._normalize_class(d.get('class'))
                             if category is None or d.get('name') is None:
                                 continue
-                            full_cache.setdefault("versions", {}).setdefault(category, {})[d["name"]] = d
+                            fetched.append((category, d))
 
                         # intro is not used for MindustryX (introUrl None)
+                        full_cache.setdefault("versions", {})
+                        self._merge_releases(full_cache["versions"], fetched)
                         full_cache["versions"] = self._sort_versions(full_cache.get("versions", {}))
 
                         # Persist only alpha classes

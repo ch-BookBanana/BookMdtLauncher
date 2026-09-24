@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
 ![Language](https://img.shields.io/badge/Language-Python%20%2B%20PySide6-green)
-![Version](https://img.shields.io/badge/Version-V26--T0816-green)
+[![Version](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fgithub.com%2Fch-BookBanana%2FBookMdtLauncher%2Freleases.atom&query=%2F%2F*%5Blocal-name()%3D%27entry%27%5D%5B1%5D%2F*%5Blocal-name()%3D%27title%27%5D&label=Version&color=green)](https://github.com/ch-BookBanana/BookMdtLauncher/releases)
 
 **基于 PySide6 的 Windows 桌面端 Mindustry 启动器**
 
@@ -75,8 +75,7 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 项目使用 Python 3.13 + PySide6，目前使用 **Pyinstaller** 打包。
 
-> 由于在使用Nutika打包本项目时经常出现在开发者使用的设备上不可复现且难以排查的报错，故舍弃Nuitka转而使用Pyinstaller打包。即使Nuitka打包的产物体积更小且运行速度更快，但是排查问题所耗费的时间也绝非一个高中开发者所能承受的，如果能有大佬发现并指出我在代码、打包程序中任何可能影响Nutika使用的漏洞或不良编码习惯，麻烦提个Issue，谢谢！
-
+> Nuitka 打包错误已排查清楚，将在下一个版本发布时切回 Nuitka 打包。
 
 ## 项目结构
 
