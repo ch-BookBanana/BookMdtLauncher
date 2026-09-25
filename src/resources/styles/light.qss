@@ -44,6 +44,11 @@ QTextBrowser[wid="text"] {
     border: none;
     color: rgb(0, 0, 0);
 }
+QTextEdit[wid="console"] {
+    border: none;
+    font-family: Consolas, 'Courier New', monospace;
+    font-size: 12px;
+}
 QPushButton[wid="btn"] {
     background: transparent;
     border: 1px solid rgb(59, 59, 59);

@@ -80,6 +80,7 @@ try:
                             f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
                             f"\n-version: {init['version']}"
                             f"\n-BuildVersion: {init['BuildCode']}"
+                            f"\n-logLevel: {logging.getLevelName(self.logger.level)}"
                             "\n-----------------------------------------")
             self.defsettings = {
                 "language": None,
@@ -158,7 +159,10 @@ try:
 
             newGame/deleteGame/nameChanged → gameList 变化，落盘；
             iconChanged → 图标文件变化，失效 QPixmaps 缓存（下次引用重新加载）。
+            事件明细属于排查用信息，走 DEBUG：仅在 `--log=debug` 启动时输出，
+            避免日常日志被游戏目录变化刷屏。
             """
+            self.logger.debug(f"on_game_changed: {data}")
             etype = data.get("type")
             if etype in ("newGame", "deleteGame", "nameChanged"):
                 self.saveSettings()
@@ -168,11 +172,17 @@ try:
         def _cleanup_on_quit(self):
             """应用退出前的统一清理（aboutToQuit 时执行）。
 
-            顺序：隐藏托盘 → 停止下载线程 → 停止 QThTimer 后台线程 → 清理图片缓存。
-            QThTimer.shutdown() 在模块内也连接了 aboutToQuit，重复调用是幂等的。
+            顺序：隐藏托盘 → 结束游戏进程 → 停止下载线程 → 停止 QThTimer 后台线程
+            → 清理图片缓存。QThTimer.shutdown() 在模块内也连接了 aboutToQuit，重复调用是幂等的。
             """
             try:
                 self.tray.hide()
+            except Exception:
+                pass
+            # 结束启动器拉起的游戏进程：退出启动器就不再留下后台跑着的服务端
+            # blocking=True：退出流程已回不到事件循环，必须同步等进程真的死掉
+            try:
+                self.launcher.kill_game(blocking=True)
             except Exception:
                 pass
             # 取消 Java 下载/解压流程（保留 javaDownload.json，下次启动续传）
@@ -2711,20 +2721,45 @@ try:
                     self.root.logger.info(t(self.root.langer.get("log.info.trayTheme"), "light" if theme == "light" else "dark"))
 
         class Logger():
+            # 命令行 `--log=<级别>`（只认 `=`，级别取 LEVELS 的键，默认 info）
+            LOG_ARG = "--log="
+            LEVELS = {
+                "debug": logging.DEBUG,
+                "info": logging.INFO,
+                "warning": logging.WARNING,
+                "error": logging.ERROR,
+                "critical": logging.CRITICAL,
+            }
+
             def __init__(self, parent=None, root=None):
                 self.parent = parent
                 self.root = root
                 # 缓存已创建的 logger 实例，避免重复创建
                 self._loggers = {}
+                # 日志级别来自命令行（--log=debug），默认 INFO
+                self.level = self._parse_level()
                 # 初始化基础配置
                 self._setup_base_logging()
+
+            @classmethod
+            def _parse_level(cls):
+                """解析 `--log=<级别>`：只接受 `=` 形式，取值必须是 LEVELS 里的键。
+
+                `--log:debug`、`--log debug` 等写法一概不接收，回退 INFO。
+                """
+                for arg in sys.argv[1:]:
+                    if arg.startswith(cls.LOG_ARG):
+                        value = arg[len(cls.LOG_ARG):].strip().lower()
+                        if value in cls.LEVELS:
+                            return cls.LEVELS[value]
+                return logging.INFO
 
             def _setup_base_logging(self):
                 """
                 配置根 Logger ("Main") 的 Handler 和格式。
                 其他子 Logger 将共享这些 Handler。
                 """
-                loglevel = logging.INFO
+                loglevel = self.level
                 self.base_logger_name = "Main"
 
                 # 获取或创建主 logger
@@ -3098,7 +3133,9 @@ try:
             socket.deleteLater()
 
             main = Main(app)
-            main.window.show()
+            # --no-open：启动后不弹出窗口（后台/托盘运行，点托盘图标再显示）
+            if "--no-open" not in sys.argv[1:]:
+                main.window.show()
             code = app.exec()
             try:
                 sys.stdout.flush()

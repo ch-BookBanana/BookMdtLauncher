@@ -6,6 +6,7 @@ from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
 from .path_utils import getPath
 from .mdtScanner import mdtScanner
 from .javaScanner import javaScanner
+from .mdtLocker import mdtLocker
 
 _log = logging.getLogger("Main.MdtLauncher")
 
@@ -57,6 +58,7 @@ class mdtLauncher(QProcess):
         self._java_flow = None                 # Java 自动下载流程实例
         self._java_download_attempts = 0       # 自动下载尝试次数（防循环；游戏启动/结束时重置）
         self._java_cancelled = False           # 当前 Java 下载是否被用户取消（决定显示"已取消"还是"失败"）
+        self._locker = mdtLocker()             # 实例锁：运行期间禁止实例与本体改名/删除（数据目录不限）
 
     def _launch(self, mdt_name, java_path=None, args=None, data_path=None):
         """
@@ -81,6 +83,7 @@ class mdtLauncher(QProcess):
             "mdtName": None,
             "mdtPath": None,
             "mdtJar": None,
+            "mdtDataRoot": None,
             "mdtData": None,
             "javaPath": None,
             "args": None
@@ -112,6 +115,7 @@ class mdtLauncher(QProcess):
                 self.going = 0
                 self._emit_finished(-1)
                 return False
+        self.data["mdtDataRoot"] = data_root
         self.data["mdtData"] = os.path.join(data_root, "Mindustry")
         self._prepare_data_dir(data_root)
 
@@ -171,7 +175,7 @@ class mdtLauncher(QProcess):
         # APPDATA 指向数据根：游戏（含不支持 MINDUSTRY_DATA_DIR 的旧版本）会在其下使用 Mindustry/，
         # 与实际数据目录 <数据根>/Mindustry 一致
         self.envs.insert("MINDUSTRY_DATA_DIR", self.data["mdtData"])
-        self.envs.insert("APPDATA", os.path.dirname(self.data["mdtData"]))
+        self.envs.insert("APPDATA", self.data["mdtDataRoot"])
         self.setProcessEnvironment(self.envs)
         self.setProcessChannelMode(QProcess.SeparateChannels)
         # 工作目录改为 jar 所在目录（mdtJar 的同级目录），与启动器所在目录解耦
@@ -185,7 +189,15 @@ class mdtLauncher(QProcess):
         self.finished.connect(self._on_finished)
         self.errorOccurred.connect(self._on_error)
 
-        # ---------- 6. 启动（异步） ----------
+        # ---------- 6. 锁定实例 ----------
+        # 锁住实例目录本身与其中不在数据根里的全部内容：运行期间实例目录、mdt.jar 等
+        # 都改不了名也删不掉（用户手动改名或启动器自身的重命名都会被系统拒绝）；
+        # 数据根整棵子树不持句柄也不下钻：游戏要随时写存档/设置，里面的文件任人改。
+        locked, failed = self._locker.lock(self.data["mdtPath"],
+                                           exclude=[self.data["mdtDataRoot"]])
+        self.log.emit({"type": "info", "text": "Locked instance, data untouched (%d objects, %d failed): " % (locked, failed) + self.data["mdtPath"]})
+
+        # ---------- 7. 启动（异步） ----------
         self.log.emit({"type": "info", "text": "Starting process: " + self.data["javaPath"] + " -jar " + self.data["mdtJar"]})
         self.start(self.data["javaPath"],
                    self.data["args"] + ["-jar", self.data["mdtJar"]])
@@ -193,6 +205,38 @@ class mdtLauncher(QProcess):
     def run(self, mdt_name, java_path=None, args=None, data_path=None):
         """对外接口：启动服务端（异步），不阻塞调用线程。"""
         self._launch(mdt_name, java_path, args, data_path)
+
+    def kill_game(self, blocking=False):
+        """杀掉由本启动器拉起的游戏进程。
+
+        blocking=False：给界面上的「强制关闭」按钮用。只发 kill，进程退出照常走
+                        finished 信号，解锁与页面回退由既有的生命周期逻辑收尾。
+        blocking=True ：给启动器退出用。先断开全部信号再强杀——退出时 UI 正在销毁，
+                        finished / errorOccurred 里的回调打回去会碰到已经释放的窗口。
+                        强杀后同步等进程真正退出——退出流程不会再回到事件循环，不能
+                        指望异步的 finished 来收尾，实例锁也在这里自己放掉。
+
+        返回 True 表示确实结束了一个在跑的进程。
+        """
+        try:
+            if self.state() == QProcess.NotRunning:
+                if blocking:
+                    self._locker.unlock()
+                return False
+            _log.info("killing game process: pid=%s (blocking=%s)" % (self.processId(), blocking))
+            if not blocking:
+                self.kill()
+                return True
+            self._disconnect_signals()
+            self.kill()
+            if not self.waitForFinished(3000):
+                _log.warning("game process still alive after 3s: pid=%s" % self.processId())
+            self.going = 0
+            self._locker.unlock()
+            return True
+        except Exception as e:
+            _log.warning("kill game process failed: %r" % (e,))
+            return False
 
     # ================== 数据目录 ==================
     def _prepare_data_dir(self, data_root):
@@ -346,6 +390,11 @@ class mdtLauncher(QProcess):
 
     def _emit_finished(self, code: int):
         """内部统一发出 lifecycle_finished 信号（只发一次），并做清理。"""
+        # 先解锁：信号一发 UI 就回主界面，不能让残留的锁挡住随后的删除/更新操作
+        try:
+            self._locker.unlock()
+        except Exception:
+            pass
         if not getattr(self, '_finished_emitted', False):
             try:
                 self.lifecycle_finished.emit(code)

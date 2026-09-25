@@ -16,10 +16,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 import os
+import re
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPixmap
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedLayout, QStackedWidget, QVBoxLayout
+from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPalette, QPixmap, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedLayout, QStackedWidget, QTextEdit, QVBoxLayout
 
 from src.utils.path_utils import getPath
 
@@ -29,6 +30,86 @@ from ..utils import change_color, t
 from ._init import *
 
 
+# 游戏（Arc/Mindustry）日志行前缀，如 "[I] xxx" / "[E] xxx"
+_LOG_TAG = re.compile(r"^\[([A-Za-z])\]\s*")
+
+# 日志前缀 -> (写入日志文件的等级, 控制台配色角色)
+_LOG_STYLES = {
+    "I": ("info",    "good"),      # 信息
+    "E": ("error",   "error"),     # 错误
+    "W": ("warning", "warning"),   # 警告
+    "D": ("debug",   "debug"),     # 调试
+    "V": ("debug",   "debug"),     # 详细
+}
+
+# 日志正文配色：角色 -> (R, G, B)。浅色主题必须用深色字，否则浅底上几乎看不见
+# 色值一律用整数三元组：QColor 不认 "rgb(r, g, b)" 这种 CSS 字符串，
+# 字符串会得到无效颜色，填进调色板/字符格式就是黑色——暗色主题下正好黑底黑字
+_LOG_COLORS = {
+    "dark": {
+        "info":     (219, 219, 219),   # 无前缀的普通输出：白
+        "error":    (232, 106, 106),   # 错误：红（整行）
+        "warning":  (230, 190, 100),   # 警告：黄（整行）
+        "debug":    (130, 170, 220),   # 调试：蓝（整行）
+        "good":     (219, 219, 219),   # [I] 正文：跟随主题的黑白
+        "launcher": (150, 150, 150),   # [L] 正文：灰
+    },
+    "light": {
+        "info":     (64, 64, 64),
+        "error":    (190, 40, 40),
+        "warning":  (158, 108, 0),
+        "debug":    (38, 100, 174),
+        "good":     (64, 64, 64),
+        "launcher": (110, 110, 110),
+    },
+}
+
+# 日志前缀配色：只有「前缀与正文不同色」的角色列在这里（[L] 紫、[I] 绿）；
+# 没列的角色取正文色，整行同色（警告、报错就是全字段渲染）
+_LOG_TAG_COLORS = {
+    "dark": {
+        "good":     (126, 200, 126),   # [I]：绿
+        "launcher": (186, 140, 235),   # [L]：紫
+    },
+    "light": {
+        "good":     (24, 124, 56),
+        "launcher": (128, 78, 190),
+    },
+}
+
+
+def _log_colors(light=False):
+    """按主题取日志正文配色表（light=True 用浅色主题配色）。"""
+    return _LOG_COLORS["light" if light else "dark"]
+
+
+def _log_tag_colors(light=False):
+    """按主题取日志前缀配色表（只有需要与正文区分的角色）。"""
+    return _LOG_TAG_COLORS["light" if light else "dark"]
+
+
+# 控制台底色（跟随主题）：QTextEdit 的正文区是视口画的，视口调色板在创建时就固定了，
+# 单靠 qss 背景或控件调色板都改不动它，必须在 Console.lighting 里直接设视口调色板
+_CONSOLE_BG = {
+    "dark":  (55, 55, 55),
+    "light": (229, 228, 228),
+}
+
+
+def _parse_log_line(text, fallback="info"):
+    """解析一行游戏输出，返回 (日志等级, 配色角色, 前缀)。
+
+    带 [I]/[E]/[W]/[D]/[V] 前缀时以前缀为准，并把前缀切出来交给控制台单独上色；
+    无前缀时用 fallback（stdout → info、stderr → error）决定，前缀为空串。
+    """
+    match = _LOG_TAG.match(text)
+    if match:
+        style = _LOG_STYLES.get(match.group(1).upper())
+        if style:
+            return style[0], style[1], match.group(0)
+    return fallback, ("error" if fallback == "error" else "info"), ""
+
+
 class Start(Page):
     def __init__(self, parent=None, root=None, text=None, logo=None):
         root.signals.register("start_gameChanged", Signal(object))
@@ -36,13 +117,44 @@ class Start(Page):
         # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtScanner 事件（替代 1 秒轮询）
         self.left.refresh()
         self.root.mdtScanner.on_game_changed.connect(self.left._on_game_changed)
-        self.root.launcher.game_launched.connect(lambda: self.main.stack.setCurrentIndex(3))
-        self.root.launcher.game_launched.connect(lambda: self.left.main.setCurrentIndex(3))
+        self.root.launcher.game_launched.connect(self._on_game_launched)
         self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
         self.root.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
         self.root.launcher.lifecycle_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
         self.root.launcher.lifecycle_finished.connect(lambda: self.left.main.setCurrentIndex(0))
-        self.root.launcher.log.connect(lambda dic: (self.root.logger.info("[launcher]"+dic["text"]) if dic["type"] == "info" else self.root.logger.error("[launcher]"+dic["text"])))
+        # 启动阶段（校验/Java 流程）与游戏进程输出：写入日志文件 + 主区控制台
+        self.root.launcher.log.connect(self._on_launcher_log)
+        self.root.launcher.game_log.connect(self._on_game_log)
+
+    def _on_game_launched(self):
+        """每次启动游戏：先清空上一次的控制台日志，再切到「启动中」页。
+
+        清空必须发生在 launcher 发日志之前，因此挂在 game_launched（最先发出）上。
+        """
+        self.main.clear_log()
+        self.main.stack.setCurrentIndex(3)
+        self.left.main.setCurrentIndex(3)
+
+    def _on_launcher_log(self, dic):
+        """启动阶段消息（参数校验、Java 流程）：写入日志文件 + 主区控制台。"""
+        text = dic["text"]
+        if dic["type"] == "error":
+            self.root.logger.error("[launcher]" + text)
+        else:
+            self.root.logger.info("[launcher]" + text)
+        self.main.append_log("[L] ", text, "launcher")
+
+    def _on_game_log(self, dic):
+        """游戏进程输出：写入日志文件 + 主区控制台（[I] 绿 / [E] 红，其余按等级着色）。"""
+        text = dic["text"]
+        level, role, prefix = _parse_log_line(text, dic["type"])
+        if level == "error":
+            self.root.logger.error("[game]" + text, name="Game")
+        elif level == "warning":
+            self.root.logger.warning("[game]" + text, name="Game")
+        else:
+            self.root.logger.info("[game]" + text, name="Game")
+        self.main.append_log(prefix, text[len(prefix):], role)
 
     def changeGame(self, game=None):
         if game == self.root.settings["defaultGame"]: return
@@ -110,10 +222,13 @@ class Start(Page):
             直接调用 sets 更新 UI（主线程安全，无需 QThTimer 中转）。"""
             default_game = self.root.mdtScanner.ensure_default_game()
             game_msg = self.root.mdtScanner.getMdtMsg(default_game) if default_game else None
+            # 底部按钮随「有无游戏」切换（无游戏时改为跳转下载页）
+            self.main.set_have_game(default_game is not None)
             if self.game["name"] != default_game:
                 if default_game is None:
                     self.game["name"] = self.game["vers"] = self.game["icon_key"] = None
-                    self.sets((False,None),(True,self.root.langer.get("wid.pages.start.left.noGame")),(True,self.root.langer.get("wid.pages.start.left.DGame")))
+                    # 图标需显式清空，否则会残留上一份游戏的图标
+                    self.sets((True,QPixmap()),(True,self.root.langer.get("wid.pages.start.gameNotfound")),(True,self.root.langer.get("wid.pages.start.gameNotfound2")))
                 else:
                     self.game["name"] = default_game
                     self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}" if game_msg else None
@@ -157,6 +272,10 @@ class Start(Page):
                 self.launch = self.Launch(self,self.root)
                 self.suspend = self.Suspend(self,self.root)
 
+            def set_have_game(self, have: bool):
+                """切换左侧底部按钮：有游戏显示「选择游戏」，无游戏显示「下载界面」。"""
+                self.start.set_have_game(have)
+
             class Pages(QWidget):
                 def __init__(self, parent=None, root=None):
                     super().__init__()
@@ -174,6 +293,7 @@ class Start(Page):
             class Start(Pages):
                 def __init__(self, parent=None, root=None):
                     super().__init__(parent,root)
+                    self.have_game = True
                     self.init_wid()
                     self.langing()
 
@@ -183,15 +303,31 @@ class Start(Page):
                     self.layout.setSpacing(10)
                     self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
 
-                    self.world =self.Btn(self,self.root)
-                    self.world.setFixedSize(QSize(170,50))
-                    self.layout.addWidget(self.world)
+                    self.action =self.Btn(self,self.root)
+                    self.action.setFixedSize(QSize(170,50))
+                    self.layout.addWidget(self.action)
 
-                    self.world.clicked.connect(lambda: self.parent.setCurrentIndex(2))
-                    self.world.clicked.connect(lambda: self.parent.parent.parent.main.stack.setCurrentIndex(2))
+                    self.action.clicked.connect(self._on_click)
+
+                def _on_click(self):
+                    # 有游戏：进入游戏选择列表；无游戏：前往下载页的「游戏本体」分类
+                    if self.have_game:
+                        self.parent.setCurrentIndex(2)
+                        self.parent.parent.parent.main.stack.setCurrentIndex(2)
+                    else:
+                        download = self.root.window.main.main.download
+                        download.click()
+                        download.main.game.btn.click()
+
+                def set_have_game(self, have: bool):
+                    if self.have_game == have:
+                        return
+                    self.have_game = have
+                    self.langing()
 
                 def langing(self):
-                    self.world.setText(self.root.langer.get("wid.pages.start.gamebtn"))
+                    btn = "wid.pages.start.gamebtn" if self.have_game else "wid.pages.start.downloadbtn"
+                    self.action.setText(self.root.langer.get(btn))
 
             class Mod(Pages):
                 def __init__(self, parent=None, root=None):
@@ -274,12 +410,45 @@ class Start(Page):
                     self.label.setText(text)
 
             class Suspend(Pages):
+                """左侧栏「游戏运行中」页：唯一按钮是强制关闭（强杀游戏进程）。"""
                 def __init__(self, parent=None, root=None):
                     super().__init__(parent,root)
+                    self.init_wid()
+                    self.langing()
+
+                def init_wid(self):
+                    self.layout = QVBoxLayout(self)
+                    self.layout.setContentsMargins(30,50,30,50)
+                    self.layout.setSpacing(10)
+                    self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+
+                    self.stop = self.Btn(self,self.root)
+                    self.stop.setFixedSize(QSize(170,50))
+                    self.layout.addWidget(self.stop)
+
+                    self.stop.clicked.connect(self._on_click)
+
+                def _on_click(self):
+                    """强杀游戏进程；成功则回主界面交给生命周期结束信号，
+                    失败（进程已不在）自己回，避免卡在运行页。"""
+                    if self.root.launcher.kill_game():
+                        return
+                    self.parent.setCurrentIndex(0)
+                    self.parent.parent.parent.main.stack.setCurrentIndex(0)
+
+                def langing(self):
+                    self.stop.setText(self.root.langer.get("wid.pages.start.suspend.stop"))
 
     class Main(Mainw):
+        LOG_MAX_LINES = 2000   # 控制台保留的最大行数，超出后丢弃最旧的行
+
         def __init__(self,parent=None,root=None):
             super().__init__(parent,root)
+            # 已输出的日志（前缀, 正文, 配色角色）：主题切换时按新配色整篇重绘
+            self.log_lines = []
+            self.light = bool(root.settings["theme"])
+            self.colors = _log_colors(self.light)
+            self.tags = _log_tag_colors(self.light)
             self.init_wid()
 
         def init_wid(self):
@@ -294,11 +463,44 @@ class Start(Page):
 
             self.layout.setCurrentIndex(1)
 
+            # 日志控制台：Launch（启动准备中）与 Log（进程运行中）两页
+            self.consoles = []
+
             self.start = self.Start(self,self.root)
             self.mod = self.Mod(self,self.root)
             self.world = self.World(self,self.root)
-            self.launch = self.Launch(self,self.root)
-            self.log = self.Log(self,self.root)
+            self.launch = self.Console(self,self.root)
+            self.log = self.Console(self,self.root)
+
+        def append_log(self, prefix, text, role):
+            """记录一行日志并刷新两个控制台视图（两页内容保持一致）。
+
+            前缀与正文分开上色：前缀色取自 tags（[L] 紫、[I] 绿），
+            没列前缀色的角色（警告、报错）整行用正文色，即全字段渲染。
+            """
+            self.log_lines.append((prefix, text, role))
+            if len(self.log_lines) > self.LOG_MAX_LINES:
+                del self.log_lines[:len(self.log_lines) - self.LOG_MAX_LINES]
+            color = self.colors[role]
+            tag_color = self.tags.get(role, color)
+            for console in self.consoles:
+                console.append(prefix, text, color, tag_color)
+
+        def clear_log(self):
+            """开始一次新的启动：清空上一次残留的输出（Launch / Log 两页同时清）。"""
+            self.log_lines.clear()
+            for console in self.consoles:
+                console.clear_log()
+
+        def lighting(self, light):
+            """主题切换：换配色表并把已输出的日志整篇重绘。"""
+            if self.light == light:
+                return
+            self.light = light
+            self.colors = _log_colors(light)
+            self.tags = _log_tag_colors(light)
+            for console in self.consoles:
+                console.render(self.log_lines, self.colors, self.tags)
 
 
 
@@ -653,15 +855,89 @@ class Start(Page):
                             self.icon.clear()
 
 
-        class Launch(_Main):
+        class Console(_Main):
+            """主区日志控制台：Launch（启动准备中）与 Log（进程运行中）两页各一个视图。"""
             def __init__(self,parent=None,root=None):
                 super().__init__(parent,root)
                 self.setAttribute(Qt.WA_StyledBackground,True)
+                self.parent.consoles.append(self)
+                self.init_wid()
+                self.lighting(self.parent.light)
 
-        class Log(_Main):
-            def __init__(self,parent=None,root=None):
-                super().__init__(parent,root)
-                self.setAttribute(Qt.WA_StyledBackground,True)
+            def init_wid(self):
+                self.layout = QVBoxLayout(self)
+                self.layout.setContentsMargins(20,20,20,20)
+                self.layout.setSpacing(0)
+
+                self.view = QTextEdit(self)
+                self.view.setReadOnly(True)
+                self.view.setFrameShape(QFrame.NoFrame)
+                # 边框/字体由 qss（QTextEdit[wid="console"]）提供；
+                # 底色统一走调色板（见 lighting），避免两处色值各写一份
+                self.view.setProperty("wid","console")
+                self.layout.addWidget(self.view)
+
+            def lighting(self, light):
+                """主题切换：控制台底色与默认字色跟着换。
+
+                视口调色板必须单独设一份：QTextEdit 的正文区由视口的 QPalette.Base 绘制，
+                视口自己显式设过调色板后就不会再继承父控件的，只改控件调色板会露系统黑底。
+                """
+                palette = self.view.palette()
+                palette.setColor(QPalette.Base, QColor(*_CONSOLE_BG["light" if light else "dark"]))
+                palette.setColor(QPalette.Text, QColor(*_log_colors(light)["info"]))
+                self.view.setPalette(palette)
+                self.view.viewport().setPalette(palette)
+                self.view.viewport().setAutoFillBackground(True)
+
+            def append(self, prefix, text, color, tag_color):
+                """追加一行着色文本；仅当停在底部时才跟随滚动，不打断用户翻阅。"""
+                bar = self.view.verticalScrollBar()
+                follow = bar.value() >= bar.maximum() - 4
+                self._write(prefix, text, color, tag_color)
+                self._trim()
+                if follow:
+                    self.view.moveCursor(QTextCursor.End)
+
+            def render(self, lines, colors, tags):
+                """按当前主题整篇重绘（主题切换时用）。"""
+                bar = self.view.verticalScrollBar()
+                follow = bar.value() >= bar.maximum() - 4
+                self.view.clear()
+                for prefix, text, role in lines:
+                    color = colors[role]
+                    self._write(prefix, text, color, tags.get(role, color))
+                if follow:
+                    self.view.moveCursor(QTextCursor.End)
+
+            def _write(self, prefix, text, color, tag_color):
+                """在文档末尾写入一行：前缀用 tag_color、正文用 color，各一段。"""
+                cursor = self.view.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                if prefix:
+                    tag = QTextCharFormat()
+                    tag.setForeground(QColor(*tag_color))
+                    cursor.insertText(prefix, tag)
+                fmt = QTextCharFormat()
+                fmt.setForeground(QColor(*color))
+                cursor.insertText(text + "\n", fmt)
+
+            def _trim(self):
+                """行数上限：超出后丢掉最旧的行，避免长时间挂机把内存吃满。
+
+                blockCount 比行数多 1（末尾换行会多出一个空块）。
+                """
+                doc = self.view.document()
+                while doc.blockCount() - 1 > self.parent.LOG_MAX_LINES:
+                    clip = QTextCursor(doc)
+                    clip.movePosition(QTextCursor.Start)
+                    clip.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
+                    clip.removeSelectedText()
+
+            def clear_log(self):
+                """清空本视图的全部日志，并把滚动位置归零。"""
+                self.view.clear()
+                self.view.moveCursor(QTextCursor.Start)
 
         class Backg(QWidget):
             def __init__(self,parent=None,root=None):

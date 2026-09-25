@@ -15,13 +15,31 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+import shutil
+
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QPixmap
 
-import os, zipfile, json
+import os, zipfile, json, logging
 from .path_utils import getPath
 from .javaScanner import javaScanner
 from .QThTimer import QThTimer
+
+_log = logging.getLogger("Main.MdtScanner")
+
+# 实例名里 Windows 不允许的字符（与下载页命名校验保持一致）
+_INVALID_NAME_CHARS = '\\/:*?"<>|'
+# Windows 保留设备名：拿它们当目录名会被系统当成设备，根本创建不出来
+_RESERVED_NAMES = ({"CON", "PRN", "AUX", "NUL"}
+                   | {f"COM{i}" for i in range(1, 10)}
+                   | {f"LPT{i}" for i in range(1, 10)})
+_MAX_NAME_LEN = 255   # 单个目录名长度上限（NTFS）
+
+
+def _key_path(keys):
+    """把 "a" / ["a","b"] 统一成键路径列表，供 setData 用。"""
+    return [keys] if isinstance(keys, str) else list(keys)
+
 
 def _parse_simple_config_typed(content: str) -> dict:
     """解析 version.properties 内容为字典"""
@@ -105,9 +123,10 @@ class mdtScanner(QObject):
 
     @classmethod
     def setData(cls, subdir_name, keys, value):
-        """通用写 BML.json 字段：keys 为键路径列表（支持嵌套如 ["a","b"]），失败时静默。
+        """通用写 BML.json 字段：keys 为键路径列表（支持嵌套如 ["a","b"]）。
 
         setData(subdir_name, ["icon_path"], icon_path) 等价于旧的 _write_icon_path。
+        成功返回 True，失败（文件缺失/磁盘错误）返回 False 且不抛异常。
         """
         bml_path = getPath(f"BML/.Mindustrys/{subdir_name}/BML.json")
         try:
@@ -125,8 +144,10 @@ class mdtScanner(QObject):
             node[keys[-1]] = value
             with open(bml_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
-        except Exception:
-            pass
+            return True
+        except Exception as exc:
+            _log.debug(f"setData({subdir_name}, {keys}) failed: {exc!r}")
+            return False
 
     @classmethod
     def preload_all(cls):
@@ -464,6 +485,241 @@ class mdtScanner(QObject):
             return data
         return data   
 
+    # ==================== 实例编辑 ====================
+
+    def edit(self, name):
+        """取某个实例的编辑入口：mdtScanner.edit("原版-146").rename("我的原版")。
+
+        edit 只做一件事：把实例名注入编辑器类再实例化，返回现成的编辑器对象。
+        名字只在这一处传，之后每个编辑方法都从编辑器自身的 name 取目标，
+        所以能一路点下去（a.b(1).c()）。写方法返回编辑器自身，成败看 ok / error。
+
+        edit 只认正式实例（目录里 mdt.jar 有效且含 version.properties，与
+        getMdts() / 界面列表同一判据）：下载中的半截目录不是实例，
+        对它的任何写操作都报 notFound。
+        """
+        return self.Editor(self, name)
+
+    @classmethod
+    def check_name(cls, name):
+        """校验实例名是否可用：合法返回 None，否则返回 Editor.error 同款失败码。
+
+        按 Windows 的目录命名收口：非空、无 \\/:*?"<>| 、无控制字符、
+        不以点开头、不以点或空格结尾、不是 CON/COM1 之类保留设备名、长度不超 255。
+        以点开头单独给 "dot"（下载页对它有专属文案），其余一律 "invalidName"。
+        重名不在这里判——那要看目录与登记集合，用 name_conflict() / unique_name()。
+        """
+        name = str(name).strip()
+        if not name or len(name) > _MAX_NAME_LEN:
+            return "invalidName"
+        if any(ch in name for ch in _INVALID_NAME_CHARS) or any(ch < " " for ch in name):
+            return "invalidName"
+        if name.startswith("."):
+            return "dot"
+        if name.endswith(".") or name.endswith(" "):
+            return "invalidName"
+        if name.split(".")[0].upper() in _RESERVED_NAMES:
+            return "invalidName"
+        return None
+
+    def taken_names(self):
+        """已被占用的实例名集合（统一 normcase，大小写不敏感）。
+
+        两个来源：.Mindustrys 下的全部子目录（含下载中、含 jar 损坏的），
+        加上 gameList 里的登记。用目录实测而不是 getMdts()——名字最终要落在
+        真实目录上，半截目录与损坏目录一样会撞名；登记也要算：目录被删后
+        那笔登记得等下一轮 checkGame 才清。
+        """
+        taken = set()
+        try:
+            for item in os.listdir(self.base_dir):
+                if os.path.isdir(os.path.join(self.base_dir, item)):
+                    taken.add(os.path.normcase(item))
+        except OSError:
+            pass
+        for games in self.settings["gameList"].values():
+            taken.update(os.path.normcase(str(game)) for game in games)
+        return taken
+
+    def name_conflict(self, name, except_name=None):
+        """name 能否用作实例名：可用返回 None，否则返回失败码（大小写不敏感）。
+
+            downloading  这个名字正被下载中的任务占着（它比“已存在”更该被看到）
+            exists       已是别的实例目录，或 gameList 里已登记
+        except_name 是改名时略过的自身旧名，让「只改大小写」不被当成重名。
+        """
+        norm = os.path.normcase(name)
+        if except_name and norm == os.path.normcase(except_name):
+            return None
+        if norm not in self.taken_names():
+            return None
+        if os.path.isfile(os.path.join(self.base_dir, name, "downloading.json")):
+            return "downloading"
+        return "exists"
+
+    def unique_name(self, name, existing=None):
+        """name 已被占用时依次尝试 name(1)、name(2)…返回第一个可用的名字。
+
+        existing 是占用名集合；省略则现取 taken_names()。
+        下载页的默认名与重名自动改名都走这里，后缀规则只有这一份。
+        """
+        taken = self.taken_names() if existing is None else existing
+        taken = {os.path.normcase(str(n)) for n in taken}
+        name = str(name).strip()
+        if os.path.normcase(name) not in taken:
+            return name
+        index = 1
+        while os.path.normcase("%s(%d)" % (name, index)) in taken:
+            index += 1
+        return "%s(%d)" % (name, index)
+
+    class Editor:
+        """单个实例的编辑接口（mdtScanner.edit(name) 返回，勿直接构造）。
+
+        读：exists()。写：set() / java() / icon() / rename()，全部返回 self。
+
+        ok 与 error 是最近一次操作的结果（error 为 None 即成功），失败码：
+            notFound      不是正式实例（目录不存在，或只是下载中的半截目录）
+            invalidName   名称非法（空、含 \\/:*?"<>| 、以点或空格结尾、保留设备名）
+            dot           名称以点开头
+            exists        目标名称已被占用
+            downloading   目标名正被下载中的任务占用
+            locked        实例正在运行（被启动器锁住），改名被系统拒绝
+            invalidJava   传入的 Java 路径不是有效 Java
+            invalidImage  传入的图标不是有效图片
+            ioError       其它磁盘错误
+        失败码留给调用方翻成语言键——本类不碰 UI 与翻译。
+        名称规则只有一份：check_name() 判字形、name_conflict() 判占用。
+        改名成功后发 on_game_changed 的 nameChanged 事件，
+        UI 侧按事件释放旧图标、按新名重取（图标缓存不在这里搬）。
+        """
+
+        def __init__(self, scanner, name):
+            self._scanner = scanner
+            self.name = name                  # 实例名（= 目录名，改完名同步更新）
+            self.ok = True
+            self.error = None
+
+        @property
+        def path(self):
+            """实例目录（随 name 走，改名后自然跟着变，不用手动同步）。"""
+            return os.path.join(self._scanner.base_dir, self.name)
+
+        # ---------- 结果 ----------
+        def _ok(self):
+            self.ok = True
+            self.error = None
+            return self
+
+        def _fail(self, code, exc=None):
+            self.ok = False
+            self.error = code
+            _log.debug(f"edit({self.name}) failed: {code}" + (f" ({exc!r})" if exc else ""))
+            return self
+
+        # ---------- 读 ----------
+        def exists(self):
+            """该实例是否存在：只认正式实例——目录里有可用的 mdt.jar。
+
+            与 getMdts() / 界面列表同一判据。下载中的目录只有半截 jar 和
+            downloading.json，不是实例，所以写操作全报 notFound。
+            """
+            return os.path.isdir(self.path) and self._scanner.isMdtFile(self.name)
+
+        # ---------- 写 ----------
+        def set(self, keys, value):
+            """写 BML.json 字段：keys 可为 "a" 或 ["a","b"]（嵌套）。"""
+            if not self.exists():
+                return self._fail("notFound")
+            if not self._scanner.setData(self.name, _key_path(keys), value):
+                return self._fail("ioError")
+            return self._ok()
+
+        def java(self, path=None):
+            """设置实例使用的 Java：path=None 表示跟随全局设置。"""
+            if path is None:
+                return self.set("javaPath", "<:|follow|:>")
+            if not path or not javaScanner.isJava(path):
+                return self._fail("invalidJava")
+            return self.set("javaPath", path)
+
+        def icon(self, src=None):
+            """设置实例图标：src 为图片路径 → 复制成实例内 icon.png；
+            src=None → 删掉 icon.png 恢复默认图标。"""
+            if not self.exists():
+                return self._fail("notFound")
+            png = os.path.join(self.path, "icon.png")
+            if src is None:
+                try:
+                    if os.path.isfile(png):
+                        os.remove(png)
+                except OSError as exc:
+                    return self._fail("ioError", exc)
+            else:
+                if not self._scanner._is_valid_image(src):
+                    return self._fail("invalidImage")
+                try:
+                    shutil.copyfile(src, png)
+                except OSError as exc:
+                    return self._fail("ioError", exc)
+            # icon_path 归位默认值：实例内 icon.png 优先级更高，
+            # 留着旧路径会在 icon.png 被删后又把旧图标捡回来
+            self._scanner.setData(self.name, ["icon_path"], self._scanner.DEFAULT_ICON)
+            self._scanner.invalidate_cache(self.name)
+            self._scanner.invalidate_icon_pixmap(self.name)
+            self._scanner.on_game_changed.emit({"type": "iconChanged", "game": self.name})
+            return self._ok()
+
+        def rename(self, new_name):
+            """重命名实例：改目录名 + 同步 BML.json 的 name 与 settings 里的登记。
+
+            三种「改不了」各有自己的码：
+                notFound     目标实例不是正式实例（目录没了，或只是下载中的半截目录）
+                exists       新名已有实例目录，或 gameList 里已登记同名
+                downloading  新名正被下载中的任务占用
+                locked       实例正在运行（mdtLocker 握着句柄，系统拒绝改名）
+            只改大小写不算重名，照常改。
+            """
+            new_name = str(new_name).strip()
+            if not self.exists():
+                return self._fail("notFound")
+            if new_name == self.name:
+                return self._ok()
+            error = self._scanner.check_name(new_name)
+            if error:
+                return self._fail(error)
+            old_name = self.name
+            conflict = self._scanner.name_conflict(new_name, except_name=old_name)
+            if conflict:
+                return self._fail(conflict)
+            target = os.path.join(self._scanner.base_dir, new_name)
+            try:
+                os.rename(self.path, target)
+            except PermissionError as exc:
+                return self._fail("locked", exc)
+            except OSError as exc:
+                return self._fail("ioError", exc)
+            self.name = new_name
+            self._scanner.setData(new_name, ["name"], new_name)
+            self._scanner.invalidate_cache(old_name)
+            self._sync_settings(old_name, new_name)
+            self._scanner.on_game_changed.emit({"type": "nameChanged", "game": new_name, "old_name": old_name})
+            return self._ok()
+
+        # ---------- 内部 ----------
+        def _sync_settings(self, old_name, new_name):
+            """把 settings 里的登记从旧名换成新名（gameList 各分组与 defaultGame）。
+
+            必须在发 nameChanged 之前完成：主线程收事件后会存盘。
+            同名只可能有一处（重名在前面已被 name_conflict 挡住），所以按精确名字换。
+            """
+            for games in self._scanner.settings["gameList"].values():
+                for index, game in enumerate(games):
+                    if game == old_name:
+                        games[index] = new_name
+            if self._scanner.settings["defaultGame"] == old_name:
+                self._scanner.settings["defaultGame"] = new_name
+
     def _checkGame(self):
         mdts = self.getMdts()
         setting = []
@@ -471,17 +727,26 @@ class mdtScanner(QObject):
             setting += value.copy()
         for mdt in mdts:
             data = self.getMdtData(mdt, self.settings)
-            # 1. 目录名与 BML.json 的 name 不一致 → 重命名
+            # 1. 目录名与 BML.json 的 name 不一致 → 重命名（以目录名为准）
             old_name = data.get("name", None)
             if old_name is not None and old_name != mdt:
                 self.on_game_changed.emit({"type": "nameChanged", "game": mdt, "old_name": old_name})
                 self.setData(mdt, ["name"], mdt)
-                for _, value in self.settings["gameList"].items():
-                    if old_name in value:
-                        value[value.index(old_name)] = mdt
-                for i, v in enumerate(setting):
-                    if v == old_name:
-                        setting[i] = mdt
+                if mdt in setting:
+                    # 重名：目录名早就有登记了，旧名那笔是残留（或同一个实例被记了两次）。
+                    # 只把旧名清掉，别再插一笔同名的，否则 gameList 里会出现两份。
+                    for _, value in self.settings["gameList"].items():
+                        while old_name in value:
+                            value.remove(old_name)
+                    setting = [v for v in setting if v != old_name]
+                    self.on_game_changed.emit({"type": "deleteGame", "game": old_name})
+                else:
+                    for _, value in self.settings["gameList"].items():
+                        if old_name in value:
+                            value[value.index(old_name)] = mdt
+                    for i, v in enumerate(setting):
+                        if v == old_name:
+                            setting[i] = mdt
                 if self.settings["defaultGame"] == old_name:
                     self.settings["defaultGame"] = mdt
             # 2. 目录存在但不在 gameList → 新游戏

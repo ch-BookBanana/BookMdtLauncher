@@ -1161,7 +1161,6 @@ class Download(Page):
                             self._validate_key = None
                             self._closed = False
                             self._dl_timer = None
-                            self._task_list = []
                             # 遮罩与居中由叠加浮层统一提供，本页自身即弹窗面板
                             self.setAttribute(Qt.WA_StyledBackground, True)
                             self.setProperty("wid","color2")
@@ -1266,24 +1265,14 @@ class Download(Page):
                             self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
 
                         # ---------- 名称默认值与去重 ----------
-                        @staticmethod
-                        def _unique_name(name, existing):
-                            if name not in existing:
-                                return name
-                            i = 1
-                            while "%s(%d)" % (name, i) in existing:
-                                i += 1
-                            return "%s(%d)" % (name, i)
-
                         def _init_name_input(self):
                             template = getattr(self.parent, "template", None)
                             interface_name = ""
                             if template is not None:
                                 interface_name = self.root.langer.get(getattr(template, "text", "")) or ""
                             base = interface_name + "-" + (self.data.get("name") or "")
-                            existing = set(self.root.mdtScanner.getMdts())
-                            existing |= set((self.root.mdtScanner.getDownloadingMdts() or {}).keys())
-                            default = self._unique_name(base, existing)
+                            existing = self.root.mdtScanner.taken_names()
+                            default = self.root.mdtScanner.unique_name(base, existing)
                             self.input.setText(default)
                             # 背景提示与默认名称一致：清空后仍能看到原名
                             self.input.setPlaceholderText(default)
@@ -1292,11 +1281,9 @@ class Download(Page):
 
                         # ---------- 名称校验：子线程收集 / 主线程应用 ----------
                         def _collect_mdts(self, event):
-                            """子线程：收集已安装/下载中的游戏名列表（纯文件/缓存操作，线程安全）。"""
+                            """子线程：收集已占用的游戏名集合（纯文件操作，线程安全）。"""
                             try:
-                                mdts = set(self.root.mdtScanner.getMdts())
-                                downloading = set((self.root.mdtScanner.getDownloadingMdts() or {}).keys())
-                                return {"mdts": mdts, "downloading": downloading}
+                                return self.root.mdtScanner.taken_names()
                             except Exception as e:
                                 return e
 
@@ -1323,42 +1310,36 @@ class Download(Page):
                             self._stop_validation()
 
                         def _on_text_changed(self, text):
-                            # 文字变化：立即单次检测（QThTimer.task）
+                            # 文字变化：立即单次检测（QThTimer.task 跑完自销毁，无需外部保活）
                             if self._closed:
                                 return
-                            try:
-                                timer = QThTimer.task(0, self._collect_mdts, result_callback=self._apply_validation)
-                                self._task_list.append(timer)
-                                timer.finished.connect(lambda: self._discard_task(timer))
-                            except Exception:
-                                pass
-
-                        def _discard_task(self, timer):
-                            try:
-                                if timer in self._task_list:
-                                    self._task_list.remove(timer)
-                            except Exception:
-                                pass
+                            QThTimer.task(0, self._collect_mdts, result_callback=self._apply_validation)
 
                         def _apply_validation(self, result):
                             if self._closed or isinstance(result, Exception):
                                 return
-                            self._apply_existing(result["mdts"] | result["downloading"])
+                            self._apply_existing(result)
 
                         def _apply_existing(self, existing):
-                            """按现有游戏名集合校验输入框，并同步更新按钮/提示状态。"""
+                            """按现有游戏名集合校验输入框，并同步更新按钮/提示状态。
+
+                            字形规则与去重全取自 mdtScanner（check_name / unique_name），
+                            本页只负责把失败码翻成提示文案与边框颜色。
+                            """
                             text = self.input.text().strip()
                             if not text:
                                 state, final, msg = "empty", None, ""
-                            elif re.search(r'[\\/:*?"<>|]', text):
-                                state, final, msg = "illegal", None, self.root.langer.get("wid.pages.download.item.name.illegal")
-                            elif text.startswith("."):
-                                state, final, msg = "dot", None, self.root.langer.get("wid.pages.download.item.name.dot")
-                            elif text in existing:
-                                unique = self._unique_name(text, existing)
-                                state, final, msg = "dup", unique, t(self.root.langer.get("wid.pages.download.item.name.willBe"), unique)
                             else:
-                                state, final, msg = "ok", text, ""
+                                error = mdtScanner.check_name(text)
+                                unique = self.root.mdtScanner.unique_name(text, existing)
+                                if error == "dot":
+                                    state, final, msg = "dot", None, self.root.langer.get("wid.pages.download.item.name.dot")
+                                elif error:
+                                    state, final, msg = "illegal", None, self.root.langer.get("wid.pages.download.item.name.illegal")
+                                elif unique != text:
+                                    state, final, msg = "dup", unique, t(self.root.langer.get("wid.pages.download.item.name.willBe"), unique)
+                                else:
+                                    state, final, msg = "ok", text, ""
                             self._final_name = final
                             key = (state, msg)
                             if key == self._validate_key:

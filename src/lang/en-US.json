@@ -70,11 +70,12 @@
     "wid.top.restore": "Restore",
 
     "wid.pages.start": "Start",
-    "wid.pages.start.gameNotfound": "Game not downloaded yet",
-    "wid.pages.start.gameNotfound2": "Please go to the download page to download",
+    "wid.pages.start.gameNotfound": "No Game",
+    "wid.pages.start.gameNotfound2": "Go to the download page to get a game",
     "wid.pages.start.startbtn": "Start Game",
     "wid.pages.start.modbtn": "Manage Mods",
     "wid.pages.start.gamebtn": "Select Game",
+    "wid.pages.start.downloadbtn": "Download Page",
     "wid.pages.start.java.idle": "Ready",
     "wid.pages.start.java.missing": "No Java detected",
     "wid.pages.start.java.resume": "Resuming unfinished Java download...",
@@ -84,6 +85,7 @@
     "wid.pages.start.java.extracting": "Deploying Java... $1%",
     "wid.pages.start.java.done": "Java deployment complete",
     "wid.pages.start.java.error": "Java download failed",
+    "wid.pages.start.suspend.stop": "Force Close",
     "wid.pages.download": "Download",
     "wid.pages.download.game": "Game Files",
 
