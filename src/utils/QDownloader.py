@@ -215,12 +215,14 @@ class QDownloader(QObject):
         progress(done, total)        - 总体进度（已下载字节量, 总字节）
         thread_progress(id, idx, %)  - 单块进度
         source_selected(str)         - 多源竞速后选定的下载源 URL
+        source_probed(str, float)    - 单个源的测速结果 (URL, 字节/秒)，不可用为 -1.0
         error(str)                   - 错误信息
 
     多源竞速：
-        传入 urls 列表时，启动前对每个源进行 5 秒或 1MB 的限时测速
-        （先到先停），选择速度最高的源作为实际下载地址，
-        通过 source_selected 信号通知。
+        传入 urls 列表时，启动前并发对每个源进行 5 秒或 8MB 的限时测速
+        （每个源先到先停），选择速度最高的源作为实际下载地址，
+        通过 source_selected 信号通知；各源测速结果通过 source_probed 上报，
+        便于日志区分"源不可用"与"源太慢"。
 
     任务信息：
         运行时在 tmp 目录目标任务文件夹（BML/.tmp/QDownloader/<task_id>/）
@@ -238,6 +240,7 @@ class QDownloader(QObject):
     progress = Signal(int, int)
     thread_progress = Signal(int, int, int)
     source_selected = Signal(str)
+    source_probed = Signal(str, float)      # 竞速测速结果 (url, 字节/秒)，不可用源为 -1.0
     error = Signal(str)
     cancel_allowed_changed = Signal(bool)   # 允许取消状态变化
     pause_allowed_changed = Signal(bool)    # 允许暂停状态变化
@@ -523,41 +526,77 @@ class QDownloader(QObject):
             self._save_download_json()
 
     def _race_sources(self, sess):
-        """多源竞速：对每个 URL 限时 5 秒或 1MB 测速，返回速度最高的 URL。
+        """多源竞速：并发对每个 URL 限时 5 秒或 8MB 测速，返回速度最高的 URL。
 
-        每个源先到先停：下载满 1MB 或耗时达到 5 秒即停止测速，
-        以平均速度比较，选择最快的源作为正式下载地址。
+        各源在独立线程中同时测速，总耗时为"最慢的那个源"（上限 5 秒），
+        而不是各源耗时之和；某个源是死链时也不会再拖慢其余源的测速。
+        每个探测线程用独立 Session（requests.Session 非线程安全，且中途
+        close 未读完的响应可能污染连接池），仅从传入 sess 复制代理与请求头。
+
+        采样量必须足够大：TCP 慢启动阶段的速度远低于稳态，若采样阈值太小
+        （如 1MB），4MB/s 的源只要 0.25 秒就采满，测出的全是慢启动阶段的
+        速度（实测仅 422 KB/s），反而会系统性低估快源、让竞速选错源。
         """
-        probe_size = 1024 * 1024
+        if not self.urls:
+            return None
+        probe_size = 8 * 1024 * 1024
         timeout = 5.0
-        best_url = self.urls[0] if self.urls else None
-        best_speed = -1.0
-        for url in self.urls:
-            if self._is_cancelled or _ABORT_EVENT.is_set():
-                break
+        speeds = {}
+        lock = Lock()
+
+        def probe(url):
             t0 = time.monotonic()
             got = 0
+            speed = -1.0
             try:
-                resp = _ssl_retry_request(sess, "get", url,
-                                          headers={"Range": "bytes=0-%d" % (probe_size - 1)},
-                                          stream=True, timeout=10)
-                resp.raise_for_status()
-                try:
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if self._is_cancelled or _ABORT_EVENT.is_set():
-                            break
-                        got += len(chunk)
-                        if got >= probe_size or time.monotonic() - t0 >= timeout:
-                            break
-                finally:
-                    resp.close()
+                with requests.Session() as s:
+                    s.trust_env = sess.trust_env
+                    s.headers.update(dict(sess.headers))
+                    s.proxies.update(dict(sess.proxies))
+                    resp = _ssl_retry_request(s, "get", url,
+                                              headers={"Range": "bytes=0-%d" % (probe_size - 1)},
+                                              stream=True, timeout=10)
+                    try:
+                        resp.raise_for_status()
+                        # 只接受 206：返回 200 说明服务器忽略了 Range（不支持分块/续传），
+                        # 会被 _prepare 直接拒绝。这类源无视 Range 全量推数据、测速虚高，
+                        # 若不在这里剔除，它会赢下竞速再让整次下载以"不支持断点续传"失败。
+                        if resp.status_code != 206:
+                            raise ValueError("no range support")
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if self._is_cancelled or _ABORT_EVENT.is_set():
+                                break
+                            # 首个分片校验 zip 魔数：有的镜像对不存在的文件返回
+                            # 206 + HTML 错误页，只查状态码挡不住。
+                            if got == 0 and chunk and chunk[:2] != b"PK":
+                                raise ValueError("not a zip payload")
+                            got += len(chunk)
+                            if got >= probe_size or time.monotonic() - t0 >= timeout:
+                                break
+                    finally:
+                        resp.close()
                 cost = time.monotonic() - t0
-                speed = got / cost if cost > 0 else 0.0
-                if speed > best_speed:
-                    best_speed = speed
-                    best_url = url
+                if got > 0 and cost > 0:
+                    speed = got / cost
             except Exception:
-                continue
+                # 源不可用（404/超时/TLS/Range 不支持/内容异常）不中断竞速，
+                # 但要上报给上层记录，否则镜像死链会被静默跳过、只剩慢源可用却毫无提示。
+                speed = -1.0
+            with lock:
+                speeds[url] = speed
+            self.source_probed.emit(url, speed)
+
+        # with 会等所有探测结束，但每个探测有 5 秒硬上限，最坏也只阻塞 5 秒
+        with ThreadPoolExecutor(max_workers=len(self.urls)) as executor:
+            list(executor.map(probe, self.urls))
+
+        best_url = self.urls[0]
+        best_speed = -1.0
+        for url in self.urls:
+            speed = speeds.get(url, -1.0)
+            if speed > best_speed:
+                best_speed = speed
+                best_url = url
         return best_url
 
     # ---------- 内部核心 ----------
@@ -575,7 +614,7 @@ class QDownloader(QObject):
             if self.proxy:
                 sess.proxies.update({"http": self.proxy, "https": self.proxy})
 
-            # 多源竞速：对每个 URL 限时 5s 或 1MB 测速，选择速度最高的源
+            # 多源竞速：并发对每个 URL 限时 5s 或 8MB 测速，选择速度最高的源
             if not self.url and len(self.urls) > 1:
                 picked = self._race_sources(sess)
                 if picked:

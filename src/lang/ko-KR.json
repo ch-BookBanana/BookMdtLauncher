@@ -9,6 +9,8 @@
     "log.java.status": "[Java] 상태 → $1",
     "log.java.progress_suppressed": "[Java] 진행률 $1% 억제 (일시정지 중 전달 안 함, 일시정지 표시 덮어쓰기 방지)",
     "log.java.source_selected": "[Java] 다운로드 소스 선택: $1",
+    "log.java.source_probed": "[Java] 소스 속도 측정: $1 → $2",
+    "log.java.source_probe_failed": "[Java] 소스 사용 불가(건너뜀): $1",
     "log.java.dl_paused": "[Java] 다운로드 일시정지 @ $1%",
     "log.java.dl_resumed": "[Java] 다운로드 재개 @ $1%",
     "log.java.dl_cancelled": "[Java] 다운로드 취소: QDownloader 해제, 이어받기 상태 유지",

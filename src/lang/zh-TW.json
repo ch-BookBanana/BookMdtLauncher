@@ -9,6 +9,8 @@
     "log.java.status": "[Java] 狀態 → $1",
     "log.java.progress_suppressed": "[Java] 進度 $1% 抑制（暫停中不轉發，避免覆蓋暫停提示）",
     "log.java.source_selected": "[Java] 選定下載源: $1",
+    "log.java.source_probed": "[Java] 源測速: $1 → $2",
+    "log.java.source_probe_failed": "[Java] 源不可用（已略過）: $1",
     "log.java.dl_paused": "[Java] 下載暫停 @ $1%",
     "log.java.dl_resumed": "[Java] 下載恢復 @ $1%",
     "log.java.dl_cancelled": "[Java] 下載被取消：釋放 QDownloader，保留續傳檔案",

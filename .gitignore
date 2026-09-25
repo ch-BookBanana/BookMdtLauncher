@@ -23,6 +23,7 @@
 # pycache
 /__pycache__/
 /src/utils/__pycache__/
+
 /src/utils/pages/__pycache__/
 /src/utils/pages/fStack/__pycache__/
 /src/utils/pages/downloads/__pycache__/
