@@ -70,9 +70,9 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal
 from .path_utils import getPath
 
 
-# 默认 User-Agent：使用下载工具 UA（curl/wget/aria2 风格）。
-# 清华等国内镜像站对 python-requests / 浏览器 UA 返回 403（反爬白名单只放行下载工具），
-# 统一伪装为 curl 可被正常放行；对 GitHub 等其他源无副作用。
+# 默认 User-Agent：统一使用下载工具 UA（curl 风格）。
+# 部分站点按 UA 做反爬白名单，python-requests / 浏览器 UA 会被 403，
+# 下载工具 UA 可正常放行；对 GitHub 等其他源无副作用。
 _DEFAULT_USER_AGENT = "curl/8.5.0"
 
 
@@ -566,7 +566,7 @@ class QDownloader(QObject):
                         for chunk in resp.iter_content(chunk_size=65536):
                             if self._is_cancelled or _ABORT_EVENT.is_set():
                                 break
-                            # 首个分片校验 zip 魔数：有的镜像对不存在的文件返回
+                            # 首个分片校验 zip 魔数：有的源对不存在的文件返回
                             # 206 + HTML 错误页，只查状态码挡不住。
                             if got == 0 and chunk and chunk[:2] != b"PK":
                                 raise ValueError("not a zip payload")
@@ -580,7 +580,7 @@ class QDownloader(QObject):
                     speed = got / cost
             except Exception:
                 # 源不可用（404/超时/TLS/Range 不支持/内容异常）不中断竞速，
-                # 但要上报给上层记录，否则镜像死链会被静默跳过、只剩慢源可用却毫无提示。
+                # 但要上报给上层记录，否则死链会被静默跳过、只剩慢源可用却毫无提示。
                 speed = -1.0
             with lock:
                 speeds[url] = speed
@@ -634,6 +634,10 @@ class QDownloader(QObject):
             if self._is_cancelled:
                 self.cancelled.emit()
                 return
+
+            # 总大小一确定就立刻广播一次：块还没开始下时界面也知道文件多大，
+            # 不再停在“0 B”上，避免误以为下载卡死。
+            self.progress.emit(0, self.total_size)
 
             # 创建临时目录，加载断点状态，初始化每块字节进度
             self._prepare_temp_files()
@@ -712,8 +716,9 @@ class QDownloader(QObject):
     def _prepare(self):
         """
         获取文件大小并探测断点续传支持。
-        HEAD 失败时用 GET + Range 探测兜底；部分服务器不返回 accept-ranges
-        头但仍支持 Range，此时以 Range 探测（206）为准，避免误判失败。
+        优先一次 GET + Range 探测：同一个响应里拿到总大小（Content-Range）
+        和是否支持断点续传（206），只有它失败才退化为 HEAD。
+        部分服务器不返回 accept-ranges 头但仍支持 Range，此时以 206 为准。
         """
         resp = None
         try:
@@ -723,20 +728,21 @@ class QDownloader(QObject):
             if self.proxy:
                 sess.proxies.update({"http": self.proxy, "https": self.proxy})
 
-            # 优先 HEAD；部分服务器（如某些 CDN）禁用 HEAD，退化为 GET + Range 探测
+            # 探测只发一次请求（旧逻辑 HEAD + 二次 GET 确认最坏要 3 次往返，
+            # 高延迟线路下就是“开始下载后十几秒进度不动”的主因）
             supports_range = False
             try:
-                resp = _ssl_retry_request(sess, "head", self.url, allow_redirects=True, timeout=30)
-                resp.raise_for_status()
-            except requests.exceptions.RequestException:
                 resp = _ssl_retry_request(sess, "get", self.url,
                                           headers={"Range": "bytes=0-0"},
-                                          stream=True, timeout=30)
+                                          stream=True, allow_redirects=True, timeout=30)
                 resp.raise_for_status()
-                # GET + Range 探测返回 206 说明服务器支持断点续传
                 supports_range = resp.status_code == 206
+            except requests.exceptions.RequestException:
+                resp = _ssl_retry_request(sess, "head", self.url,
+                                          allow_redirects=True, timeout=30)
+                resp.raise_for_status()
 
-            # 解析文件大小（GET 探测返回 206 时从 Content-Range 头取总大小）
+            # 解析文件大小（206 从 Content-Range 取总大小，否则用 Content-Length）
             if resp.status_code == 206:
                 content_range = resp.headers.get('content-range', '')
                 total_str = content_range.rsplit('/', 1)[-1] if content_range else '0'
@@ -744,24 +750,13 @@ class QDownloader(QObject):
                 supports_range = True
             else:
                 self.total_size = int(resp.headers.get('content-length', 0))
-                # HEAD 成功且显式声明支持 Range
+                # 显式声明支持 Range
                 if resp.headers.get('accept-ranges') == 'bytes':
                     supports_range = True
 
             if self.total_size <= 0:
                 self.error.emit("无法获取文件大小")
                 return False
-
-            # HEAD 成功但未确认支持 Range 时，用 GET + Range 探测二次确认
-            if not supports_range:
-                try:
-                    probe = _ssl_retry_request(sess, "get", self.url,
-                                               headers={"Range": "bytes=0-0"},
-                                               stream=True, timeout=30)
-                    supports_range = probe.status_code == 206
-                    probe.close()
-                except requests.exceptions.RequestException:
-                    supports_range = False
 
             if not supports_range:
                 self.error.emit("服务器不支持断点续传")

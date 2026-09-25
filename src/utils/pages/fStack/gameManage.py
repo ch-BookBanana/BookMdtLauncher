@@ -3,10 +3,11 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLay
 
 
 class GameManage(QWidget):
-    def __init__(self, parent=None, root=None):
+    def __init__(self, game, parent=None, root=None):
         super().__init__()
         self.parent = parent
         self.root = root
+        self.game = game
         self.init_ui()
         self.init_wid()
 

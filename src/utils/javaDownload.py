@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 - javaDownload.json（BML/.tmp/javaDownload.json）记录 Java 下载信息与状态：
     status: downloading / extracting / done / error
-    urls  : 多源下载列表（QDownloader 竞速选优）
+    urls  : 下载源列表（当前只有 Adoptium 官方源，多源竞速待镜像功能落地后启用）
     dest  : jdk zip 下载目标路径（BML/.tmp/Java/）
 - 下载：QDownloader 全程子线程运行并注册到全局路由表；
 - 解压：解压到 BML/.Java/<version>/bin/java.exe（zip 顶层目录自动剥离）。
@@ -80,47 +80,22 @@ JAVA_INFO_PATH = os.path.join(TMP_DIR, "javaDownload.json")
 
 DEFAULT_MAJOR = 17
 # Adoptium 在 17.0.20 之后把构建号命名从 "17.0.20+8" 改成了 "17.0.20.1+1"，
-# 国内镜像只同步新命名（旧命名一律 404），因此这里必须跟着用新命名。
+# 旧命名已从仓库移除，这里必须跟着用新命名。
 DEFAULT_VERSION = "17.0.20.1"
 DEFAULT_BUILD = 1
 
-# 国内镜像前缀（清华镜像路径首字母为大写 Adoptium，须一致）。
-# 下列镜像均已用 GET + Range 实测过（HEAD 会得到假阳性，不能作数）：
-#   清华 7.7 MB/s、南大 4.7 MB/s（均返回 206 + application/zip）
-# 已排除的镜像及原因（勿再加入）：
-#   中科大（HEAD 200 但 GET 一律 403）
-#   兰州大学（忽略 Range 返回 200 全量，会被 _prepare 判为不支持续传）
-#   山东大学、东莞理工（返回 206 但内容是 HTML 错误页）
-#   华为云（前端 SPA，任何路径都返回同一个页面，无法确认文件是否存在）
-_MIRROR_PREFIXES = (
-    "https://mirrors.tuna.tsinghua.edu.cn/Adoptium",
-    "https://mirror.nju.edu.cn/adoptium",
-)
-
-# GitHub 加速代理（第三方，仅作国内镜像全部失败时的兜底）。
-# 实测约 300 KB/s，远慢于镜像，正常情况下不会赢得竞速；
-# 且返回内容为第三方转发，不如教育机构镜像可信，故排在镜像之后。
-_GH_PROXIES = (
-    "https://ghproxy.net/",
-    "https://gh-proxy.com/",
-)
-
 
 def _build_urls(major=DEFAULT_MAJOR, version=DEFAULT_VERSION, build=DEFAULT_BUILD):
-    """构建 JDK 多源下载列表（国内镜像 + GitHub 代理 + Adoptium 官方），用于竞速选优。
+    """构建 JDK 下载源列表。
 
-    国内镜像实测可达数 MB/s，官方源直连不到 100 KB/s，故镜像排在前面。
-    列表顺序不代表优先级（竞速按实测速度选），但决定全部不可用时的兜底顺序。
+    目前只出 Adoptium 官方源（单一来源，QDownloader 不走竞速）；
+    镜像/加速代理待以后统一实现，到时会作为额外候选加进这个列表。
     """
     name = "OpenJDK%dU-jdk_x64_windows_hotspot_%s_%d.zip" % (major, version, build)
-    urls = ["%s/%d/jdk/x64/windows/%s" % (prefix, major, name) for prefix in _MIRROR_PREFIXES]
-    official = (
+    return [
         "https://github.com/adoptium/temurin%d-binaries/releases/download/jdk-%s%%2B%d/%s"
         % (major, version, build, name)
-    )
-    urls.extend(prefix + official for prefix in _GH_PROXIES)
-    urls.append(official)
-    return urls
+    ]
 
 
 def get_status():
@@ -377,13 +352,13 @@ class JavaDownloadFlow(QObject):
         self.version = info.get("version") or self.version
         self.major = info.get("major") or self.major
         self.build = info.get("build") or self.build
-        # 源列表由代码生成，不复用 json 里的旧快照——否则镜像地址/文件命名失效后
-        # 会永远沿用那份死链列表，竞速只剩官方慢源可用。
+        # 源列表由代码生成，不复用 json 里的旧快照——否则地址或文件命名失效后
+        # 会永远沿用那份死链列表。
         self.urls = _build_urls(self.major, self.version, self.build)
         self.target_dir = os.path.join(JAVA_ROOT, self.version)
 
     def _start_download(self):
-        """创建 QDownloader（子线程运行、注册到全局路由表、多源竞速）并开始下载。"""
+        """创建 QDownloader（子线程运行、注册到全局路由表）并开始下载。"""
         if self._is_cancelled:
             self.finished.emit(False)
             return
@@ -399,6 +374,9 @@ class JavaDownloadFlow(QObject):
             self.finished.emit(False)
             return
         self._downloader = dl
+        # 单源不走竞速，source_selected 不会发，这里补记一次实际使用的地址
+        if len(self.urls) == 1:
+            self._on_source_selected(self.urls[0])
         dl.source_selected.connect(self._on_source_selected)
         dl.source_probed.connect(self._on_source_probed)
         dl.progress.connect(self._emit_progress)
@@ -417,7 +395,7 @@ class JavaDownloadFlow(QObject):
     def _on_source_probed(self, url, speed):
         """记录竞速中每个源的测速结果（speed<0 表示该源不可用）。
 
-        用于排查"为什么选到了慢源"：镜像死链会在这里明确留下记录，
+        用于排查"为什么选到了慢源"：不可用的源会在这里明确留下记录，
         而不是像以前那样被静默跳过。
         """
         if speed < 0:

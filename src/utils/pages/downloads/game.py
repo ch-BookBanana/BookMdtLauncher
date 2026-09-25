@@ -247,6 +247,12 @@ class Game(QWidget):
 
         # 下载界面游戏本体模板
         class Template(QWidget):
+            # 仓库介绍（intro）异步就绪通知：子线程抓到正文后回主线程补写缓存。
+            # 介绍只是附加内容，绝不让它拖住搜索结果。
+            introReady = Signal(object)
+            # intro 抓取超时（秒），只作用于附加介绍，子类可覆盖
+            introTimeout = 10
+
             def __init__(self, parent=None, root=None, text=None, icon=None):
                 super().__init__()
                 self.parent = parent
@@ -256,6 +262,7 @@ class Game(QWidget):
                 self.icon = icon
                 self._searching = False
                 self._action_btns = []
+                self.introReady.connect(self._on_intro_ready, Qt.QueuedConnection)
                 self._init_wid()
 
             def _init_wid(self):
@@ -434,12 +441,19 @@ class Game(QWidget):
                 releases_all = []
                 max_workers = min(len(pages) + 1, 8)
 
-                with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                # 不用 with：__exit__ 会 shutdown(wait=True)，会被慢的 intro 连接拖住
+                pool = ThreadPoolExecutor(max_workers=max_workers)
+                try:
                     futures = {
                         pool.submit(api.getRelease, self.releaseRepo, p, per_page): p
                         for p in pages
                     }
-                    f_intro = pool.submit(self.root.githubAPI._session.get, self.introUrl, timeout=15) if self.introUrl else None
+                    # intro 挂后台，抓完由 introReady 信号回主线程补写缓存，不阻塞本次搜索
+                    if self.introUrl:
+                        pool.submit(
+                            self.root.githubAPI._session.get, self.introUrl,
+                            timeout=self.introTimeout,
+                        ).add_done_callback(self._on_intro_fetched)
 
                     for f in as_completed(futures):
                         try:
@@ -450,13 +464,8 @@ class Game(QWidget):
                                 self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
                         except Exception as e:
                             self.root.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
-
-                    intro_resp = None
-                    if f_intro is not None:
-                        try:
-                            intro_resp = f_intro.result()
-                        except Exception as e:
-                            self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] intro fetch failed: {e}")
+                finally:
+                    pool.shutdown(wait=False, cancel_futures=False)
 
                 fetched = []
                 for r in releases_all:
@@ -474,12 +483,32 @@ class Game(QWidget):
                 self._merge_releases(cache["versions"], fetched)
 
                 cache["intro"] = cache.get("intro", "")
-                if intro_resp is not None and getattr(intro_resp, 'status_code', None) == 200:
-                    cache["intro"] = intro_resp.text
 
                 cache["versions"] = self._sort_versions(cache["versions"])
                 self._write_cache(cache)
                 return cache
+
+            def _on_intro_fetched(self, fut):
+                """子线程回调：介绍抓到了就交给主线程，失败静默（介绍缺失不影响搜索）。"""
+                try:
+                    resp = fut.result()
+                except Exception:
+                    return
+                if getattr(resp, "status_code", None) == 200 and getattr(resp, "text", ""):
+                    self.introReady.emit(resp.text)
+
+            def _on_intro_ready(self, text):
+                """主线程：把介绍正文补进缓存，下次打开仓库信息页即有内容。"""
+                if not text:
+                    return
+                try:
+                    data = self._read_cache()
+                    data["intro"] = text
+                    self._write_cache(data)
+                except Exception:
+                    pass
+                if isinstance(getattr(self, "data", None), dict):
+                    self.data["intro"] = text
 
             def _before_search(self):
                 pass
