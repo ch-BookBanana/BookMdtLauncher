@@ -22,8 +22,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 init = {
-    "version": "26-T0818",
-    "BuildCode": "10000.01"
+    "version": "26-T0925",
+    "BuildCode": "10000.02"
 }
 
 from PySide6.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, Signal
