@@ -88,7 +88,6 @@ class mdtScanner(QObject):
         self.checkGame()
         self.icon_timer = QThTimer.taskP(1000, lambda e: self.check_icons())
         self.icon_timer.setParent(self)
-        self.on_game_changed.connect(print)
 
     @classmethod
     def invalidate_cache(cls, game=None):
@@ -265,16 +264,14 @@ class mdtScanner(QObject):
         """随周期检查各游戏图标状态（子线程执行）。
 
         - icon_path 为 null/空或指向无效图片 → 写回默认图标
-        - BML.json 或 icon.png 变化 → 使对应游戏的消息缓存失效
+        - 图标来源（icon.png / icon_path 指向的文件）或 mdt.jar 变化 → 使缓存失效
         检测到变化时 emit on_game_changed({"type": "iconChanged", "game": ...})；
         QPixmaps 缓存的失效由主线程收到事件后处理（GUI 资源禁止跨线程操作）。"""
         for mdt in self.getMdts():
             bml_path = getPath(f"BML/.Mindustrys/{mdt}/BML.json")
-            bml_mtime = 0
             icon_path = None
             try:
                 if os.path.isfile(bml_path):
-                    bml_mtime = os.path.getmtime(bml_path)
                     with open(bml_path, "r", encoding="utf-8") as f:
                         icon_path = (json.load(f) or {}).get("icon_path")
             except (OSError, ValueError, TypeError):
@@ -303,7 +300,7 @@ class mdtScanner(QObject):
                 jar_mtime = os.path.getmtime(self._get_mdt_jar_path(mdt))
             except OSError:
                 pass
-            new_key = (jar_mtime, bml_mtime, resolved, png_mtime, png_size)
+            new_key = (jar_mtime, resolved, png_mtime, png_size)
             if self._icon_check_keys.get(mdt) != new_key:
                 # 首次检查只建立基线不通知（启动时 UI 自行加载图标，无需全量刷）
                 first = mdt not in self._icon_check_keys
@@ -702,6 +699,8 @@ class mdtScanner(QObject):
             self.name = new_name
             self._scanner.setData(new_name, ["name"], new_name)
             self._scanner.invalidate_cache(old_name)
+            # 新名可能残着更早一次的缓存与图标检测基线（路径已失效），一并清掉
+            self._scanner.invalidate_cache(new_name)
             self._sync_settings(old_name, new_name)
             self._scanner.on_game_changed.emit({"type": "nameChanged", "game": new_name, "old_name": old_name})
             return self._ok()
@@ -732,6 +731,8 @@ class mdtScanner(QObject):
             if old_name is not None and old_name != mdt:
                 self.on_game_changed.emit({"type": "nameChanged", "game": mdt, "old_name": old_name})
                 self.setData(mdt, ["name"], mdt)
+                # 目录名变了 → 图标来源路径跟着变，基线作废，下次检查静默重建
+                self._icon_check_keys.pop(mdt, None)
                 if mdt in setting:
                     # 重名：目录名早就有登记了，旧名那笔是残留（或同一个实例被记了两次）。
                     # 只把旧名清掉，别再插一笔同名的，否则 gameList 里会出现两份。
@@ -749,6 +750,12 @@ class mdtScanner(QObject):
                             setting[i] = mdt
                 if self.settings["defaultGame"] == old_name:
                     self.settings["defaultGame"] = mdt
+            elif old_name is None:
+                # 首次扫到这个实例：把目录名写进 BML.json 的 name 当身份标记，
+                # 之后无论谁改了目录名，这一行就是改名依据。
+                # 先清图标检测键：写文件会改 bml_mtime，否则下一秒误报 iconChanged。
+                self.setData(mdt, ["name"], mdt)
+                self._icon_check_keys.pop(mdt, None)
             # 2. 目录存在但不在 gameList → 新游戏
             if mdt not in setting:
                 self.settings["gameList"].setdefault("<:|default|:>", []).append(mdt)
@@ -758,6 +765,7 @@ class mdtScanner(QObject):
             cand = getPath(icon_path) if icon_path and not os.path.isabs(icon_path) else icon_path
             if not (icon_path and os.path.isfile(cand) and self._is_valid_image(cand)):
                 self.setData(mdt, ["icon_path"], self.DEFAULT_ICON)
+                self._icon_check_keys.pop(mdt, None)   # 上面已发事件，别让下个周期重复报
                 self.on_game_changed.emit({"type": "iconChanged", "game": mdt})
         # 4. 在 gameList 但目录已不存在 → 删除
         for dat in setting:
