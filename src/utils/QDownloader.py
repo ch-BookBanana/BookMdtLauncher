@@ -426,11 +426,19 @@ class QDownloader(QObject):
         return True
 
     def __del__(self):
-        """兜底：对象被 GC 时若线程仍在运行，先等待其退出再销毁。"""
+        """兜底：对象被 GC 时若线程仍在运行，先等待其退出再销毁。
+
+        在线程内被 GC（引用计数归零恰好发生在下载线程收尾的那一句）时不等待，
+        否则就是线程等自己，Qt 会报 QThread::wait: Thread tried to wait on itself，
+        线程局部存储也会报 destroyed before end of thread。
+        """
         try:
             t = getattr(self, "_thread", None)
-            if t is not None and t.isRunning():
-                t.wait(3000)
+            if t is None or not t.isRunning():
+                return
+            if t is QThread.currentThread():
+                return
+            t.wait(3000)
         except Exception:
             pass
 

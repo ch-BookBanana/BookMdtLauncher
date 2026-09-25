@@ -57,8 +57,9 @@ def pngSha(path):
     return sha256.hexdigest()
 
 def t(text, *args):
+    """按传入顺序替换 $1 / $2 …（args[0] → $1），未匹配的占位符原样保留。"""
     try:
-        for i, arg in enumerate(reversed(args), start=1):
+        for i, arg in enumerate(args, start=1):
             text = text.replace(f"${i}", str(arg))
     except Exception:
         pass

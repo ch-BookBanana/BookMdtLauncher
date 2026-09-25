@@ -53,10 +53,10 @@ def set_tr_func(fn):
 
 
 def _tr(key, *args):
-    """取翻译文本并替换 $1/$2 占位符；未注入翻译函数时原样返回 key。"""
+    """取翻译文本并替换 $1/$2 占位符（args[0] → $1）；未注入翻译函数时原样返回 key。"""
     text = _tr_func(key) if _tr_func is not None else key
     try:
-        for i, arg in enumerate(reversed(args), start=1):
+        for i, arg in enumerate(args, start=1):
             text = text.replace("$%d" % i, str(arg))
     except Exception:
         pass

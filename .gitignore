@@ -17,14 +17,17 @@
 /main.dist/
 /main.onefile-build/
 /nuitka-crash-report.xml
+/nuitka_bisect/
 
 
 # pycache
 /__pycache__/
 /src/utils/__pycache__/
 /src/utils/pages/__pycache__/
+/src/utils/pages/fStack/__pycache__/
+/src/utils/pages/downloads/__pycache__/
 /src/utils/on_start/__pycache__/
 /src/utils/api/__pycache__/
-/nuitka_bisect/
+
 
 Book Mindustry Launcher.exe

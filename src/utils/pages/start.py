@@ -28,6 +28,7 @@ from ..mdtScanner import mdtScanner
 from ..utils import change_color, t
 
 from ._init import *
+from .fStack.gameManage import GameManage
 
 
 # 游戏（Arc/Mindustry）日志行前缀，如 "[I] xxx" / "[E] xxx"
@@ -77,6 +78,13 @@ _LOG_TAG_COLORS = {
     },
 }
 
+# 控制台底色（跟随主题）：QTextEdit 的正文区是视口画的，视口调色板在创建时就固定了，
+# 单靠 qss 背景或控件调色板都改不动它，必须在 Console.lighting 里直接设视口调色板
+_CONSOLE_BG = {
+    "dark":  (55, 55, 55),
+    "light": (229, 228, 228),
+}
+
 
 def _log_colors(light=False):
     """按主题取日志正文配色表（light=True 用浅色主题配色）。"""
@@ -86,14 +94,6 @@ def _log_colors(light=False):
 def _log_tag_colors(light=False):
     """按主题取日志前缀配色表（只有需要与正文区分的角色）。"""
     return _LOG_TAG_COLORS["light" if light else "dark"]
-
-
-# 控制台底色（跟随主题）：QTextEdit 的正文区是视口画的，视口调色板在创建时就固定了，
-# 单靠 qss 背景或控件调色板都改不动它，必须在 Console.lighting 里直接设视口调色板
-_CONSOLE_BG = {
-    "dark":  (55, 55, 55),
-    "light": (229, 228, 228),
-}
 
 
 def _parse_log_line(text, fallback="info"):
@@ -502,9 +502,6 @@ class Start(Page):
             for console in self.consoles:
                 console.render(self.log_lines, self.colors, self.tags)
 
-
-
-
         class _Main(QWidget):
             def __init__(self,parent=None,root=None):
                 super().__init__()
@@ -517,7 +514,6 @@ class Start(Page):
                 super().showEvent(event)
                 self.parent.backg.setVisible(not self.testAttribute(Qt.WA_StyledBackground))
                 self.parent.stack.setStyleSheet(""if self.testAttribute(Qt.WA_StyledBackground) else "background:transparent;")
-
 
         class Start(_Main):
             def __init__(self,parent=None,root=None):
@@ -553,6 +549,7 @@ class Start(Page):
                 self.layout.addWidget(self.mod,2,1,1,1)
 
                 self.start.clicked.connect(self.on_start_clicked)
+                self.settings.clicked.connect(lambda: self.root.window.floatingStack.add_page(GameManage(self.root.settings["defaultGame"], self, self.root)))
 
             def on_start_clicked(self):
                 """开始游戏：无可用 Java 时自动触发下载流程（launcher 会发 java_missing）。"""
@@ -719,18 +716,6 @@ class Start(Page):
                 def langing(self):
                     self.title.setText(self.name if self.name != "<:|default|:>" else self.root.langer.get("text.default"))
 
-                def toggle(self):
-                    self.body.setVisible(not self.body.isVisible())
-                    self._sync_fold_icon()
-
-                def show_items(self):
-                    """展开条目（default 组初始展开用）。"""
-                    self.body.show()
-                    self._sync_fold_icon()
-
-                def _sync_fold_icon(self):
-                    self.fold_btn.setIcon(QIcon(self.foldPix[int(self.body.isVisible())]))
-
                 def lighting(self,light):
                     if self.light != light:
                         self.light = light
@@ -781,6 +766,18 @@ class Start(Page):
                     for item in self.items.values():
                         item.release()
                     self.items.clear()
+
+                def toggle(self):
+                    self.body.setVisible(not self.body.isVisible())
+                    self._sync_fold_icon()
+
+                def show_items(self):
+                    """展开条目（default 组初始展开用）。"""
+                    self.body.show()
+                    self._sync_fold_icon()
+
+                def _sync_fold_icon(self):
+                    self.fold_btn.setIcon(QIcon(self.foldPix[int(self.body.isVisible())]))
 
                 class Item(QPushButton):
                     """单个游戏条目：图标 + 名称 + 版本。"""
@@ -854,7 +851,6 @@ class Start(Page):
                             self._held = False
                             self.icon.clear()
 
-
         class Console(_Main):
             """主区日志控制台：Launch（启动准备中）与 Log（进程运行中）两页各一个视图。"""
             def __init__(self,parent=None,root=None):
@@ -910,6 +906,13 @@ class Start(Page):
                 if follow:
                     self.view.moveCursor(QTextCursor.End)
 
+            def clear_log(self):
+                """清空本视图的全部日志，并把滚动位置归零。"""
+                self.view.clear()
+                self.view.moveCursor(QTextCursor.Start)
+
+            # ---- 内部 ----
+
             def _write(self, prefix, text, color, tag_color):
                 """在文档末尾写入一行：前缀用 tag_color、正文用 color，各一段。"""
                 cursor = self.view.textCursor()
@@ -933,11 +936,6 @@ class Start(Page):
                     clip.movePosition(QTextCursor.Start)
                     clip.movePosition(QTextCursor.NextBlock, QTextCursor.KeepAnchor)
                     clip.removeSelectedText()
-
-            def clear_log(self):
-                """清空本视图的全部日志，并把滚动位置归零。"""
-                self.view.clear()
-                self.view.moveCursor(QTextCursor.Start)
 
         class Backg(QWidget):
             def __init__(self,parent=None,root=None):

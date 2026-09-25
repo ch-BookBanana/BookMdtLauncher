@@ -1802,10 +1802,10 @@ try:
                                 key = "github.token.error"
                             else:
                                 key = "github.token"
-                            #   $1=剩余次数 $2=刷新时间 $3=剩余次数 $4=刷新时间
+                            #   $1=通用剩余 $2=通用刷新 $3=搜索剩余 $4=搜索刷新（与文案顺序一致）
                             self.setToolTip(str(t(
                                 self.root.langer.get(key),
-                                search_reset, search_rem, core_reset, core_rem
+                                core_rem, core_reset, search_rem, search_reset
                             )))
 
                         def _maybe_fetch_rate(self):

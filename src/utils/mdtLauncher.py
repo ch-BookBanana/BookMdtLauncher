@@ -377,15 +377,22 @@ class mdtLauncher(QProcess):
         self._emit_finished(-2)
 
     def _disconnect_signals(self):
-        """断开所有内部信号连接，防止重复触发和干扰。"""
-        for sig in (self.readyReadStandardOutput,
-                    self.readyReadStandardError,
-                    self.started,
-                    self.finished,
-                    self.errorOccurred):
+        """断开启动时建立的信号连接，防止重复触发和干扰。
+
+        逐个指定槽断开，不用无参 disconnect()：无参形式相当于从 None 接收者上
+        断开，信号本就无连接时 libpyside 会打警告
+        （Failed to disconnect (None) from signal ...），而警告不走异常，
+        try/except 拦不住。
+        """
+        pairs = ((self.readyReadStandardOutput, self.on_stdout),
+                 (self.readyReadStandardError, self.read_stderr),
+                 (self.started, self._on_started),
+                 (self.finished, self._on_finished),
+                 (self.errorOccurred, self._on_error))
+        for sig, slot in pairs:
             try:
-                sig.disconnect()
-            except TypeError:
+                sig.disconnect(slot)
+            except (TypeError, RuntimeError):
                 pass
 
     def _emit_finished(self, code: int):

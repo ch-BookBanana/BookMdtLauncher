@@ -110,7 +110,7 @@ def _on_java_status(root, status):
         _java_stack(root).setCurrentIndex(3)
         bottom.launch.setStatus(status)
     except Exception as e:
-        print("[java_ui_status]", status, "ERR:", repr(e))
+        root.logger.error("[java_ui_status] %s ERR: %r" % (status, e), name="Java")
 
 
 def _on_java_progress(root, done, total):
@@ -122,7 +122,7 @@ def _on_java_progress(root, done, total):
         _java_stack(root).setCurrentIndex(3)
         bottom.launch.setStatus("downloading", pct)
     except Exception as e:
-        print("[java_ui_progress]", done, total, "ERR:", repr(e))
+        root.logger.error("[java_ui_progress] %s/%s ERR: %r" % (done, total, e), name="Java")
 
 
 def _on_java_extract_progress(root, done, total):
@@ -134,7 +134,7 @@ def _on_java_extract_progress(root, done, total):
         _java_stack(root).setCurrentIndex(3)
         bottom.launch.setStatus("extracting", pct)
     except Exception as e:
-        print("[java_ui_extract]", done, total, "ERR:", repr(e))
+        root.logger.error("[java_ui_extract] %s/%s ERR: %r" % (done, total, e), name="Java")
 
 
 def _on_java_paused_changed(root, paused, pct):
@@ -150,7 +150,7 @@ def _on_java_paused_changed(root, paused, pct):
         else:
             bottom.launch.setStatus("downloading", pct)
     except Exception as e:
-        print("[java_ui_paused]", paused, pct, "ERR:", repr(e))
+        root.logger.error("[java_ui_paused] %s %s ERR: %r" % (paused, pct, e), name="Java")
 
 
 def _on_java_flow_cancelled(root):
@@ -212,7 +212,7 @@ def _java_show_status(root, status):
         _java_stack(root).setCurrentIndex(3)
         bottom.launch.setStatus(status)
     except Exception as e:
-        print("[java_ui_show]", status, "ERR:", repr(e))
+        root.logger.error("[java_ui_show] %s ERR: %r" % (status, e), name="Java")
 
 
 def _java_go_home(root):
