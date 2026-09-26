@@ -8,19 +8,14 @@ class GameManage(QWidget):
         self.parent = parent
         self.root = root
         self.game = game
-        self.init_ui()
-        self.init_wid()
-
-    def init_ui(self):
-        self.setFixedSize(520, 365)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid", "color2")
+        self.init_wid()    
 
     def init_wid(self):
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setContentsMargins(30, 30, 30, 30)
         self.layout.setSpacing(0)
-        self.layout.setAlignment(Qt.AlignTop)
+        self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
         self.top = self.Top(self, self.root)
         self.layout.addWidget(self.top, 0)

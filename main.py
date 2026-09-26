@@ -48,9 +48,11 @@ try:
     from src.utils.api.githubAPI import GithubAPI
     from src.utils import javaDownload
     from src.utils.QDownloader import QDownloader
-
     from src.utils.utils import _is_mdt_download, change_color, t
     from src.utils.on_start import startup
+    from src.utils.pages.fOverlay._init import FloatingOverlay
+    from src.utils.pages.fStack._init import FloatingStack
+
 
 
     class Main():
@@ -543,7 +545,7 @@ try:
                 conn.deleteLater()
 
             def init_wid(self):
-                self.floatingStack = self.FloatingStack(self, self.root)
+                self.floatingStack = FloatingStack(self, self.root)
                 self.root.logger.debug("init QW.window.left")
                 self.left = self.Left(self, self.root)
                 self.root.logger.debug("init QW.window.lline")
@@ -572,7 +574,7 @@ try:
                 # GitHub 设置页：改为叠加浮层页面（遮罩/居中由 floatingOverlay 提供）；
                 # 创建时机仍早于 apply_theme，以便首轮主题递归覆盖到其子控件
                 self.githubSetting = self.GithubSetting(self, self.root)
-                self.floatingOverlay = self.FloatingOverlay(self, self.root)
+                self.floatingOverlay = FloatingOverlay(self, self.root)
 
             def eventFilter(self, obj, event):
                 if obj is self and event.type() == QEvent.Resize:
@@ -2418,252 +2420,6 @@ try:
                             super().__init__(parent)
                             self.parent = parent
                             self.root = root
-
-            class FloatingStack(QWidget):
-                def __init__(self,parent=None,root=None):
-                    super().__init__(parent)
-                    self.parent = parent
-                    self.root = root
-                    self.setAttribute(Qt.WA_StyledBackground, True)
-                    self.init_wid()
-                    self.refresh()
-
-                def init_wid(self):
-                    self.layout = QVBoxLayout(self)
-                    self.layout.setContentsMargins(0,0,0,0)
-                    self.layout.setSpacing(0)
-                    self.layout.setAlignment(Qt.AlignTop)
-
-                    self.line = QWidget()
-                    self.line.setProperty("wid","line")
-                    self.line.setFixedHeight(1)
-                    self.layout.addWidget(self.line)
-
-                    self.l2w = QWidget()
-                    self.layout.addWidget(self.l2w,1)
-
-                    self.l2 = QHBoxLayout(self.l2w)
-                    self.l2.setContentsMargins(0,0,0,0)
-                    self.l2.setSpacing(0)
-                    self.l2.setAlignment(Qt.AlignLeft)
-
-                    self.left = self.Left(self,self.root)
-                    self.l2.addWidget(self.left,0)
-
-                    self.line2 = QWidget()
-                    self.line2.setProperty("wid","line")
-                    self.line2.setFixedWidth(1)
-                    self.l2.addWidget(self.line2,0)
-
-                    self.main = self.Main(self,self.root)
-                    self.l2.addWidget(self.main,1)
-
-                def refresh(self):
-                    # 栈空时隐藏整个浮层，否则显示并提层
-                    if self.main.count() <= 0:
-                        self.hide()
-                    else:
-                        self.show()
-                        self.raise_()
-                    self.left.refresh()
-
-                def add_page(self,wid):
-                    # 入栈：添加页面并切换到栈顶（已在栈中先移出，支持 deletable=False 后复用）
-                    if self.main.indexOf(wid) >= 0:
-                        self.main.removeWidget(wid)
-                    self.main.addWidget(wid)
-                    self.main.setCurrentWidget(wid)
-                    def close_page():
-                        self.pop_page(wid)
-                    wid.close_page = close_page
-                    self.refresh()
-
-                def pop_page(self, wid=None, deletable=True):
-                    # 出栈：移除指定页面（缺省为栈顶）；deletable=True 销毁，False 仅移出保留实例
-                    if self.main.count() <= 0:
-                        return
-                    if wid is None:
-                        wid = self.main.currentWidget()
-                    index = self.main.indexOf(wid)
-                    if index < 0:
-                        return
-                    self.main.removeWidget(wid)
-                    wid.hide()
-                    on_close = getattr(wid, "on_close", None)
-                    if on_close is not None:
-                        on_close()
-                    if deletable:
-                        wid.deleteLater()
-                    if self.main.count() > 0:
-                        self.main.setCurrentIndex(self.main.count() - 1)
-                    self.refresh()
-
-                def clear(self, deletable=True):
-                    # 清空栈；deletable=True 销毁页面，False 仅移出保留实例
-                    while self.main.count() > 0:
-                        wid = self.main.widget(0)
-                        self.main.removeWidget(wid)
-                        wid.hide()
-                        on_close = getattr(wid, "on_close", None)
-                        if on_close is not None:
-                            on_close()
-                        if deletable:
-                            wid.deleteLater()
-                    self.refresh()
-
-                class Left(QWidget):
-                    def __init__(self,parent=None,root=None):
-                        super().__init__(parent)
-                        self.parent = parent
-                        self.root = root
-                        self.setFixedWidth(40)
-                        self.init_wid()
-
-                    def init_wid(self):
-                        self.layout = QVBoxLayout(self)
-                        self.layout.setContentsMargins(5,5,5,5)
-                        self.layout.setSpacing(0)
-                        self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-
-                        # 内置退出按钮（左箭头，返回上一页）
-                        self.back = self.NavBtn(self, self.root, "src/assets/nav/back.png", "text.return", self.parent.pop_page)
-                        self.layout.addWidget(self.back,0,Qt.AlignHCenter)
-
-                        # 清空整个栈按钮（叉号）
-                        self.btn_close = self.NavBtn(self, self.root, "src/assets/tribtns/close.png", "wid.top.close", self.parent.clear)
-                        self.layout.addWidget(self.btn_close,0,Qt.AlignHCenter)
-
-                    def refresh(self):
-                        # 栈空时禁用两个按钮
-                        enabled = self.parent.main.count() > 0
-                        self.back.setEnabled(enabled)
-                        self.btn_close.setEnabled(enabled)
-
-                    class NavBtn(QPushButton):
-                        """浮动栈导航按钮：Back/Close 通用（图标、tooltip、回调参数化）"""
-                        def __init__(self, parent=None, root=None, icon=None, tip_key=None, callback=None):
-                            super().__init__(parent)
-                            self.parent = parent
-                            self.root = root
-                            self.icon_ = icon
-                            self.tip_key_ = tip_key
-                            self.setFixedSize(30,30)
-                            self.setAttribute(Qt.WA_StyledBackground, False)
-                            self.setProperty("wid","tbtn")
-                            self.langing()
-                            self.lighting(self.root.settings["theme"])
-                            if callback is not None:
-                                # clicked 自带 checked(bool) 参数，必须丢弃：
-                                # 否则会顶替 pop_page(wid) 的 wid 或 clear(deletable) 的 deletable
-                                self.clicked.connect(lambda: callback())
-
-                        def lighting(self, light: bool):
-                            color = QColor(120,120,120) if light else QColor(200,200,200)
-                            logo = change_color(self.icon_, color)
-                            self.setIcon(QIcon(logo.pixmap(48,48)))
-
-                        def langing(self):
-                            self.setToolTip(self.root.langer.get(self.tip_key_))
-
-                class Main(QStackedWidget):
-                    def __init__(self,parent=None,root=None):
-                        super().__init__(parent)
-                        self.parent = parent
-                        self.root = root
-                        self.init_wid()
-
-                    def init_wid(self):
-                        # QStackedWidget 内部自带 QStackedLayout 管理页面，无需（也不能）再设置 layout
-                        pass
-
-            class FloatingOverlay(QWidget):
-                """叠加形悬浮窗：注册方式与 FloatingStack 相同（add_page/pop_page/clear + close_page 闭包），
-                但页面为叠加显示（后进者盖在上层、互不销毁），样式参照 GithubSetting（全屏半透明遮罩+居中）。"""
-                def __init__(self,parent=None,root=None):
-                    super().__init__(parent)
-                    self.parent = parent
-                    self.root = root
-                    self.setAttribute(Qt.WA_StyledBackground, True)
-                    self.setProperty("wid_", "_window.overlay")
-                    self.setStyleSheet('QWidget[wid_="_window.overlay"]{background-color: rgba(0,0,0,0.5);}')
-                    self._pages = []
-                    self.init_wid()
-                    self.hide()
-
-                def init_wid(self):
-                    # 所有页面置于同一格子：重叠显示、居中，后添加者在上层
-                    self.layout = QGridLayout(self)
-                    self.layout.setContentsMargins(0,0,0,0)
-                    self.layout.setSpacing(0)
-                    self.layout.setAlignment(Qt.AlignCenter)
-
-                def add_page(self,wid):
-                    # 入叠：添加页面并提到最上层（已在叠中则仅重新提到最上层，_pages 始终按层序排列）
-                    if wid in self._pages:
-                        self._pages.remove(wid)
-                    else:
-                        self.layout.addWidget(wid,0,0,Qt.AlignCenter)
-                        # 页面（小窗口）截断鼠标事件冒泡：点其空白处不应传到遮罩触发窗口拖动
-                        wid.setAttribute(Qt.WA_NoMousePropagation, True)
-                        def close_page():
-                            self.pop_page(wid)
-                        wid.close_page = close_page
-                    self._pages.append(wid)
-                    wid.show()
-                    wid.raise_()
-                    self.show()
-                    self.raise_()
-
-                def pop_page(self, wid=None, deletable=True):
-                    # 出叠：移除指定页面（缺省为最上层），露出下层页面；deletable=True 销毁，False 仅移出保留实例
-                    if wid is None:
-                        wid = self._pages[-1] if self._pages else None
-                    if wid is None or wid not in self._pages:
-                        return
-                    self._pages.remove(wid)
-                    self.layout.removeWidget(wid)
-                    wid.hide()
-                    on_close = getattr(wid, "on_close", None)
-                    if on_close is not None:
-                        on_close()
-                    if deletable:
-                        wid.deleteLater()
-                    if self._pages:
-                        self._pages[-1].raise_()
-                    else:
-                        self.hide()
-
-                def clear(self, deletable=True):
-                    # 清空全部叠加页面；deletable=True 销毁页面，False 仅移出保留实例
-                    while self._pages:
-                        wid = self._pages.pop(0)
-                        self.layout.removeWidget(wid)
-                        wid.hide()
-                        on_close = getattr(wid, "on_close", None)
-                        if on_close is not None:
-                            on_close()
-                        if deletable:
-                            wid.deleteLater()
-                    self.hide()
-
-                def showEvent(self, event):
-                    # 显示时提层，盖过 floatingStack 等覆盖控件
-                    super().showEvent(event)
-                    self.raise_()
-
-                def mousePressEvent(self, event):
-                    # 灰色遮罩区域按下：拖动无边框窗口（与 Left.Logo 共用 Window 的拖动逻辑）
-                    self.root.window.drag_begin(event)
-                    super().mousePressEvent(event)
-
-                def mouseMoveEvent(self, event):
-                    self.root.window.drag_move(event)
-                    super().mouseMoveEvent(event)
-
-                def mouseReleaseEvent(self, event):
-                    self.root.window.drag_end(event)
-                    super().mouseReleaseEvent(event)
-
 
         class Tray(QSystemTrayIcon):
             def __init__(self, parent=None, root=None):
