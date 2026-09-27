@@ -1441,6 +1441,9 @@ try:
                     def init_ui(self):
                         self.setFixedSize(180, 40)
                         self.setAttribute(Qt.WA_StyledBackground, True)
+                        # 整块可拖动：悬停/按下都是食指手，只有拖动中换成四向移动
+                        self._cursor_shape = Qt.PointingHandCursor
+                        self.setCursor(self._cursor_shape)
 
                     def init_wid(self):
                         self.root.logger.debug("init QW.window.leftL.logoL")
@@ -1468,18 +1471,44 @@ try:
                             self.root.logger.error(f"Logo image not found: {logo}")
                         self.logo.setPixmap(pix)
 
+                    def _set_cursor(self, shape):
+                        """切换光标形状；拖动时 mouseMove 高频触发，同形状不重复设。"""
+                        if self._cursor_shape != shape:
+                            self._cursor_shape = shape
+                            self.setCursor(shape)
+
+                    def _over_icon(self, event):
+                        """鼠标是否落在 40x40 的 logo 图上：图标本身可点，光标保持悬停时的食指手。"""
+                        return self.logo.geometry().contains(event.position().toPoint())
+
                     def mousePressEvent(self, event):
-                        self.root.window.drag_begin(event)
+                        # 只认左键：右键（含中键）在这里不触发任何操作——既不拖动窗口，也不折叠侧栏
+                        if event.button() == Qt.LeftButton:
+                            self.root.window.drag_begin(event)
+                        elif not self._over_icon(event):
+                            # 右键按在标题文字上：按住没任何反应，光标换回普通箭头
+                            self._set_cursor(Qt.ArrowCursor)
                         super().mousePressEvent(event)
 
                     def mouseMoveEvent(self, event):
-                        self.root.window.drag_move(event)
+                        if self.root.window._drag_pressed:
+                            self.root.window.drag_move(event)
+                            # 按住后 drag_move 立刻置位 _drag_moving（无位移阈值），光标随即换成四向移动
+                            if self.root.window._drag_moving:
+                                self._set_cursor(Qt.SizeAllCursor)
+                        elif event.buttons() & Qt.RightButton:
+                            # 右键按住移动：跨过图标边界时实时切换
+                            self._set_cursor(Qt.PointingHandCursor if self._over_icon(event) else Qt.ArrowCursor)
                         super().mouseMoveEvent(event)
 
                     def mouseReleaseEvent(self, event):
-                        # 未发生拖动视为单击：折叠/展开左侧栏
-                        if not self.root.window.drag_end(event):
-                            self.parent.fold()
+                        if event.button() == Qt.LeftButton:
+                            # 用 drag_end 的返回值区分单击/拖动：它返回「本次是否真的移动过」。
+                            # 不能改读 _drag_moving——drag_end 里已经把它清成 False 了。
+                            if self.root.window._drag_pressed and not self.root.window.drag_end(event):
+                                self.parent.fold()
+                        # 松开时鼠标仍在控件上：不论左右键都回到悬停的食指手
+                        self._set_cursor(Qt.PointingHandCursor)
                         super().mouseReleaseEvent(event)
 
                 class TLine(QWidget):

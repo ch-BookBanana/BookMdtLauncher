@@ -1099,6 +1099,8 @@ class Game(QWidget):
                     self.input.setProperty("wid", "input")
                     self.input.setFixedHeight(32)
                     self.input.setClearButtonEnabled(True)
+                    # 名称即实例目录名，上限与 check_name 同源，超长直接打不进去
+                    self.input.setMaxLength(mdtScanner.MAX_NAME_LEN)
                     self.body_layout.addWidget(self.input, 0)
 
                     self.body_layout.addStretch(1)

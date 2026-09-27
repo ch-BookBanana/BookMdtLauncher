@@ -33,7 +33,6 @@ _INVALID_NAME_CHARS = '\\/:*?"<>|'
 _RESERVED_NAMES = ({"CON", "PRN", "AUX", "NUL"}
                    | {f"COM{i}" for i in range(1, 10)}
                    | {f"LPT{i}" for i in range(1, 10)})
-_MAX_NAME_LEN = 255   # 单个目录名长度上限（NTFS）
 
 
 def _key_path(keys):
@@ -66,6 +65,10 @@ def _parse_simple_config_typed(content: str) -> dict:
 class mdtScanner(QObject):
     base_dir = getPath("BML/.Mindustrys")
     DEFAULT_ICON = "src/assets/icons/mdt/mdt.png"
+    # 实例名长度上限（字符）。名字既是目录名也是界面上到处显示的标题，
+    # NTFS 允许的 255 对 UI 毫无意义，太长会把列表、标题栏、下载卡片撑坏。
+    # 下载页的输入框与管理模块的改名共用这一个值（check_name 是唯一校验入口）。
+    MAX_NAME_LEN = 32
     on_game_changed = Signal(dict)
 
     # ---- 游戏图标全局缓存表（引用计数，仅主线程操作） ----
@@ -502,12 +505,12 @@ class mdtScanner(QObject):
         """校验实例名是否可用：合法返回 None，否则返回 Editor.error 同款失败码。
 
         按 Windows 的目录命名收口：非空、无 \\/:*?"<>| 、无控制字符、
-        不以点开头、不以点或空格结尾、不是 CON/COM1 之类保留设备名、长度不超 255。
+        不以点开头、不以点或空格结尾、不是 CON/COM1 之类保留设备名、长度不超 MAX_NAME_LEN。
         以点开头单独给 "dot"（下载页对它有专属文案），其余一律 "invalidName"。
         重名不在这里判——那要看目录与登记集合，用 name_conflict() / unique_name()。
         """
         name = str(name).strip()
-        if not name or len(name) > _MAX_NAME_LEN:
+        if not name or len(name) > cls.MAX_NAME_LEN:
             return "invalidName"
         if any(ch in name for ch in _INVALID_NAME_CHARS) or any(ch < " " for ch in name):
             return "invalidName"
@@ -559,16 +562,21 @@ class mdtScanner(QObject):
 
         existing 是占用名集合；省略则现取 taken_names()。
         下载页的默认名与重名自动改名都走这里，后缀规则只有这一份。
+        返回值一定不超 MAX_NAME_LEN：后缀要先占位，主体按剩余额度截断再拼，
+        否则「32 字的名字已存在」会造出 35 字的目录名。
         """
         taken = self.taken_names() if existing is None else existing
         taken = {os.path.normcase(str(n)) for n in taken}
-        name = str(name).strip()
+        name = str(name).strip()[:self.MAX_NAME_LEN]
         if os.path.normcase(name) not in taken:
             return name
         index = 1
-        while os.path.normcase("%s(%d)" % (name, index)) in taken:
+        while True:
+            suffix = "(%d)" % index
+            candidate = name[:self.MAX_NAME_LEN - len(suffix)] + suffix
+            if os.path.normcase(candidate) not in taken:
+                return candidate
             index += 1
-        return "%s(%d)" % (name, index)
 
     class Editor:
         """单个实例的编辑接口（mdtScanner.edit(name) 返回，勿直接构造）。

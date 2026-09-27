@@ -71,38 +71,6 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 > 建议在「设置」页填入 GitHub Token，可显著提高 API 请求限额，避免下载列表加载受限。
 
-## 构建
-
-项目使用 Python 3.13 + PySide6，目前使用 **Pyinstaller** 打包。
-
-> Nuitka 打包错误已排查清楚，将在下一个版本发布时切回 Nuitka 打包。
-
-## 项目结构
-
-```
-BookMDTLauncher/
-├── main.py                   # 主程序（UI 与全部主逻辑）
-├── nuitka.cmd                # Nuitka 打包脚本
-├── pyinstaller.cmd           # PyInstaller 打包脚本
-└── src/
-    ├── assets/               # 图标资源
-    ├── lang/                 # 语言翻译
-    ├── resources/            # 主题样式（dark.qss / light.qss）
-    └── utils/                # 核心工具模块
-        ├── mdtScanner.py     # 游戏副本扫描与版本解析
-        ├── mdtLauncher.py    # 游戏进程启动器（QProcess）
-        ├── javaScanner.py    # 本地 Java 并发嗅探（轻量）
-        ├── javaDownload.py   # Java 自动下载 / 解压
-        ├── mdtServer.py      # Mindustry 服务器 UDP 查询
-        ├── api/              # 网络 API 封装
-        │   ├── githubAPI.py         # GitHub REST API 封装
-        │   ├── wayzer_mapAPI.py     # WayZer 地图站 (www.mindustry.top) API
-        │   └── stng_blueprintAPI.py # STNG 蓝图工坊 (www.stng.pw) API
-        ├── QDownloader.py    # 多线程断点续传下载器
-        ├── QThTimer.py       # 跨线程定时器框架
-        └── path_utils.py     # 多环境（开发 / PyInstaller / Nuitka）路径解析
-```
-
 ## 语言支持
 
 | 语言 | 代码 |
@@ -116,23 +84,7 @@ BookMDTLauncher/
 
 ## 参与贡献
 
-### 提交
-
-欢迎提交 Issue 与 Pull Request！
-
-- 功能建议 / Bug 反馈：请在 [Issues](https://github.com/ch-BookBanana/BookMdtLauncher/issues) 中提出；
-- 翻译补充：直接修改 `src/lang/` 下对应语言的 JSON 文件；
-- 代码风格：模块职责清晰、保持 `src/utils/` 各模块独立可复用。
-
-### 贡献者
-
-| 资源 | 贡献者 | 来源 |
-| --- | --- | --- |
-| 原版游戏 | [Anuken](https://github.com/Anuken) | [GitHub](https://github.com/Anuken/Mindustry) |
-| MindustryX | [wayzer](https://github.com/Way-zer) | [GitHub](https://github.com/TinyLake/MindustryX) |
-| MindustryARC | [squi2rel](https://github.com/squi2rel) | [GitHub](https://github.com/squi2rel/MindustryARC) |
-| Mindustry地图站(未集成) | [wayzer](https://github.com/Way-zer) | [Mindustry地图站](https://www.mindustry.top/) |
-| STNG 蓝图工坊(未集成) | --- | [STNG 蓝图工坊](https://www.stng.pw/) | 
+欢迎提交 Issue 与 Pull Request。构建方式、项目结构与贡献者名单见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## Star History
 

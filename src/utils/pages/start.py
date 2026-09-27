@@ -214,6 +214,8 @@ class Start(Page):
                 self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, 150))
             if versTxt[0]:
                 self.versTxt.setText(QFontMetrics(self.versTxt.font()).elidedText(versTxt[1], Qt.ElideRight, 130))
+            # 图标悬浮提示：名称 + 版本（二者都可能为空，拼一起即可；无实例时自动清空）
+            self.icon.setToolTip("\n".join(x for x in (self.game["name"], self.game["vers"]) if x))
 
         def refresh(self):
             """defaultGame 或其图标/版本变化时刷新左侧信息（主线程调用）。
@@ -222,8 +224,11 @@ class Start(Page):
             直接调用 sets 更新 UI（主线程安全，无需 QThTimer 中转）。"""
             default_game = self.root.mdtScanner.ensure_default_game()
             game_msg = self.root.mdtScanner.getMdtMsg(default_game) if default_game else None
-            # 底部按钮随「有无游戏」切换（无游戏时改为跳转下载页）
-            self.main.set_have_game(default_game is not None)
+            have_game = default_game is not None
+            # 左栏底部按钮随「有无游戏」切换：无游戏时改为跳转下载页
+            self.main.set_have_game(have_game)
+            # 主区按钮层同理整个隐藏：无实例时不该存在可点的「开始游戏」
+            self.parent.main.set_have_game(have_game)
             if self.game["name"] != default_game:
                 if default_game is None:
                     self.game["name"] = self.game["vers"] = self.game["icon_key"] = None
@@ -449,7 +454,10 @@ class Start(Page):
             self.light = bool(root.settings["theme"])
             self.colors = _log_colors(self.light)
             self.tags = _log_tag_colors(self.light)
+            self.have_game = True     # 是否有可用实例：无实例时按钮层整层隐藏
             self.init_wid()
+            # 切页时 QStackedWidget 会自己把目标页 show 出来，所以每次切页都要重压一次显隐
+            self.stack.currentChanged.connect(self._sync_have_game)
 
         def init_wid(self):
             self.layout = QStackedLayout(self)
@@ -471,6 +479,18 @@ class Start(Page):
             self.world = self.World(self,self.root)
             self.launch = self.Console(self,self.root)
             self.log = self.Console(self,self.root)
+
+        def set_have_game(self, have):
+            """有无可用实例：无实例时直接隐藏主区按钮层。
+
+            按钮藏起来就点不到「开始游戏」，也就没有「没选游戏却提交启动」这条路径。
+            """
+            self.have_game = bool(have)
+            self._sync_have_game()
+
+        def _sync_have_game(self, *_index):
+            """按钮层仅在「有实例且当前页就是按钮层」时可见，其余情况一律压回隐藏。"""
+            self.start.setVisible(self.have_game and self.stack.currentIndex() == 0)
 
         def append_log(self, prefix, text, role):
             """记录一行日志并刷新两个控制台视图（两页内容保持一致）。

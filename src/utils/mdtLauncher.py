@@ -66,15 +66,22 @@ class mdtLauncher(QProcess):
         返回 True 表示启动指令已发出，False 表示启动前校验失败。
         进程的实际启动、运行、结束都通过信号通知。
         """
-        # 生命周期开始
-        self._finished_emitted = False
-        self.game_launched.emit()
-
-        # ---------- 并发保护 ----------
+        # ---------- 启动前校验：失败直接返回 ----------
+        # 必须排在 game_launched 之前：把界面切到「启动中」页的正是这个信号，
+        # 先切页再退出会留下一个没人负责收回的界面（卡在"就绪"，且 going 停在 1）。
         if self.going:
             self.log.emit({"type": "error", "text": "gameRunning"})
             self._emit_finished(-1)
             return False
+        if mdt_name not in self.root.mdtScanner.getMdts():
+            self.log.emit({"type": "error", "text": "mdtNotFound"})
+            self._emit_finished(-1)
+            return False
+
+        # ---------- 生命周期开始 ----------
+        # game_launched 必须早于任何日志：Start 页挂在它上面清空上一次的控制台
+        self._finished_emitted = False
+        self.game_launched.emit()
         self.going = 1
         self.log.emit({"type": "info", "text": "Launch preparation started for: " + mdt_name})
 
@@ -88,13 +95,6 @@ class mdtLauncher(QProcess):
             "javaPath": None,
             "args": None
         }
-
-        # ---------- 1. 检查 mdt 实例 ----------
-        if mdt_name not in self.root.mdtScanner.getMdts():
-            self.log.emit({"type": "error", "text": "mdtNotFound"})
-            self.going = 0
-            self._emit_finished(-1)
-            return False
 
         self.data["mdtName"] = mdt_name
         self.data["mdtPath"] = os.path.join(getPath("BML/.Mindustrys"), mdt_name)
