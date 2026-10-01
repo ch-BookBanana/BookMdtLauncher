@@ -91,6 +91,7 @@ class Download(Page):
                 self.icon_ = icon
                 self.init_ui()
                 self.init_wid()
+                bus.bind(self)
 
             def init_ui(self):
                 self.setFixedSize(120, 30)

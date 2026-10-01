@@ -26,6 +26,11 @@ BookMDTLauncher/
         ├── QThTimer.py         # 跨线程定时器框架
         ├── path_utils.py       # 多环境（开发 / PyInstaller / Nuitka）路径解析
         ├── utils.py            # 通用工具：翻译取用、图标改色、Markdown 渲染
+        ├── bus.py              # 全局总线：主题/语言变化广播，控件用 bus.bind(self) 自行接入
+        ├── options/            # 设置页可复用的选项块（不自插布局，由页面的 add() 挂载）
+        │   ├── _init.py        # 公共导入：Qt 控件、getPath、change_color、bus 的汇总出口
+        │   ├── items.py        # Bool/Slider/DropBtnCombo/Combo
+        │   └── texts.py        # Title/Line
         ├── api/                # 网络 API 封装
         │   ├── githubAPI.py         # GitHub REST API 封装
         │   ├── wayzer_mapAPI.py     # WayZer 地图站 (www.mindustry.top) API
@@ -37,9 +42,9 @@ BookMDTLauncher/
         └── pages/              # 页面层（三栏框架：Leftw / Mainw / Rightw / Page）
             ├── _init.py        # 页面基类与三栏容器
             ├── start.py        # 启动页
-            ├── setting.py      # 设置页
             ├── download.py     # 下载页
             ├── game.py         # 游戏页
+            ├── setting.py      # 设置页：Setting（左栏 Left、右栏 Main）及其子页 Launcher
             ├── downloads/
             │   └── game.py     # 各下载源的游戏列表
             ├── fOverlay/

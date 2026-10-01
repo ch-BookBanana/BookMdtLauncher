@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ...bus import bus
 from ...utils import change_color
 
 
@@ -154,6 +155,7 @@ class FloatingStack(QWidget):
                 self.setProperty("wid","tbtn")
                 self.langing()
                 self.lighting(self.root.settings["theme"])
+                bus.bind(self)
                 if callback is not None:
                     # clicked 自带 checked(bool) 参数，必须丢弃：
                     # 否则会顶替 pop_page(wid) 的 wid 或 clear(deletable) 的 deletable

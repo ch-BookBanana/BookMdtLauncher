@@ -301,6 +301,7 @@ class Start(Page):
                     self.have_game = True
                     self.init_wid()
                     self.langing()
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -339,6 +340,7 @@ class Start(Page):
                     super().__init__(parent,root)
                     self.init_wid()
                     self.langing()
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -361,6 +363,7 @@ class Start(Page):
                     super().__init__(parent,root)
                     self.init_wid()
                     self.langing()
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -384,6 +387,7 @@ class Start(Page):
                     super().__init__(parent,root)
                     self.init_wid()
                     self.langing()
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -420,6 +424,7 @@ class Start(Page):
                     super().__init__(parent,root)
                     self.init_wid()
                     self.langing()
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -456,6 +461,7 @@ class Start(Page):
             self.tags = _log_tag_colors(self.light)
             self.have_game = True     # 是否有可用实例：无实例时按钮层整层隐藏
             self.init_wid()
+            bus.bind(self)
             # 切页时 QStackedWidget 会自己把目标页 show 出来，所以每次切页都要重压一次显隐
             self.stack.currentChanged.connect(self._sync_have_game)
 
@@ -541,6 +547,7 @@ class Start(Page):
                 self.init_wid()
                 self.langing()
                 self.setAttribute(Qt.WA_StyledBackground,False)
+                bus.bind(self)
 
             def init_wid(self):
                 self.layout = QGridLayout(self)
@@ -689,6 +696,7 @@ class Start(Page):
                     self.body.hide()
                     self.langing()
                     self.add_many(games)
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -879,6 +887,7 @@ class Start(Page):
                 self.parent.consoles.append(self)
                 self.init_wid()
                 self.lighting(self.parent.light)
+                bus.bind(self)
 
             def init_wid(self):
                 self.layout = QVBoxLayout(self)

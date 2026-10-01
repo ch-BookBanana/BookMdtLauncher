@@ -31,6 +31,7 @@ from ...mdtScanner import mdtScanner
 from ...QThTimer import QThTimer
 from ...path_utils import getPath
 from ...utils import _apply_md_image, change_color, md_to_html, t
+from ...bus import bus
 
 
 class Game(QWidget):
@@ -153,6 +154,7 @@ class Game(QWidget):
                 self.colorable = color
                 self.init_ui()
                 self.init_wid()
+                bus.bind(self)
 
             def init_ui(self):
                 self.setFixedHeight(30)
@@ -264,6 +266,7 @@ class Game(QWidget):
                 self._action_btns = []
                 self.introReady.connect(self._on_intro_ready, Qt.QueuedConnection)
                 self._init_wid()
+                bus.bind(self)
 
             def _init_wid(self):
                 self.layout = QVBoxLayout(self)
@@ -600,6 +603,7 @@ class Game(QWidget):
                     self.setProperty("wid_","download.game.classs")
                     self.setMaximumWidth(600)
                     self.init_wid()
+                    bus.bind(self)
 
                 def sizeHint(self):
                     h = super().sizeHint().height()
@@ -872,6 +876,7 @@ class Game(QWidget):
                         self.setAttribute(Qt.WA_StyledBackground, True)
                         self.setObjectName("item")
                         self.init_wid()
+                        bus.bind(self)
 
                     def set_data(self, data: dict, icon_pixmap=None):
                         self.data = data or {}
@@ -895,6 +900,7 @@ class Game(QWidget):
                             self._tooltip_key = tooltip_key
                             self._is_show = True   # 悬浮 Item 时是否显示该按钮
                             self.init_ui()
+                            bus.bind(self)
 
                         def init_ui(self):
                             self.setFixedSize(20, 20)
@@ -1041,6 +1047,7 @@ class Game(QWidget):
                     self.lighting(bool(self.root.settings.get("theme")))
                     self._init_name_input()
                     self._start_validation()
+                    bus.bind(self)
 
                 def init_wid(self):
                     # 弹窗尺寸：仅「关闭行 + 分割线 + 名称输入框 + 提示/确定行」，
@@ -1354,6 +1361,7 @@ class Game(QWidget):
                     self.init_wid()
                     self.langing()
                     self.lighting(bool(self.root.settings.get("theme")))
+                    bus.bind(self)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -1590,6 +1598,7 @@ class Game(QWidget):
                         self.init_wid()
                         self.langing()
                         self.lighting(bool(self.root.settings.get("theme")))
+                        bus.bind(self)
 
                     def init_wid(self):
                         self.layout = QHBoxLayout(self)

@@ -17,6 +17,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PySide6.QtWidgets import QWidget
 
+from ..bus import bus
+
 
 class Leftw(QWidget):
     def __init__(self, parent=None, root=None):

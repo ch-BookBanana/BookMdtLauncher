@@ -49,6 +49,7 @@ try:
     from src.utils import javaDownload
     from src.utils.QDownloader import QDownloader
     from src.utils.utils import _is_mdt_download, change_color, t
+    from src.utils.bus import bus
     from src.utils.on_start import startup
     from src.utils.pages.fOverlay._init import FloatingOverlay
     from src.utils.pages.fStack._init import FloatingStack
@@ -441,17 +442,8 @@ try:
                 font.setPointSize(8)
                 app.setFont(font)
 
-                # 递归调用所有子控件的 lighting 函数（图标换色）
-                def notify_lighting(widget, state):
-                    if hasattr(widget, 'lighting') and callable(widget.lighting):
-                        try:
-                            widget.lighting(state)
-                        except Exception as e:
-                            self.logger.error(f"Error calling lighting on {widget}: {e}")
-                    for child in widget.children():
-                        notify_lighting(child, state)
-
-                notify_lighting(self.window, is_light)
+                # 广播主题变化：各控件的 lighting 已自行接在总线上
+                bus.set_theme(is_light)
                 self.logger.info(t(self.langer.get("log.info.changetheme"), "light" if is_light else "dark"))
             finally:
                 # 完成：重新启用绘制（异常也保证恢复，避免窗口卡在不绘制状态）
@@ -572,7 +564,7 @@ try:
                 self.floatingStack.raise_()
 
                 # GitHub 设置页：改为叠加浮层页面（遮罩/居中由 floatingOverlay 提供）；
-                # 创建时机仍早于 apply_theme，以便首轮主题递归覆盖到其子控件
+                # 子控件的主题/语言由各自在总线上订阅，和创建时机没有关系
                 self.githubSetting = self.GithubSetting(self, self.root)
                 self.floatingOverlay = FloatingOverlay(self, self.root)
 
@@ -829,6 +821,7 @@ try:
                                 self.parent = parent
                                 self.root = root
                                 self.init_ui()
+                                bus.bind(self)
 
                             def init_ui(self):
                                 self.setFixedSize(30, 30)
@@ -870,6 +863,7 @@ try:
                                 self._editing = False
                                 self.init_wid()
                                 self.langing()
+                                bus.bind(self)
 
                             def init_wid(self):
                                 self.layout = QVBoxLayout(self)
@@ -1437,6 +1431,7 @@ try:
 
                         self.init_ui()
                         self.init_wid()
+                        bus.bind(self)
 
                     def init_ui(self):
                         self.setFixedSize(180, 40)
@@ -1602,6 +1597,7 @@ try:
                             self.text_ = text
                             self.init_ui()
                             self.init_wid()
+                            bus.bind(self)
 
                         def init_ui(self):
                             self.setFixedSize(180, 40)
@@ -1783,6 +1779,7 @@ try:
                             self.root = root
                             self._hover_pending = False
                             self.init_ui()
+                            bus.bind(self)
                             self.clicked.connect(self.root.window.openGithubSetting)
                             # refreshed 仅更新 tooltip，不触发后台请求
                             self.root.githubAPI.refreshed.connect(self._update_tooltip)
@@ -1865,6 +1862,7 @@ try:
                             self.parent = parent
                             self.root = root
                             self.init_ui()
+                            bus.bind(self)
                             self.shown = True
                             self.hide()
                             self._active_state = None
@@ -1933,6 +1931,7 @@ try:
                                 self._last_java_paused = None   # 检测循环上次看到的 Java 暂停状态（变化时记日志）
                                 self.init_ui()
                                 self.langing()
+                                bus.bind(self)
                                 # 初始化时立即扫描一次，随后周期刷新
                                 self._timer = QThTimer.taskP(1000, self._snapshot_tasks, result_callback=self._render_items)
                                 QThTimer.task(0, self._snapshot_tasks, result_callback=self._render_items)
@@ -2365,6 +2364,7 @@ try:
                             self.logo_ = logo
                             self.setLogo_ = 0
                             self.init_ui()
+                            bus.bind(self)
 
                         def init_ui(self):
                             self.setFixedSize(30,30)
@@ -2458,6 +2458,7 @@ try:
                 self.theme = None
                 self.init_ui()
                 self.init_wid()
+                bus.bind(self)
                 self.activated.connect(self.on_tray_activated)
                 self.root.logger.info(self.root.langer.get("log.info.trayLoad"))
 
@@ -2698,31 +2699,9 @@ try:
                     self.root.logger.warning(f"Failed to load default language file {default_lang_path}: {e}")
                     self.default_langs = {}
 
-                # 自动加载每个控件里的 langing 模块
-                try:
-                    self._refresh_all_widgets()
-                    self.root.tray.langing()
-                except:
-                    pass
-
-            def _refresh_all_widgets(self):
-                """递归查找所有控件并调用 langing 方法"""
-                def notify_langing(widget):
-                    # 检查是否有 langing 方法且可调用
-                    if hasattr(widget, 'langing') and callable(widget.langing):
-                        try:
-                            widget.langing()
-                        except Exception as e:
-                            # 避免因为某个控件翻译失败导致整个程序崩溃
-                            self.root.logger.debug(f"Error calling langing on {widget}: {e}")
-
-                    # 递归处理子控件
-                    for child in widget.children():
-                        notify_langing(child)
-
-                # 从主窗口开始遍历
-                if hasattr(self.root, 'window') and self.root.window:
-                    QTimer.singleShot(0, lambda: notify_langing(self.root.window))
+                # 广播语言变化：各控件的 langing 已自行接在总线上，
+                # 延到事件循环里统一刷新，避免阻塞本次语言文件的加载
+                QTimer.singleShot(0, bus.set_lang)
                 self.root.logger.info(self.get("init.load"))
 
             def get(self, key):

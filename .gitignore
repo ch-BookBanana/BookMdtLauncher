@@ -20,15 +20,10 @@
 /nuitka_bisect/
 
 
-# pycache
-/__pycache__/
-/src/utils/__pycache__/
-
-/src/utils/pages/__pycache__/
-/src/utils/pages/fStack/__pycache__/
-/src/utils/pages/downloads/__pycache__/
-/src/utils/on_start/__pycache__/
-/src/utils/api/__pycache__/
+# pycache（全库通配：新增的包不用再来补目录）
+__pycache__/
+*.pyc
+*.pyo
 
 
 Book Mindustry Launcher.exe
