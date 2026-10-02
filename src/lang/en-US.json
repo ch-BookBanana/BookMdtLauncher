@@ -121,6 +121,18 @@
     "wid.pages.downloadList.delete": "Delete",
 
     "wid.pages.game": "Game",
+
+    "wid.pages.gameManage.java.follow": "Follow Global",
+    "wid.pages.gameManage.rename": "Change Name",
+    "wid.pages.gameManage.group": "Change Group",
+    "wid.pages.gameManage.group.tip": "Choose a group:",
+    "wid.pages.gameManage.delete": "Delete Game",
+    "wid.pages.gameManage.delete.tip": "Really delete this game? It will be gone for a long time (a really long time)",
+    "wid.pages.gameManage.delete.confirm": "Delete",
+    "wid.pages.gameManage.failed": "Operation failed, please try again",
+    "wid.pages.gameManage.folder.data": "Data Folder",
+    "wid.pages.gameManage.folder.blueprint": "Schematics Folder",
+    "wid.pages.gameManage.folder.mod": "Mods Folder",
     "wid.pages.setting": "Settings",
     "wid.pages.setting.launcher": "Launcher",
     "wid.pages.setting.launcher.preferences": "Appearance",

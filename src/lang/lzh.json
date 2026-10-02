@@ -121,6 +121,18 @@
     "wid.pages.downloadList.delete": "刪除",
 
     "wid.pages.game": "藏戲",
+
+    "wid.pages.gameManage.java.follow": "隨全局",
+    "wid.pages.gameManage.rename": "易名",
+    "wid.pages.gameManage.group": "改屬",
+    "wid.pages.gameManage.group.tip": "請擇分組：",
+    "wid.pages.gameManage.delete": "刪戲",
+    "wid.pages.gameManage.delete.tip": "果欲刪此戲乎？將失之久，甚久",
+    "wid.pages.gameManage.delete.confirm": "刪之",
+    "wid.pages.gameManage.failed": "事敗，請再試",
+    "wid.pages.gameManage.folder.data": "數據之匣",
+    "wid.pages.gameManage.folder.blueprint": "藍圖之匣",
+    "wid.pages.gameManage.folder.mod": "模組之匣",
     "wid.pages.setting": "機杼",
     "wid.pages.setting.launcher": "啟闔之器",
     "wid.pages.setting.launcher.preferences": "容止",

@@ -17,11 +17,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QScrollBar, QStackedWidget, QVBoxLayout
+from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout
 
 from ..javaScanner import javaScanner
 
 from ..options.items import Bool, Combo
+from ..options.scrolls import Scroll
 from ..options.texts import Title
 
 from ..utils import change_color
@@ -46,45 +47,16 @@ class Setting(Page):
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.layout.setSpacing(0)
 
-            self.scroll = QScrollArea(self)
-            self.scroll.setWidgetResizable(True)
-            self.scroll.setFrameShape(QFrame.NoFrame)
+            self.scroll = Scroll(self, self.root)
             self.layout.addWidget(self.scroll)
-
-            self.main = QWidget()
-            self.scroll_layout = QVBoxLayout(self.main)
-            self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-            self.scroll_layout.setSpacing(0)
-            self.scroll_layout.setAlignment(Qt.AlignTop)
-            self.scroll.setWidget(self.main)
-            self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-            self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-            
-            self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-            self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-            self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
 
             self.bthGroup = QButtonGroup(self)
 
         def add_btn(self, text=None, icon=None):
             btn = self.Btns(text, icon, self, self.root)
-            self.scroll_layout.addWidget(btn)
+            self.scroll.add(btn)
             self.bthGroup.addButton(btn)
-            self.barShow()
             return btn
-
-        def barShow(self):
-            self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
-
-        def resizeEvent(self,event):
-            self.scroll_slider.setGeometry(self.scroll.width()-5,0,5,self.scroll.height())
-            self.barShow()
-            super().resizeEvent(event)
-
-        def showEvent(self,event):
-            super().showEvent(event)
-            self.barShow()
 
 
         class Btns(QPushButton):
@@ -210,33 +182,16 @@ class Setting(Page):
                 self.layout.setSpacing(0)
                 self.layout.setAlignment(Qt.AlignHCenter)
 
-                self.scroll = QScrollArea(self)
+                self.scroll = Scroll(self, self.root, margins=(30, 0, 30, 0))
                 self.scroll.setStyleSheet("max-width: 600px;")
-                self.scroll.setWidgetResizable(True)
-                self.scroll.setFrameShape(QFrame.NoFrame)
                 self.layout.addWidget(self.scroll)
-
-                self.main = QWidget()
-                
-                self.scroll_layout = QVBoxLayout(self.main)
-                self.scroll_layout.setContentsMargins(30,0,30,0)
-                self.scroll_layout.setSpacing(0)
-                self.scroll_layout.setAlignment(Qt.AlignTop)
-                self.scroll.setWidget(self.main)
-                self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-                self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                
-                self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-                self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-                self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
 
                 self._title = QLabel()
                 self._title.setProperty("wid", "title")
                 self._title.setFixedHeight(38)
                 self._title.setStyleSheet("font-size: 28px;")
                 self._title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-                self.scroll_layout.addWidget(self._title)
+                self.scroll.add(self._title)
                 self.langing()
 
             def langing(self):
@@ -244,21 +199,7 @@ class Setting(Page):
             
 
             def add(self, wid, spacing=0):
-                if spacing: self.scroll_layout.addSpacing(spacing)
-                self.scroll_layout.addWidget(wid)
-                return wid
-
-            def barShow(self):
-                self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
-
-            def resizeEvent(self,event):
-                self.scroll_slider.setGeometry(self.scroll.width()-5,0,5,self.scroll.height())
-                self.barShow()
-                super().resizeEvent(event)
-
-            def showEvent(self,event):
-                super().showEvent(event)
-                self.barShow()
+                return self.scroll.add(wid, spacing)
 
         class Launcher(Page):
             def __init__(self, parent=None, root=None, text=None,icon=None):

@@ -16,7 +16,7 @@ BookMDTLauncher/
     ├── lang/                   # 语言翻译（zh-CN / zh-TW / en-US / ja-JP / ko-KR / lzh）
     ├── resources/styles/       # 主题样式（dark.qss / light.qss）
     └── utils/                  # 核心工具模块
-        ├── mdtScanner.py       # 游戏副本扫描与版本解析
+        ├── mdtManager.py       # 游戏副本扫描与版本解析
         ├── mdtLauncher.py      # 游戏进程启动器（QProcess）
         ├── mdtLocker.py        # 游戏实例锁：运行期间禁止改名 / 删除实例
         ├── mdtServer.py        # Mindustry 服务器 UDP 查询
@@ -27,9 +27,10 @@ BookMDTLauncher/
         ├── path_utils.py       # 多环境（开发 / PyInstaller / Nuitka）路径解析
         ├── utils.py            # 通用工具：翻译取用、图标改色、Markdown 渲染
         ├── bus.py              # 全局总线：主题/语言变化广播，控件用 bus.bind(self) 自行接入
-        ├── options/            # 设置页可复用的选项块（不自插布局，由页面的 add() 挂载）
+        ├── options/            # 可复用的界面单元（不自插布局，由页面的 add() 挂载）
         │   ├── _init.py        # 公共导入：Qt 控件、getPath、change_color、bus 的汇总出口
         │   ├── items.py        # Bool/Slider/DropBtnCombo/Combo
+        │   ├── scrolls.py      # Scroll：自带浮条的滚动区（横/竖、可选拖动）
         │   └── texts.py        # Title/Line
         ├── api/                # 网络 API 封装
         │   ├── githubAPI.py         # GitHub REST API 封装

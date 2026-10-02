@@ -20,7 +20,7 @@ import re
 from urllib.parse import urljoin, urlparse
 
 from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QImage, QPainter, QPixmap
 
 import hashlib
 
@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import markdown
 import threading
 
-from .mdtScanner import mdtScanner
+from .mdtManager import mdtManager
 from .path_utils import getPath
 
 
@@ -66,12 +66,28 @@ def t(text, *args):
     return text
 
 
+def openFolder(path):
+    """在系统文件管理器里打开目录（不存在就先建出来），返回是否成功打开。
+
+    实例目录是解压出来的，mods/、schematics/ 这类目录在游戏写入数据前根本不存在，
+    所以这里替游戏把目录建好再打开——只是想看一眼也不该被「目录不存在」挡住。
+    路径为空、或目录建不出来（非法路径/无权限）时返回 False，提示与否交给调用方。
+    """
+    if not path:
+        return False
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError:
+        return False
+    return QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+
 def _is_mdt_download(dest):
     """dest 是否属于 mdt 游戏下载目标（BML/.Mindustrys/ 下）。"""
     if not dest:
         return False
     try:
-        base = os.path.normcase(os.path.normpath(mdtScanner.base_dir))
+        base = os.path.normcase(os.path.normpath(mdtManager.base_dir))
         path = os.path.normcase(os.path.normpath(dest))
         return path == base or path.startswith(base + os.sep)
     except Exception:

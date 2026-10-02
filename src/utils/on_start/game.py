@@ -20,7 +20,7 @@ import hashlib
 import os
 
 from ..QDownloader import QDownloader
-from ..mdtScanner import mdtScanner
+from ..mdtManager import mdtManager
 from ..path_utils import getPath
 from ..utils import t
 
@@ -28,12 +28,12 @@ from ..utils import t
 def resume_mdt_downloads(root):
     """启动续传所有未完成的 mdt 游戏下载（downloading.json 记录），并同步暂停状态。
 
-    通过 mdtScanner.getDownloadingMdts() 获取下载中列表；
+    通过 mdtManager.getDownloadingMdts() 获取下载中列表；
     有 .tmp/<task_id>/state.json → continue_task 续传；否则用 downloading.json
     的 url/dest 新建任务；downloading.json 记录 paused=true 时创建后立即暂停。
     """
     try:
-        downloading = root.mdtScanner.getDownloadingMdts() or {}
+        downloading = root.mdtManager.getDownloadingMdts() or {}
     except Exception as e:
         root.logger.warning(t(root.langer.get("log.dl.mdt_scan_error"), repr(e)))
         return
@@ -81,11 +81,11 @@ def on_mdt_download_finished(root, dl, name, ok):
         root.logger.error(t(root.langer.get("log.dl.mdt_finished_fail"), name))
         return
     try:
-        root.mdtScanner._retrieve_mdt_data(name)
+        root.mdtManager._retrieve_mdt_data(name)
         dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
         if os.path.isfile(dfile):
             os.remove(dfile)
-        root.mdtScanner.invalidate_cache()
+        root.mdtManager.invalidate_cache()
         root.logger.info(t(root.langer.get("log.dl.mdt_finished_ok"), name))
     except Exception as e:
         root.logger.error(t(root.langer.get("log.dl.mdt_finished_clean_err"), name, repr(e)))

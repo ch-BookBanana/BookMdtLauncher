@@ -25,7 +25,7 @@ from .path_utils import getPath
 from .javaScanner import javaScanner
 from .QThTimer import QThTimer
 
-_log = logging.getLogger("Main.MdtScanner")
+_log = logging.getLogger("Main.MdtManager")
 
 # 实例名里 Windows 不允许的字符（与下载页命名校验保持一致）
 _INVALID_NAME_CHARS = '\\/:*?"<>|'
@@ -62,7 +62,7 @@ def _parse_simple_config_typed(content: str) -> dict:
             config[key] = val
     return config
 
-class mdtScanner(QObject):
+class mdtManager(QObject):
     base_dir = getPath("BML/.Mindustrys")
     DEFAULT_ICON = "src/assets/icons/mdt/mdt.png"
     # 实例名长度上限（字符）。名字既是目录名也是界面上到处显示的标题，
@@ -70,6 +70,19 @@ class mdtScanner(QObject):
     # 下载页的输入框与管理模块的改名共用这一个值（check_name 是唯一校验入口）。
     MAX_NAME_LEN = 32
     on_game_changed = Signal(dict)
+    # BML.json 里「跟随全局设置」的标识符（只写不读：界面按它显示「跟随全局」那个选项）
+    FOLLOW = "<:|follow|:>"
+    # settings["gameList"] 里默认分组的键（是个符号名，显示前要过 i18n 翻成「默认」）
+    DEFAULT_GROUP = "<:|default|:>"
+
+    # ---- 实例数据目录布局（与 mdtLauncher 启动时设的环境变量一一对应）----
+    # <实例目录>/data 是数据根：启动时既是进程的 %APPDATA%，也是进程的工作目录；
+    # 游戏真正读写的是其下的 Mindustry/：saves、schematics、mods 都在那一层。
+    DATA_ROOT_NAME = "data"
+    DATA_DIR_NAME = "Mindustry"
+    # 「数据 / 蓝图 / 模组」三个文件夹按类别取：键是类别名，值是数据目录下的目录名。
+    # 数据目录本体用空串表示（蓝图 schematics、模组 mods 都是游戏自己定的目录名）。
+    DATA_FOLDERS = {"data": "", "blueprint": "schematics", "mod": "mods"}
 
     # ---- 游戏图标全局缓存表（引用计数，仅主线程操作） ----
     # QPixmaps: {game: QPixmap}；_pixmap_refs: {game: int}
@@ -161,6 +174,30 @@ class mdtScanner(QObject):
     def _get_mdt_jar_path(cls, subdir_name):
         """返回子目录下 mdt.jar 的完整路径"""
         return os.path.join(cls.base_dir, subdir_name, "mdt.jar")
+
+    @classmethod
+    def getDataRoot(cls, subdir_name):
+        """实例的数据根路径（<实例目录>/data）；实例名为空返回 ""。
+
+        即启动游戏时给进程设的 %APPDATA% 与工作目录，比 mdtData 高一级。
+        """
+        if not subdir_name:
+            return ""
+        return os.path.join(cls.base_dir, subdir_name, cls.DATA_ROOT_NAME)
+
+    @classmethod
+    def getDataFolder(cls, subdir_name, kind="data"):
+        """实例某个数据文件夹的完整路径；实例名为空或类别未知返回 ""。
+
+        kind 取 DATA_FOLDERS 的键：data（数据目录本体）/ blueprint（蓝图）/ mod（模组）。
+        只拼路径，不建目录、也不判断存在——建目录与打开是「要用这个文件夹」时的事。
+        """
+        if kind not in cls.DATA_FOLDERS:
+            return ""
+        root = cls.getDataRoot(subdir_name)
+        if not root:
+            return ""
+        return os.path.join(root, cls.DATA_DIR_NAME, cls.DATA_FOLDERS[kind])
 
     @classmethod
     def _get_base_dir_mtime(cls):
@@ -405,7 +442,7 @@ class mdtScanner(QObject):
     def _retrieve_mdt_data(cls, subdir_name):
         """读取 data.json，与默认值深度合并后写回。"""
         default_data = {
-            "javaPath": "<:|follow|:>"
+            "javaPath": cls.FOLLOW
         }
         data_path = os.path.join(cls.base_dir, subdir_name, "BML.json")
         file_data = {}
@@ -455,7 +492,7 @@ class mdtScanner(QObject):
         if os.path.isfile(data_path):
             with open(data_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        if (data["javaPath"] == "<:|follow|:>" and settings["javaPath"] is None) or data["javaPath"] is None:
+        if (data["javaPath"] == cls.FOLLOW and settings["javaPath"] is None) or data["javaPath"] is None:
             # 自动选择：优先 17，其次最高版本
             max_vers = -1
             max_path = None
@@ -469,14 +506,14 @@ class mdtScanner(QObject):
                     max_vers = 17
                     break
             data["javaPath"] = max_path
-        elif data["javaPath"] == "<:|follow|:>":
+        elif data["javaPath"] == cls.FOLLOW:
             data["javaPath"] = settings["javaPath"]
 
         # 仅校验具体路径：不可用 → 改回 follow 写入并返回
         # （None 表示自动匹配，不参与 isJava 校验，也不写入 BML.json）
         java_path = data["javaPath"]
-        if java_path and java_path != "<:|follow|:>" and not javaScanner.isJava(java_path):
-            data["javaPath"] = "<:|follow|:>"
+        if java_path and java_path != cls.FOLLOW and not javaScanner.isJava(java_path):
+            data["javaPath"] = cls.FOLLOW
             try:
                 with open(data_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
@@ -485,10 +522,27 @@ class mdtScanner(QObject):
             return data
         return data   
 
+    @classmethod
+    def getMdtRaw(cls, subdir_name):
+        """读实例 BML.json 的原样字段，读不到返回 {}。
+
+        与 getMdtData 的区别：getMdtData 会把 follow / None 解析成具体路径给启动用，
+        这里要的是原始值——界面得知道用户当初选的是「跟随全局」还是某个具体 Java。
+        """
+        cls._retrieve_mdt_data(subdir_name)
+        data_path = getPath(os.path.join(cls.base_dir, subdir_name, "BML.json"))
+        if not os.path.isfile(data_path):
+            return {}
+        try:
+            with open(data_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
     # ==================== 实例编辑 ====================
 
     def edit(self, name):
-        """取某个实例的编辑入口：mdtScanner.edit("原版-146").rename("我的原版")。
+        """取某个实例的编辑入口：mdtManager.edit("原版-146").rename("我的原版")。
 
         edit 只做一件事：把实例名注入编辑器类再实例化，返回现成的编辑器对象。
         名字只在这一处传，之后每个编辑方法都从编辑器自身的 name 取目标，
@@ -579,9 +633,9 @@ class mdtScanner(QObject):
             index += 1
 
     class Editor:
-        """单个实例的编辑接口（mdtScanner.edit(name) 返回，勿直接构造）。
+        """单个实例的编辑接口（mdtManager.edit(name) 返回，勿直接构造）。
 
-        读：exists()。写：set() / java() / icon() / rename()，全部返回 self。
+        读：exists()。写：set() / java() / icon() / rename() / group() / delete()，全部返回 self。
 
         ok 与 error 是最近一次操作的结果（error 为 None 即成功），失败码：
             notFound      不是正式实例（目录不存在，或只是下载中的半截目录）
@@ -643,7 +697,7 @@ class mdtScanner(QObject):
         def java(self, path=None):
             """设置实例使用的 Java：path=None 表示跟随全局设置。"""
             if path is None:
-                return self.set("javaPath", "<:|follow|:>")
+                return self.set("javaPath", self._scanner.FOLLOW)
             if not path or not javaScanner.isJava(path):
                 return self._fail("invalidJava")
             return self.set("javaPath", path)
@@ -713,6 +767,68 @@ class mdtScanner(QObject):
             self._scanner.on_game_changed.emit({"type": "nameChanged", "game": new_name, "old_name": old_name})
             return self._ok()
 
+        def group(self, name=None):
+            """把实例挪到分组：name 为空 → 默认分组。
+
+            分组只活在 settings["gameList"] 这张表里（实例目录与 BML.json 都不记归属），
+            所以这里改的只有它：先从旧组摘掉，再挂到目标组末尾。
+            目标组是界面从这张表里选的，正常都在；万一不在就顺手建一个，
+            免得实例从表里凭空消失（下一轮 checkGame 会把它当新游戏重报一次）。
+            分组没变则原样返回，不动表也不发事件。
+            成功后发 on_game_changed 的 groupChanged 事件，UI 侧按事件搬条目。
+            """
+            if not self.exists():
+                return self._fail("notFound")
+            name = name or self._scanner.DEFAULT_GROUP
+            lists = self._scanner.settings["gameList"]
+            old_name = ""
+            for key, games in lists.items():
+                if self.name in games:
+                    old_name = key
+                    break
+            if old_name == name:
+                return self._ok()
+            for games in lists.values():
+                while self.name in games:
+                    games.remove(self.name)
+            lists.setdefault(name, []).append(self.name)
+            self._scanner.on_game_changed.emit({
+                "type": "groupChanged", "game": self.name,
+                "old_group": old_name, "group": name})
+            return self._ok()
+
+        def delete(self):
+            """删除实例：连目录一起移除，并清掉 settings 里的兵记。
+
+            三种「删不掉」各有自己的码：
+                notFound    不是正式实例（目录没了，或只是下载中的半截目录）
+                locked      实例正在运行（mdtLocker 握着目录句柄，系统拒绝删除）
+                ioError     其它磁盘错误
+            登记必须跟着清（gameList 各分组 + defaultGame 回退）：留着那笔登记，
+            下一轮 checkGame 会把它当「目录不见了」再报一次 deleteGame。
+            成功后发 on_game_changed 的 deleteGame 事件，UI 侧按事件移除条目。
+            """
+            if not self.exists():
+                return self._fail("notFound")
+            name = self.name
+            try:
+                shutil.rmtree(self.path)
+            except PermissionError as exc:
+                return self._fail("locked", exc)
+            except OSError as exc:
+                return self._fail("ioError", exc)
+            # 目录没了：副本列表缓存与图标缓存一起作废（图标引用计数不碰，
+            # 那是各处持有者自己 release 的账）
+            self._scanner.invalidate_cache()
+            self._scanner.invalidate_icon_pixmap(name)
+            for games in self._scanner.settings["gameList"].values():
+                while name in games:
+                    games.remove(name)
+            # defaultGame 指向它时回退到别的副本（副本列表缓存刚清过，重算就是实的）
+            self._scanner.ensure_default_game()
+            self._scanner.on_game_changed.emit({"type": "deleteGame", "game": name})
+            return self._ok()
+
         # ---------- 内部 ----------
         def _sync_settings(self, old_name, new_name):
             """把 settings 里的登记从旧名换成新名（gameList 各分组与 defaultGame）。
@@ -766,7 +882,7 @@ class mdtScanner(QObject):
                 self._icon_check_keys.pop(mdt, None)
             # 2. 目录存在但不在 gameList → 新游戏
             if mdt not in setting:
-                self.settings["gameList"].setdefault("<:|default|:>", []).append(mdt)
+                self.settings["gameList"].setdefault(self.DEFAULT_GROUP, []).append(mdt)
                 self.on_game_changed.emit({"type": "newGame", "game": mdt})
             # 3. 图片检测：BML.json 的 icon_path 缺失或指向无效图片 → 写回默认并通知
             icon_path = data.get("icon_path", None)

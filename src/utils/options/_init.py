@@ -14,13 +14,14 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-设置页可复用的选项块：控件类在 items.py，标题/分隔线在 texts.py。
+可复用的界面单元：选项块在 items.py，标题/分隔线在 texts.py，滚动区在 scrolls.py。
+各文件用 `from ._init import *` 拿公共导入，不各自再写一遍。
 块自己不进 scroll_layout，由页面调用 add() 挂上去。
 """
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QSlider, QStyle, QStyleOptionComboBox, QStyleOptionSlider, QWidget
+from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QScrollBar, QSlider, QStyle, QStyleOptionComboBox, QStyleOptionSlider, QVBoxLayout, QWidget
 
 from ..path_utils import getPath
 

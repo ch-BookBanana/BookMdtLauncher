@@ -22,8 +22,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 init = {
-    "version": "26-T0925",
-    "BuildCode": "10000.02"
+    "version": "26-T1002",
+    "BuildCode": "10000.03"
 }
 
 from PySide6.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, Signal
@@ -32,7 +32,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QGridLayout, QStackedWidget, QLineEdit, QPushButton, QLabel,
-    QFrame, QScrollArea, QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
+    QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 import sys, os, json, copy, winreg, logging, locale, base64, time, shutil, traceback, webbrowser
@@ -42,13 +42,14 @@ import ctypes.wintypes
 
 try:
     from src.utils.path_utils import getPath
-    from src.utils.mdtScanner import mdtScanner
+    from src.utils.mdtManager import mdtManager
     from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
     from src.utils.QThTimer import QThTimer
     from src.utils.api.githubAPI import GithubAPI
     from src.utils import javaDownload
     from src.utils.QDownloader import QDownloader
     from src.utils.utils import _is_mdt_download, change_color, t
+    from src.utils.options.scrolls import Scroll
     from src.utils.bus import bus
     from src.utils.on_start import startup
     from src.utils.pages.fOverlay._init import FloatingOverlay
@@ -124,9 +125,9 @@ try:
             self.launcher = mdtLauncher(self, self.settings)
             self.githubAPI = GithubAPI()
             # settings 传 dict；parent 必须 QObject（Main 不是，传 None）；root 存 Main 引用
-            self.mdtScanner = mdtScanner(self.settings, parent=None, root=self)
+            self.mdtManager = mdtManager(self.settings, parent=None, root=self)
             # checkGame 变更 gameList（newGame/deleteGame/nameChanged）后自动落盘
-            self.mdtScanner.on_game_changed.connect(self._on_game_changed)
+            self.mdtManager.on_game_changed.connect(self._on_game_changed)
             if self.settings["github"]["token_enc"]:
                 raw = self._decrypt_settings_token()
                 if raw:
@@ -145,8 +146,8 @@ try:
             self.window = self.Window(self, self)
 
             # 后台预加载所有游戏数据到缓存，加速后续切换
-            QThTimer.task(100, lambda event: self.mdtScanner.preload_all())
-            # 图标周期检查与 QPixmaps 引用计数缓存已由 mdtScanner 自管理（icon_timer）
+            QThTimer.task(100, lambda event: self.mdtManager.preload_all())
+            # 图标周期检查与 QPixmaps 引用计数缓存已由 mdtManager 自管理（icon_timer）
 
             # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
             app.aboutToQuit.connect(self._cleanup_on_quit)
@@ -158,19 +159,19 @@ try:
             startup.register(self)
 
         def _on_game_changed(self, data):
-            """mdtScanner 事件回调（主线程）。
+            """mdtManager 事件回调（主线程）。
 
-            newGame/deleteGame/nameChanged → gameList 变化，落盘；
+            newGame/deleteGame/nameChanged/groupChanged → gameList 变化，落盘；
             iconChanged → 图标文件变化，失效 QPixmaps 缓存（下次引用重新加载）。
             事件明细属于排查用信息，走 DEBUG：仅在 `--log=debug` 启动时输出，
             避免日常日志被游戏目录变化刷屏。
             """
             self.logger.debug(f"on_game_changed: {data}")
             etype = data.get("type")
-            if etype in ("newGame", "deleteGame", "nameChanged"):
+            if etype in ("newGame", "deleteGame", "nameChanged", "groupChanged"):
                 self.saveSettings()
             elif etype == "iconChanged":
-                mdtScanner.invalidate_icon_pixmap(data.get("game"))
+                mdtManager.invalidate_icon_pixmap(data.get("game"))
 
         def _cleanup_on_quit(self):
             """应用退出前的统一清理（aboutToQuit 时执行）。
@@ -846,17 +847,12 @@ try:
                             self.layout.setContentsMargins(0, 0, 0, 0)
                             self.layout.setSpacing(0)
 
-                            self.scroll = QScrollArea(self)
-                            self.scroll.setWidgetResizable(True)
-                            self.scroll.setFrameShape(QFrame.NoFrame)
-                            self.layout.addWidget(self.scroll)
-
                             self.content = self.Content(self, self.root)
-                            self.scroll.setWidget(self.content)
+                            self.layout.addWidget(self.content)
 
-                        class Content(QWidget):
+                        class Content(Scroll):
                             def __init__(self, parent=None, root=None):
-                                super().__init__(parent)
+                                super().__init__(parent, root, margins=(20, 20, 20, 20), spacing=10)
                                 self.parent = parent
                                 self.root = root
                                 self._gs = parent.parent.parent
@@ -866,11 +862,7 @@ try:
                                 bus.bind(self)
 
                             def init_wid(self):
-                                self.layout = QVBoxLayout(self)
-                                self.layout.setContentsMargins(20,20,20,20)
-                                self.layout.setSpacing(10)
-                                self.layout.setAlignment(Qt.AlignTop)
-
+                                self.layout = self.scroll_layout
 
                                 self.l1w = QWidget()
                                 self.l1w.setFixedHeight(84)
@@ -1972,18 +1964,13 @@ try:
                                 self.layout.addWidget(self.divider, 0)
 
                                 # 任务列表滚动区
-                                self.scroll = QScrollArea()
-                                self.scroll.setWidgetResizable(True)
-                                self.scroll.setFrameShape(QFrame.NoFrame)
-                                self.layout.addWidget(self.scroll, 1)
                                 self.list_container = QWidget()
                                 self.list_container.setAttribute(Qt.WA_StyledBackground, True)
                                 self.list_container.setStyleSheet("background: transparent")
-                                self.list_layout = QVBoxLayout(self.list_container)
-                                self.list_layout.setContentsMargins(12, 12, 12, 12)
-                                self.list_layout.setSpacing(8)
-                                self.list_layout.setAlignment(Qt.AlignTop)
-                                self.scroll.setWidget(self.list_container)
+                                self.scroll = Scroll(self, self.root, content=self.list_container,
+                                                     margins=(12, 12, 12, 12), spacing=8)
+                                self.list_layout = self.scroll.scroll_layout
+                                self.layout.addWidget(self.scroll, 1)
 
                                 # 空状态提示（始终位于列表末尾，任务卡片插入其前）
                                 self.empty_label = QLabel()

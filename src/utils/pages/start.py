@@ -20,11 +20,12 @@ import re
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPalette, QPixmap, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QStackedLayout, QStackedWidget, QTextEdit, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QStackedLayout, QStackedWidget, QTextEdit, QVBoxLayout
 
 from src.utils.path_utils import getPath
 
-from ..mdtScanner import mdtScanner
+from ..mdtManager import mdtManager
+from ..options.scrolls import Scroll
 from ..utils import change_color, t
 
 from ._init import *
@@ -114,9 +115,9 @@ class Start(Page):
     def __init__(self, parent=None, root=None, text=None, logo=None):
         root.signals.register("start_gameChanged", Signal(object))
         super().__init__(parent, root, text, logo)
-        # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtScanner 事件（替代 1 秒轮询）
+        # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtManager 事件（替代 1 秒轮询）
         self.left.refresh()
-        self.root.mdtScanner.on_game_changed.connect(self.left._on_game_changed)
+        self.root.mdtManager.on_game_changed.connect(self.left._on_game_changed)
         self.root.launcher.game_launched.connect(self._on_game_launched)
         self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
         self.root.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
@@ -158,7 +159,7 @@ class Start(Page):
 
     def changeGame(self, game=None):
         if game == self.root.settings["defaultGame"]: return
-        mdts = self.root.mdtScanner.getMdts()
+        mdts = self.root.mdtManager.getMdts()
         self.root.settings["defaultGame"] = game if game in mdts else (mdts[0] if mdts else None)
         self.root.signals.emit("start_gameChanged", game)
         self.left.refresh()
@@ -220,10 +221,10 @@ class Start(Page):
         def refresh(self):
             """defaultGame 或其图标/版本变化时刷新左侧信息（主线程调用）。
 
-            替代旧 changeTimer：不再 1 秒轮询，由 mdtScanner 事件驱动触发；
+            替代旧 changeTimer：不再 1 秒轮询，由 mdtManager 事件驱动触发；
             直接调用 sets 更新 UI（主线程安全，无需 QThTimer 中转）。"""
-            default_game = self.root.mdtScanner.ensure_default_game()
-            game_msg = self.root.mdtScanner.getMdtMsg(default_game) if default_game else None
+            default_game = self.root.mdtManager.ensure_default_game()
+            game_msg = self.root.mdtManager.getMdtMsg(default_game) if default_game else None
             have_game = default_game is not None
             # 左栏底部按钮随「有无游戏」切换：无游戏时改为跳转下载页
             self.main.set_have_game(have_game)
@@ -256,7 +257,7 @@ class Start(Page):
                 self.sets((True, QPixmap(game_msg["icon"]) if icon_key else QPixmap()),(False,None),(False,None))
 
         def _on_game_changed(self, data):
-            """mdtScanner 事件：defaultGame 受影响时刷新左侧信息。"""
+            """mdtManager 事件：defaultGame 受影响时刷新左侧信息。"""
             etype = data["type"]
             if etype in ("newGame", "deleteGame", "nameChanged"):
                 self.refresh()
@@ -617,7 +618,7 @@ class Start(Page):
                 self.setAttribute(Qt.WA_StyledBackground,True)
 
         class World(_Main):
-            """游戏分组列表：订阅 mdtScanner 事件增量更新，不做整页重建。"""
+            """游戏分组列表：订阅 mdtManager 事件增量更新，不做整页重建。"""
 
             def __init__(self,parent=None,root=None):
                 super().__init__(parent,root)
@@ -626,26 +627,20 @@ class Start(Page):
                 self.init_wid()
                 self.rebuild()
                 self.groups["<:|default|:>"].show_items()
-                # 订阅 mdtScanner 事件，按类型精确更新对应条目
-                self.root.mdtScanner.on_game_changed.connect(self._on_game_changed)
+                # 订阅 mdtManager 事件，按类型精确更新对应条目
+                self.root.mdtManager.on_game_changed.connect(self._on_game_changed)
 
             def init_wid(self):
                 self.layout = QVBoxLayout(self)
                 self.layout.setContentsMargins(0, 0, 0, 0)
                 self.layout.setSpacing(0)
 
-                self.scroll = QScrollArea(self)
-                self.scroll.setWidgetResizable(True)
-                self.scroll.setFrameShape(QFrame.NoFrame)
-                self.layout.addWidget(self.scroll)
-
                 self.box = QWidget()
                 self.box.setProperty("wid","color2")
-                self.box_l = QVBoxLayout(self.box)
-                self.box_l.setContentsMargins(10,10,10,10)
-                self.box_l.setSpacing(10)
-                self.box_l.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-                self.scroll.setWidget(self.box)
+                self.scroll = Scroll(self, self.root, content=self.box, margins=(10, 10, 10, 10),
+                                     spacing=10, align=Qt.AlignTop | Qt.AlignHCenter)
+                self.box_l = self.scroll.scroll_layout
+                self.layout.addWidget(self.scroll)
 
             def rebuild(self):
                 """按 settings.gameList 全量重建分组（仅初始构建）。"""
@@ -657,7 +652,7 @@ class Start(Page):
                     self.groups[name] = self.Group(self, self.root, name, games)
 
             def _on_game_changed(self, data):
-                """newGame/deleteGame/nameChanged/iconChanged → 精确更新对应条目。"""
+                """newGame/deleteGame/nameChanged/groupChanged/iconChanged → 精确更新对应条目。"""
                 etype = data["type"]
                 game = data["game"]
                 if etype == "newGame":
@@ -673,6 +668,15 @@ class Start(Page):
                     for group in self.groups.values():
                         if group.rename(data["old_name"], game):
                             break
+                elif etype == "groupChanged":
+                    # 搬家：先从旧组摘掉条目（图标引用跟着释放），再挂到新组。
+                    # 组名来自 settings.gameList 的键，必然已在 self.groups 里。
+                    for group in self.groups.values():
+                        if group.remove(game):
+                            break
+                    target = self.groups.get(data["group"])
+                    if target:
+                        target.add(game)
                 elif etype == "iconChanged":
                     for group in self.groups.values():
                         if group.refresh_icon(game):
@@ -855,7 +859,7 @@ class Start(Page):
 
                     def showEvent(self,event):
                         super().showEvent(event)
-                        vers = self.root.mdtScanner.getMdtMsg(self.game)
+                        vers = self.root.mdtManager.getMdtMsg(self.game)
                         if vers:
                             self.acquire()
                             self.title.setText(self.game)
@@ -864,10 +868,10 @@ class Start(Page):
                     def acquire(self, force=False):
                         """取图标 +1 引用；force 先释放旧引用再重取（iconChanged 用）。"""
                         if force and self._held:
-                            mdtScanner.release_icon_pixmap(self.game)
+                            mdtManager.release_icon_pixmap(self.game)
                             self._held = False
                         if not self._held:
-                            pix = mdtScanner.get_icon_pixmap(self.game, 30)
+                            pix = mdtManager.get_icon_pixmap(self.game, 30)
                             self._held = True
                             if not pix.isNull():
                                 self.icon.setPixmap(pix)
@@ -875,7 +879,7 @@ class Start(Page):
                     def release(self):
                         """释放图标引用（-1，归零自动清缓存）；条目销毁前调用。"""
                         if self._held:
-                            mdtScanner.release_icon_pixmap(self.game)
+                            mdtManager.release_icon_pixmap(self.game)
                             self._held = False
                             self.icon.clear()
 

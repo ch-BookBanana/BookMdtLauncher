@@ -1,10 +1,8 @@
 import os
-import shutil
 import logging
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
 
-from .path_utils import getPath
-from .mdtScanner import mdtScanner
+from .mdtManager import mdtManager
 from .javaScanner import javaScanner
 from .mdtLocker import mdtLocker
 
@@ -49,7 +47,7 @@ class mdtLauncher(QProcess):
 
     def __init__(self, parent=None, settings=None):
         super().__init__()
-        self.root = parent  # Main 实例（mdtScanner 等工具经此访问）
+        self.root = parent  # Main 实例（mdtManager 等工具经此访问）
         self.envs = QProcessEnvironment.systemEnvironment()
         self.going = 0   # 0: 空闲, 1: 校验中/准备启动, 2: 进程运行中
         self.data = {}   # 本次启动的关键路径信息
@@ -73,7 +71,7 @@ class mdtLauncher(QProcess):
             self.log.emit({"type": "error", "text": "gameRunning"})
             self._emit_finished(-1)
             return False
-        if mdt_name not in self.root.mdtScanner.getMdts():
+        if mdt_name not in self.root.mdtManager.getMdts():
             self.log.emit({"type": "error", "text": "mdtNotFound"})
             self._emit_finished(-1)
             return False
@@ -97,14 +95,14 @@ class mdtLauncher(QProcess):
         }
 
         self.data["mdtName"] = mdt_name
-        self.data["mdtPath"] = os.path.join(getPath("BML/.Mindustrys"), mdt_name)
+        self.data["mdtPath"] = os.path.join(mdtManager.base_dir, mdt_name)
         self.data["mdtJar"] = os.path.join(self.data["mdtPath"], "mdt.jar")
         self.log.emit({"type": "info", "text": "MDT instance found: " + mdt_name})
 
         # ---------- 2. 确定数据目录 ----------
         # 数据根作为游戏进程的 %APPDATA%，游戏实际数据目录固定为其下的 Mindustry/
         if data_path is None:
-            data_root = os.path.join(self.data["mdtPath"], "data")
+            data_root = mdtManager.getDataRoot(mdt_name)
             self.log.emit({"type": "info", "text": "Using default data directory: " + data_root})
         else:
             try:
@@ -116,8 +114,8 @@ class mdtLauncher(QProcess):
                 self._emit_finished(-1)
                 return False
         self.data["mdtDataRoot"] = data_root
-        self.data["mdtData"] = os.path.join(data_root, "Mindustry")
-        self._prepare_data_dir(data_root)
+        self.data["mdtData"] = os.path.join(data_root, mdtManager.DATA_DIR_NAME)
+        self._prepare_data_dir()
 
         # ---------- 3. 确定 Java 路径 ----------
         if java_path is not None:
@@ -138,12 +136,12 @@ class mdtLauncher(QProcess):
             self.data["javaPath"] = java_path
             self.log.emit({"type": "info", "text": "Java path validated: " + java_path})
         else:
-            # 从 mdtScanner 获取 BML 配置（含 javaPath 解析与回退）
-            self.log.emit({"type": "info", "text": "Reading BML config via mdtScanner for: " + mdt_name})
+            # 从 mdtManager 获取 BML 配置（含 javaPath 解析与回退）
+            self.log.emit({"type": "info", "text": "Reading BML config via mdtManager for: " + mdt_name})
             try:
-                mdt_data = self.root.mdtScanner.getMdtData(mdt_name, self.settings)
+                mdt_data = self.root.mdtManager.getMdtData(mdt_name, self.settings)
                 java_from_config = mdt_data.get("javaPath")
-                # follow 表示无可用的 Java（mdtScanner 已校验并写回），按缺失处理
+                # follow 表示无可用的 Java（mdtManager 已校验并写回），按缺失处理
                 if not java_from_config or java_from_config == "<:|follow|:>":
                     raise ValueError("missing java path")
                 self.log.emit({"type": "info", "text": "Java path from BML config: " + str(java_from_config)})
@@ -178,8 +176,7 @@ class mdtLauncher(QProcess):
         self.envs.insert("APPDATA", self.data["mdtDataRoot"])
         self.setProcessEnvironment(self.envs)
         self.setProcessChannelMode(QProcess.SeparateChannels)
-        # 工作目录改为 jar 所在目录（mdtJar 的同级目录），与启动器所在目录解耦
-        self.setWorkingDirectory(self.data["mdtPath"])
+        self.setWorkingDirectory(self.data["mdtDataRoot"])
 
         # ---------- 5. 连接信号（先断开避免重复） ----------
         self._disconnect_signals()
@@ -239,19 +236,14 @@ class mdtLauncher(QProcess):
             return False
 
     # ================== 数据目录 ==================
-    def _prepare_data_dir(self, data_root):
-        """准备游戏数据目录：不存在则创建，并把旧布局（数据直接位于数据根下）的内容一次性迁入。"""
+    def _prepare_data_dir(self):
+        """准备游戏数据目录（<数据根>/Mindustry）：不存在则创建。
+
+        不做旧布局（数据直接位于数据根下）的自动迁移：数据目录布局切换由使用者手动完成。
+        """
         target = self.data["mdtData"]
         try:
-            if os.path.isdir(target):
-                return
             os.makedirs(target, exist_ok=True)
-            if os.path.isdir(data_root):
-                for name in os.listdir(data_root):
-                    if name == "Mindustry":
-                        continue
-                    shutil.move(os.path.join(data_root, name), os.path.join(target, name))
-                self.log.emit({"type": "info", "text": "Migrated legacy data into: " + target})
         except Exception as e:
             self.log.emit({"type": "error", "text": "Prepare data directory failed: " + str(e)})
 

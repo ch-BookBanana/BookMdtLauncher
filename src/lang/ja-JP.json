@@ -121,6 +121,18 @@
     "wid.pages.downloadList.delete": "削除",
 
     "wid.pages.game": "ゲーム",
+
+    "wid.pages.gameManage.java.follow": "グローバルに従う",
+    "wid.pages.gameManage.rename": "名前を変更",
+    "wid.pages.gameManage.group": "グループを変更",
+    "wid.pages.gameManage.group.tip": "グループを選択：",
+    "wid.pages.gameManage.delete": "ゲームを削除",
+    "wid.pages.gameManage.delete.tip": "本当にこのゲームを削除しますか？しばらく（かなり長く）失われます",
+    "wid.pages.gameManage.delete.confirm": "削除する",
+    "wid.pages.gameManage.failed": "操作に失敗しました。もう一度お試しください",
+    "wid.pages.gameManage.folder.data": "データフォルダ",
+    "wid.pages.gameManage.folder.blueprint": "設計図フォルダ",
+    "wid.pages.gameManage.folder.mod": "MODフォルダ",
     "wid.pages.setting": "設定",
     "wid.pages.setting.launcher": "ランチャー",
     "wid.pages.setting.launcher.preferences": "外観",

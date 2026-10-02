@@ -123,6 +123,18 @@
 
     "wid.pages.game": "游戏",
 
+    "wid.pages.gameManage.java.follow": "跟随全局",
+    "wid.pages.gameManage.rename": "更改名称",
+    "wid.pages.gameManage.group": "更改分组",
+    "wid.pages.gameManage.group.tip": "请选择分组：",
+    "wid.pages.gameManage.delete": "删除游戏",
+    "wid.pages.gameManage.delete.tip": "真的要删除这个游戏吗？它会丢失很久（真的很久）",
+    "wid.pages.gameManage.delete.confirm": "确认删除",
+    "wid.pages.gameManage.failed": "操作失败，请重试",
+    "wid.pages.gameManage.folder.data": "数据文件夹",
+    "wid.pages.gameManage.folder.blueprint": "蓝图文件夹",
+    "wid.pages.gameManage.folder.mod": "模组文件夹",
+
 
     "wid.pages.setting": "设置",
     "wid.pages.setting.launcher": "启动器",

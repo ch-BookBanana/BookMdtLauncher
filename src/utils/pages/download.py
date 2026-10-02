@@ -18,10 +18,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import  (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QScrollBar, QStackedWidget, QVBoxLayout
+from PySide6.QtWidgets import (
+    QButtonGroup, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout
 )
+from ..options.scrolls import Scroll
 from ..utils import change_color
 
 from ._init import *
@@ -42,45 +42,16 @@ class Download(Page):
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.layout.setSpacing(0)
 
-            self.scroll = QScrollArea(self)
-            self.scroll.setWidgetResizable(True)
-            self.scroll.setFrameShape(QFrame.NoFrame)
+            self.scroll = Scroll(self, self.root)
             self.layout.addWidget(self.scroll)
-
-            self.main = QWidget()
-            self.scroll_layout = QVBoxLayout(self.main)
-            self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-            self.scroll_layout.setSpacing(0)
-            self.scroll_layout.setAlignment(Qt.AlignTop)
-            self.scroll.setWidget(self.main)
-            self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-            self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-
-            self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-            self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-            self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
 
             self.bthGroup = QButtonGroup(self)
 
         def add_btn(self, text=None, icon=None):
             btn = self.Btns(text, icon, self, self.root)
-            self.scroll_layout.addWidget(btn)
+            self.scroll.add(btn)
             self.bthGroup.addButton(btn)
-            self.barShow()
             return btn
-
-        def barShow(self):
-            self.scroll_slider.setVisible(self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum())
-
-        def resizeEvent(self, event):
-            self.scroll_slider.setGeometry(self.scroll.width() - 5, 0, 5, self.scroll.height())
-            self.barShow()
-            super().resizeEvent(event)
-
-        def showEvent(self, event):
-            super().showEvent(event)
-            self.barShow()
 
         class Btns(QPushButton):
             def __init__(self, text=None, icon=None, parent=None, root=None):

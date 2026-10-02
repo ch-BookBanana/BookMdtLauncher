@@ -18,17 +18,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import copy, hashlib, json, os, re, time, webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QCursor, QIcon, QPixmap, QTextOption
 from PySide6.QtWidgets import (
-    QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QScrollBar, QSizePolicy, QStackedWidget,
-    QTextBrowser, QVBoxLayout, QWidget
+    QApplication, QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QSizePolicy, QStackedWidget, QTextBrowser, QVBoxLayout,
+    QWidget
 )
 
 from ...QDownloader import QDownloader
-from ...mdtScanner import mdtScanner
+from ...mdtManager import mdtManager
 from ...QThTimer import QThTimer
+from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import _apply_md_image, change_color, md_to_html, t
 from ...bus import bus
@@ -73,76 +74,17 @@ class Game(QWidget):
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.layout.setSpacing(0)
 
-            self.scroll = self.HScrollArea(self)
-            self.scroll.setWidgetResizable(True)
-            self.scroll.setFrameShape(QFrame.NoFrame)
+            # 横向区：滚轮转为横向滚动，空白处可拖拽
+            self.scroll = Scroll(self, self.root, horizontal=True, drag=True)
             self.layout.addWidget(self.scroll)
-
-            self.main = QWidget()
-            self.scroll_layout = QHBoxLayout(self.main)
-            self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-            self.scroll_layout.setSpacing(0)
-            self.scroll_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-            self.scroll.setWidget(self.main)
-
-            # 自定义横向滚动条：浮在底部 5px，内容超宽才显示
-            self.scroll_slider = QScrollBar(Qt.Horizontal, self.scroll)
-            self.scroll_slider.valueChanged.connect(self.scroll.horizontalScrollBar().setValue)
-            self.scroll.horizontalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-            self.scroll.horizontalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
 
             self.bthGroup = QButtonGroup(self)
 
         def add_btn(self, text=None, icon=None, color=True):
             btn = self.Btns(text, getPath(icon), self, self.root, color)
-            self.scroll_layout.addWidget(btn)
+            self.scroll.add(btn)
             self.bthGroup.addButton(btn)
-            self.barShow()
             return btn
-
-        def barShow(self):
-            self.scroll_slider.setVisible(
-                self.scroll.horizontalScrollBar().maximum() > self.scroll.horizontalScrollBar().minimum()
-            )
-
-        def resizeEvent(self, event):
-            self.scroll_slider.setGeometry(0, self.height() - 5, self.width(), 5)
-            self.barShow()
-            super().resizeEvent(event)
-
-        def showEvent(self, event):
-            super().showEvent(event)
-            self.barShow()
-
-        class HScrollArea(QScrollArea):
-            """横向滚动区域：隐藏原生滚动条，滚轮转为横向，空白处可拖拽"""
-            def __init__(self, parent=None):
-                super().__init__(parent)
-                self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                self._drag_pos = None
-                self.viewport().installEventFilter(self)
-
-            def wheelEvent(self, event):
-                delta = event.angleDelta().y()
-                if delta == 0:
-                    delta = event.angleDelta().x()
-                bar = self.horizontalScrollBar()
-                bar.setValue(bar.value() - delta)
-                event.accept()
-
-            def eventFilter(self, obj, event):
-                if obj is self.viewport():
-                    if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                        self._drag_pos = event.pos()
-                    elif event.type() == QEvent.MouseMove and self._drag_pos is not None:
-                        bar = self.horizontalScrollBar()
-                        bar.setValue(bar.value() - (event.pos().x() - self._drag_pos.x()))
-                        self._drag_pos = event.pos()
-                        return True
-                    elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-                        self._drag_pos = None
-                return super().eventFilter(obj, event)
 
         class Btns(QPushButton):
             def __init__(self, text=None, icon=None, parent=None, root=None, color=True):
@@ -287,25 +229,14 @@ class Game(QWidget):
                 self.add_action_btn("wid.pages.download.origin.searchAll", lambda: self.searchAll())
                 self.action_bar_layout.addStretch()
 
-                self.scroll = QScrollArea(self)
-                self.scroll.setWidgetResizable(True)
-                self.scroll.setFrameShape(QFrame.NoFrame)
-                self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                self.layout.addWidget(self.scroll)
-
                 self.main = QWidget()
                 self.main.setProperty("wid", "color2")
                 self.main.setAttribute(Qt.WA_StyledBackground, True)
-                self.scroll_layout = QVBoxLayout(self.main)
-                self.scroll_layout.setContentsMargins(30, 20, 30, 20)
-                self.scroll_layout.setSpacing(10)
-                self.scroll_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-                self.scroll.setWidget(self.main)
+                self.scroll = Scroll(self, self.root, content=self.main, margins=(30, 20, 30, 20),
+                                     spacing=10, align=Qt.AlignTop | Qt.AlignHCenter)
+                self.layout.addWidget(self.scroll)
 
-                self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-                self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-                self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+                self.scroll_layout = self.scroll.scroll_layout
 
             def _set_searching(self, disabled):
                 self._searching = disabled
@@ -328,11 +259,6 @@ class Game(QWidget):
                     if hasattr(btn, '_text_key'):
                         btn.setText(self.root.langer.get(btn._text_key))
 
-            def barShow(self):
-                self.scroll_slider.setVisible(
-                    self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
-                )
-
             def _clear_scroll_stretch(self):
                 i = 0
                 while i < self.scroll_layout.count():
@@ -341,17 +267,6 @@ class Game(QWidget):
                         self.scroll_layout.takeAt(i)
                         continue
                     i += 1
-
-            def resizeEvent(self, event):
-                self.scroll_slider.setGeometry(
-                    self.scroll.width() - 5, 0, 5, self.scroll.height()
-                )
-                self.barShow()
-                super().resizeEvent(event)
-
-            def showEvent(self, event):
-                super().showEvent(event)
-                self.barShow()
 
             def _read_cache(self):
                 if not hasattr(self, 'tmpPath') or self.tmpPath is None:
@@ -720,22 +635,16 @@ class Game(QWidget):
                     self.layout.setContentsMargins(0, 0, 0, 0)
                     self.layout.setSpacing(10)
 
-                    self.scroll = QScrollArea(self)
-                    self.scroll.setWidgetResizable(True)
-                    self.scroll.setFrameShape(QFrame.NoFrame)
+                    # 虚拟列表：子控件自己 setGeometry 定位，所以不要内容布局
+                    self.scroll = Scroll(self, self.root, layout=False)
+                    bar = self.scroll.bar()
                     # 滚动时：1) 刷新 item 池内容 2) 刷新悬停状态
-                    self.scroll.verticalScrollBar().valueChanged.connect(self._update_visible)
-                    self.scroll.verticalScrollBar().valueChanged.connect(self._check_all_hover)
+                    bar.valueChanged.connect(self._update_visible)
+                    bar.valueChanged.connect(self._check_all_hover)
                     self.layout.addWidget(self.scroll)
 
-                    self.main = QWidget()
+                    self.main = self.scroll.main
                     self.main.setMinimumWidth(0)
-                    self.scroll.setWidget(self.main)
-
-                    self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                    self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-                    self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-                    self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
 
                     # 空数据提示：铺满整个滚动区，无条目时显示
                     self.empty_label = QLabel(self)
@@ -761,9 +670,6 @@ class Game(QWidget):
                     self._update_visible()
 
                 def resizeEvent(self, event):
-                    self.scroll_slider.setGeometry(
-                        self.scroll.width() - 5, 0, 5, self.scroll.height()
-                    )
                     self.empty_label.setGeometry(0, 0, self.width(), self.height())
                     super().resizeEvent(event)
                     self.viewport_h = self.height()
@@ -783,9 +689,7 @@ class Game(QWidget):
                 def showEvent(self, event):
                     super().showEvent(event)
                     self._hidden = False
-                    self.scroll_slider.setVisible(
-                        self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
-                    )
+                    self.scroll.barShow()
                     self._update_visible()
 
                 def hideEvent(self, event):
@@ -831,7 +735,7 @@ class Game(QWidget):
                             it.setParent(self.main)
                             it.hide()
                             self.itemw.append(it)
-                    vbar = self.scroll.verticalScrollBar()
+                    vbar = self.scroll.bar()
                     scroll_y = vbar.value()
                     first = int(scroll_y / self.item_h)
                     if first < 0:
@@ -1107,7 +1011,7 @@ class Game(QWidget):
                     self.input.setFixedHeight(32)
                     self.input.setClearButtonEnabled(True)
                     # 名称即实例目录名，上限与 check_name 同源，超长直接打不进去
-                    self.input.setMaxLength(mdtScanner.MAX_NAME_LEN)
+                    self.input.setMaxLength(mdtManager.MAX_NAME_LEN)
                     self.body_layout.addWidget(self.input, 0)
 
                     self.body_layout.addStretch(1)
@@ -1152,8 +1056,8 @@ class Game(QWidget):
                     if template is not None:
                         interface_name = self.root.langer.get(getattr(template, "text", "")) or ""
                     base = interface_name + "-" + (self.data.get("name") or "")
-                    existing = self.root.mdtScanner.taken_names()
-                    default = self.root.mdtScanner.unique_name(base, existing)
+                    existing = self.root.mdtManager.taken_names()
+                    default = self.root.mdtManager.unique_name(base, existing)
                     self.input.setText(default)
                     # 背景提示与默认名称一致：清空后仍能看到原名
                     self.input.setPlaceholderText(default)
@@ -1164,7 +1068,7 @@ class Game(QWidget):
                 def _collect_mdts(self, event):
                     """子线程：收集已占用的游戏名集合（纯文件操作，线程安全）。"""
                     try:
-                        return self.root.mdtScanner.taken_names()
+                        return self.root.mdtManager.taken_names()
                     except Exception as e:
                         return e
 
@@ -1204,15 +1108,15 @@ class Game(QWidget):
                 def _apply_existing(self, existing):
                     """按现有游戏名集合校验输入框，并同步更新按钮/提示状态。
 
-                    字形规则与去重全取自 mdtScanner（check_name / unique_name），
+                    字形规则与去重全取自 mdtManager（check_name / unique_name），
                     本页只负责把失败码翻成提示文案与边框颜色。
                     """
                     text = self.input.text().strip()
                     if not text:
                         state, final, msg = "empty", None, ""
                     else:
-                        error = mdtScanner.check_name(text)
-                        unique = self.root.mdtScanner.unique_name(text, existing)
+                        error = mdtManager.check_name(text)
+                        unique = self.root.mdtManager.unique_name(text, existing)
                         if error == "dot":
                             state, final, msg = "dot", None, self.root.langer.get("wid.pages.download.item.name.dot")
                         elif error:
@@ -1322,7 +1226,7 @@ class Game(QWidget):
                         self.root.logger.error("[mdt-download] %s 下载失败（downloading.json 已保留）" % name)
                         return
                     try:
-                        self.root.mdtScanner._retrieve_mdt_data(name)
+                        self.root.mdtManager._retrieve_mdt_data(name)
                         dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
                         if os.path.isfile(dfile):
                             # 把下载时记录的类图标路径合并进 BML.json
@@ -1342,7 +1246,7 @@ class Game(QWidget):
                             except Exception:
                                 pass
                             os.remove(dfile)
-                        self.root.mdtScanner.invalidate_cache()
+                        self.root.mdtManager.invalidate_cache()
                         self.root.logger.info("[mdt-download] %s 下载完成" % name)
                     except Exception as e:
                         self.root.logger.error("[mdt-download] %s 收尾失败: %s" % (name, e))
@@ -1369,29 +1273,15 @@ class Game(QWidget):
                     self.layout.setSpacing(0)
                     self.layout.setAlignment(Qt.AlignTop)
 
-                    # 滚动区域（整体可滚动，隐藏原生滚动条）
-                    self.scroll = QScrollArea(self)
-                    self.scroll.setWidgetResizable(True)
-                    self.scroll.setFrameShape(QFrame.NoFrame)
-                    self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                    self.layout.addWidget(self.scroll, 1)
-
+                    # 滚动区（整体可滚，内容最大宽度 800，超出后在视口中水平居中）
                     self.main = QWidget()
                     self.main.setObjectName("repoMain")
                     self.main.setAttribute(Qt.WA_StyledBackground, True)
-                    # 内容最大宽度 800，超出后在视口中水平居中
                     self.main.setMaximumWidth(800)
-                    self.scroll_layout = QVBoxLayout(self.main)
-                    self.scroll_layout.setContentsMargins(20, 15, 20, 15)
-                    self.scroll_layout.setSpacing(10)
-                    self.scroll_layout.setAlignment(Qt.AlignTop)
-                    self.scroll.setWidget(self.main)
-                    self.scroll.setAlignment(Qt.AlignHCenter)
-
-                    self.scroll_slider = QScrollBar(Qt.Vertical, self.scroll)
-                    self.scroll_slider.valueChanged.connect(self.scroll.verticalScrollBar().setValue)
-                    self.scroll.verticalScrollBar().rangeChanged.connect(self.scroll_slider.setRange)
-                    self.scroll.verticalScrollBar().valueChanged.connect(self.scroll_slider.setValue)
+                    self.scroll = Scroll(self, self.root, content=self.main, margins=(20, 15, 20, 15),
+                                         spacing=10, content_align=Qt.AlignHCenter)
+                    self.scroll_layout = self.scroll.scroll_layout
+                    self.layout.addWidget(self.scroll, 1)
 
                     data = self.data or {}
 
@@ -1434,13 +1324,6 @@ class Game(QWidget):
                     self.scroll_layout.addWidget(line1, 0)
 
                     # ===== 定高介绍区（内部可滚动查看全文） =====
-                    self.intro_area = QScrollArea(self.main)
-                    self.intro_area.setFixedHeight(300)
-                    self.intro_area.setWidgetResizable(True)
-                    self.intro_area.setFrameShape(QFrame.NoFrame)
-                    self.intro_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                    self.scroll_layout.addWidget(self.intro_area, 0)
-
                     self.intro = QTextBrowser()
                     self.intro.setAlignment(Qt.AlignTop)
                     self.intro.setProperty("wid", "text")
@@ -1450,7 +1333,9 @@ class Game(QWidget):
                     self.intro.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                     self.intro.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                     self.intro.document().setDocumentMargin(0)
-                    self.intro_area.setWidget(self.intro)
+                    self.intro_area = Scroll(self.main, self.root, content=self.intro, content_align=Qt.AlignTop)
+                    self.intro_area.setFixedHeight(300)
+                    self.scroll_layout.addWidget(self.intro_area, 0)
 
                     # 后台处理 markdown（Qt 原生渲染，含图片缓存），完成后渲染
                     intro_md = data.get("intro") or ""
@@ -1574,18 +1459,6 @@ class Game(QWidget):
                         self.icon.clear()
                     for fi in self.files:
                         fi.lighting(light)
-
-                def resizeEvent(self, event):
-                    self.scroll_slider.setGeometry(
-                        self.scroll.width() - 5, 0, 5, self.scroll.height()
-                    )
-                    super().resizeEvent(event)
-
-                def showEvent(self, event):
-                    super().showEvent(event)
-                    self.scroll_slider.setVisible(
-                        self.scroll.verticalScrollBar().maximum() > self.scroll.verticalScrollBar().minimum()
-                    )
 
                 class FileItem(QWidget):
                     def __init__(self, parent=None, root=None, name=""):

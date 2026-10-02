@@ -121,6 +121,18 @@
     "wid.pages.downloadList.delete": "刪除",
 
     "wid.pages.game": "遊戲",
+
+    "wid.pages.gameManage.java.follow": "跟隨全域",
+    "wid.pages.gameManage.rename": "變更名稱",
+    "wid.pages.gameManage.group": "變更分組",
+    "wid.pages.gameManage.group.tip": "請選擇分組：",
+    "wid.pages.gameManage.delete": "刪除遊戲",
+    "wid.pages.gameManage.delete.tip": "真的要刪除這個遊戲嗎？它會消失很久（真的很久）",
+    "wid.pages.gameManage.delete.confirm": "確認刪除",
+    "wid.pages.gameManage.failed": "操作失敗，請重試",
+    "wid.pages.gameManage.folder.data": "資料夾",
+    "wid.pages.gameManage.folder.blueprint": "藍圖資料夾",
+    "wid.pages.gameManage.folder.mod": "模組資料夾",
     "wid.pages.setting": "設定",
     "wid.pages.setting.launcher": "啟動器",
     "wid.pages.setting.launcher.preferences": "外觀",
