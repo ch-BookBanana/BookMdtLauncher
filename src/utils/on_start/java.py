@@ -25,6 +25,7 @@ import types
 from PySide6.QtCore import QTimer
 
 from ..javaDownload import JavaDownloadFlow, get_status
+from ..javaManager import javaManager
 from ..utils import t
 
 
@@ -38,7 +39,7 @@ def startup_resume_java(root):
     status = get_status()
     if status not in ("downloading", "extracting"):
         return
-    root.logger.info(t(root.langer.get("log.java.resume_takeover"), status), name="Java")
+    root.logger.info(t(root.langer.get("log.info.javaResumeTakeover"), status), name="Java")
     # 同时切 left.bottom 与 right.main 到 Launch 页（唯一状态 label）
     try:
         bottom = root._java_bottom()
@@ -73,7 +74,7 @@ def begin_java_flow(root, resume=False):
     """
     if root.java_flow is not None:
         return
-    root.logger.info(t(root.langer.get("log.java.flow_create"), resume), name="Java")
+    root.logger.info(t(root.langer.get("log.info.javaFlowCreate"), resume), name="Java")
     flow = JavaDownloadFlow(resume=resume)
     root.java_flow = flow
     flow.status_changed.connect(root._on_java_status)
@@ -82,7 +83,7 @@ def begin_java_flow(root, resume=False):
     flow.finished.connect(root._on_java_finished)
     flow.cancelled.connect(root._on_java_flow_cancelled)
     flow.paused_changed.connect(root._on_java_paused_changed)
-    flow.error.connect(lambda msg: root.logger.error(t(root.langer.get("log.java.dl_error_prefix"), str(msg))))
+    flow.error.connect(lambda msg: root.logger.error(t(root.langer.get("log.error.javaDlErrorPrefix"), str(msg))))
     flow.start()
 
 
@@ -104,7 +105,7 @@ def _java_stack(root):
 def _on_java_status(root, status):
     """Java 下载/解压状态变化：left.bottom 与 right.main 都切到 Launch 页并更新 label。"""
     try:
-        root.logger.info(t(root.langer.get("log.java.status_change"), status), name="Java")
+        root.logger.info(t(root.langer.get("log.info.javaStatusChange"), status), name="Java")
         bottom = _java_bottom(root)
         bottom.setCurrentIndex(3)
         _java_stack(root).setCurrentIndex(3)
@@ -140,8 +141,8 @@ def _on_java_extract_progress(root, done, total):
 def _on_java_paused_changed(root, paused, pct):
     """Java 下载暂停/恢复 → label 显示"Java暂停下载 n%"或恢复"正在下载Java n%"。"""
     try:
-        _state = root.langer.get("log.java.paused_state" if paused else "log.java.resumed_state")
-        root.logger.info(t(root.langer.get("log.java.paused_change"), _state, pct), name="Java")
+        _state = root.langer.get("log.info.javaPausedState" if paused else "log.info.javaResumedState")
+        root.logger.info(t(root.langer.get("log.info.javaPausedChange"), _state, pct), name="Java")
         bottom = _java_bottom(root)
         bottom.setCurrentIndex(3)
         _java_stack(root).setCurrentIndex(3)
@@ -155,13 +156,13 @@ def _on_java_paused_changed(root, paused, pct):
 
 def _on_java_flow_cancelled(root):
     """启动延续流程的下载被用户取消（下载列表页/退出）：记录标记。"""
-    root.logger.info(root.langer.get("log.java.flow_cancelled"), name="Java")
+    root.logger.info(root.langer.get("log.info.javaFlowCancelled"), name="Java")
     root._java_flow_cancelled = True
 
 
 def _on_java_cancelled(root):
     """launcher 内置 Java 下载被用户取消：显示"已取消"，一秒后回主界面。"""
-    root.logger.info(root.langer.get("log.java.dl_cancelled_show"), name="Java")
+    root.logger.info(root.langer.get("log.info.javaDlCancelledShow"), name="Java")
     _java_show_status(root, "cancelled")
     QTimer.singleShot(1000, lambda: _java_go_home(root))
 
@@ -180,8 +181,10 @@ def _on_java_finished(root, ok):
             pass
     cancelled = root._java_flow_cancelled
     root._java_flow_cancelled = False
-    root.logger.info(t(root.langer.get("log.java.flow_finished"), ok, cancelled), name="Java")
+    root.logger.info(t(root.langer.get("log.info.javaFlowFinished"), ok, cancelled), name="Java")
     if ok:
+        # 新装的 JDK 已经落在盘上：子线程重扫候选表并广播，界面跟着刷新
+        javaManager.scan()
         _java_show_status(root, "done")
     elif cancelled:
         _java_show_status(root, "cancelled")   # 用户主动取消，不误报"下载失败"
@@ -196,7 +199,7 @@ def _on_java_download_done(root, ok):
     ok=True：launcher 内部已刷新 Java 设置并重新启动游戏（game_launched 信号会切页）；
     ok=False：显示失败，一秒后回主界面。
     """
-    root.logger.info(t(root.langer.get("log.java.dl_finished_show"), ok), name="Java")
+    root.logger.info(t(root.langer.get("log.info.javaDlFinishedShow"), ok), name="Java")
     if ok:
         _java_show_status(root, "done")
     else:
@@ -240,7 +243,7 @@ def _java_cancel_all(root):
     if flow is None and lf is None:
         # 没有任何流程，无需打印"取消全部流程"
         return
-    root.logger.info(root.langer.get("log.java.cancel_all"), name="Java")
+    root.logger.info(root.langer.get("log.info.javaCancelAll"), name="Java")
     if flow is not None:
         try:
             flow.cancel()

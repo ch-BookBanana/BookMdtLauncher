@@ -3,7 +3,7 @@ import logging
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
 
 from .mdtManager import mdtManager
-from .javaScanner import javaScanner
+from .javaManager import javaManager
 from .mdtLocker import mdtLocker
 
 _log = logging.getLogger("Main.MdtLauncher")
@@ -56,6 +56,7 @@ class mdtLauncher(QProcess):
         self._java_flow = None                 # Java 自动下载流程实例
         self._java_download_attempts = 0       # 自动下载尝试次数（防循环；游戏启动/结束时重置）
         self._java_cancelled = False           # 当前 Java 下载是否被用户取消（决定显示"已取消"还是"失败"）
+        self._java_rescan_done = False         # 本次启动是否已用掉"没 Java 就先重扫一遍"的补救机会
         self._locker = mdtLocker()             # 实例锁：运行期间禁止实例与本体改名/删除（数据目录不限）
 
     def _launch(self, mdt_name, java_path=None, args=None, data_path=None):
@@ -118,53 +119,13 @@ class mdtLauncher(QProcess):
         self._prepare_data_dir()
 
         # ---------- 3. 确定 Java 路径 ----------
-        if java_path is not None:
-            # 显式传入 java_path 的情况
-            self.log.emit({"type": "info", "text": "Using explicit Java path: " + java_path})
-            if not os.path.exists(java_path):
-                self.log.emit({"type": "error", "text": "javaNotFound"})
-                self.going = 0
-                self._auto_java_download()
-                return False
-            
-            if not javaScanner.isJava(java_path):
-                self.log.emit({"type": "error", "text": "javaInvalid"})
-                self.going = 0
-                self._auto_java_download()
-                return False
-                
-            self.data["javaPath"] = java_path
-            self.log.emit({"type": "info", "text": "Java path validated: " + java_path})
-        else:
-            # 从 mdtManager 获取 BML 配置（含 javaPath 解析与回退）
-            self.log.emit({"type": "info", "text": "Reading BML config via mdtManager for: " + mdt_name})
-            try:
-                mdt_data = self.root.mdtManager.getMdtData(mdt_name, self.settings)
-                java_from_config = mdt_data.get("javaPath")
-                # follow 表示无可用的 Java（mdtManager 已校验并写回），按缺失处理
-                if not java_from_config or java_from_config == "<:|follow|:>":
-                    raise ValueError("missing java path")
-                self.log.emit({"type": "info", "text": "Java path from BML config: " + str(java_from_config)})
-            except Exception:
-                self.log.emit({"type": "error", "text": "javaConfigInvalid"})
-                self.going = 0
-                self._auto_java_download()
-                return False
-
-            if not os.path.exists(java_from_config):
-                self.log.emit({"type": "error", "text": "javaNotFound"})
-                self.going = 0
-                self._auto_java_download()
-                return False
-
-            if not javaScanner.isJava(java_from_config):
-                self.log.emit({"type": "error", "text": "javaInvalid"})
-                self.going = 0
-                self._auto_java_download()
-                return False
-
-            self.data["javaPath"] = java_from_config
-            self.log.emit({"type": "info", "text": "Java path validated: " + java_from_config})
+        # 解析与校验的口径收在 _resolve_java 里，界面上的"提前拦"用的是同一套
+        java_from_config, problem = self._resolve_java(mdt_name, java_path)
+        if problem:
+            self._java_unavailable(problem)
+            return False
+        self.data["javaPath"] = java_from_config
+        self.log.emit({"type": "info", "text": "Java path validated: " + java_from_config})
 
         self.data["args"] = args if args else []
         self.log.emit({"type": "info", "text": "Launch args: " + str(self.data["args"])})
@@ -201,6 +162,9 @@ class mdtLauncher(QProcess):
 
     def run(self, mdt_name, java_path=None, args=None, data_path=None):
         """对外接口：启动服务端（异步），不阻塞调用线程。"""
+        # 新的一次启动：重新给一次"没有 Java 就先重扫候选表"的补救机会
+        # （重试走 _launch 而不是 run，正是为了不把这面旗子又立回去）
+        self._java_rescan_done = False
         self._launch(mdt_name, java_path, args, data_path)
 
     def kill_game(self, blocking=False):
@@ -247,6 +211,72 @@ class mdtLauncher(QProcess):
         except Exception as e:
             self.log.emit({"type": "error", "text": "Prepare data directory failed: " + str(e)})
 
+    # ================== Java 缺失的补救 ==================
+    @staticmethod
+    def _java_problem(java_path):
+        """检查具体 Java 路径：可用返回 None，否则返回日志用的错误文本 key。"""
+        if not os.path.exists(java_path):
+            return "javaNotFound"
+        if not javaManager.isJava(java_path):
+            return "javaInvalid"
+        return None
+
+    def _resolve_java(self, mdt_name, java_path=None):
+        """解析本次启动要用的 Java，返回 (路径, 错误 key)：错误 key 非空即不可用。
+
+        显式传入的路径直接用；否则按实例配置解析——getMdtData 会把 FOLLOW 与
+        自动匹配都落成具体路径，还是 FOLLOW 就说明一个 Java 也没解析出来。
+        解析与校验的口径只此一份：启动流程用它，界面上的"提前拦"也用它。
+        """
+        if java_path is not None:
+            # 显式传入 java_path 的情况
+            java_path = javaManager.resolve(java_path)
+            self.log.emit({"type": "info", "text": "Using explicit Java path: " + java_path})
+            return java_path, self._java_problem(java_path)
+        # 从 mdtManager 获取 BML 配置（含 javaPath 解析与回退）
+        self.log.emit({"type": "info", "text": "Reading BML config via mdtManager for: " + mdt_name})
+        try:
+            mdt_data = self.root.mdtManager.getMdtData(mdt_name, self.settings)
+            java_from_config = mdt_data.get("javaPath")
+            # follow 表示无可用的 Java（mdtManager 已校验并写回），按缺失处理
+            if not java_from_config or java_from_config == mdtManager.FOLLOW:
+                raise ValueError("missing java path")
+            self.log.emit({"type": "info", "text": "Java path from BML config: " + str(java_from_config)})
+        except Exception:
+            return None, "javaConfigInvalid"
+        java_from_config = javaManager.resolve(java_from_config)
+        return java_from_config, self._java_problem(java_from_config)
+
+    def _java_unavailable(self, problem, mdt_name=None):
+        """没有可用 Java 时的统一善后：先重扫一遍候选表，再决定要不要下载。
+
+        候选表（settings["javaPaths"]）只在启动器启动时算过一次，用户中途装好
+        JDK 后它还是旧的，照着它走会把"有 Java"误判成"没有 Java"，所以先重扫。
+        重扫每次启动只做一次（_java_rescan_done）：重试后仍解析不出可用 Java
+        就直接自动下载，不会在"重扫 → 重试 → 重扫"之间来回打转。
+        重走启动必须延后到事件循环：此刻外层 _launch 还没返回，
+        直接递归会被外层的 going 归零和 return False 覆盖掉。
+        mdt_name：重试要启动的实例。启动流程里 self.data 已经填好，走"提前拦"
+        过来时还没有，所以要显式传。
+        """
+        self.going = 0
+        if not self._java_rescan_done:
+            self._java_rescan_done = True
+            try:
+                javas = javaManager.getJavas()
+            except Exception:
+                javas = []
+            if javas:
+                self.settings["javaPaths"] = javas
+                _log.info(_tr("log.info.javaRescanFound"))
+                target = mdt_name or self.data.get("mdtName")
+                if target:
+                    QTimer.singleShot(0, lambda: self._launch(target))
+                    return
+            _log.info(_tr("log.info.javaRescanEmpty"))
+        self.log.emit({"type": "error", "text": problem})
+        self._auto_java_download()
+
     # ================== Java 自动下载 ==================
     def _auto_java_download(self):
         """Java 缺失/无效：切页显示"未检测到Java"并自动下载。
@@ -264,7 +294,7 @@ class mdtLauncher(QProcess):
             self._emit_finished(-1)
             return
         self._java_download_attempts += 1
-        _log.info(_tr("log.java.autodl_start", self._java_download_attempts))
+        _log.info(_tr("log.info.javaAutoDlStart", self._java_download_attempts))
         self.java_missing.emit()
         try:
             from src.utils import javaDownload
@@ -278,12 +308,12 @@ class mdtLauncher(QProcess):
         flow.finished.connect(self._on_java_download_finished)
         flow.cancelled.connect(self._on_java_flow_cancelled)
         flow.paused_changed.connect(self.java_paused)
-        flow.error.connect(lambda msg: self.log.emit({"type": "error", "text": _tr("log.java.dl_error_prefix", str(msg))}))
+        flow.error.connect(lambda msg: self.log.emit({"type": "error", "text": _tr("log.error.javaDlErrorPrefix", str(msg))}))
         flow.start()
 
     def _on_java_flow_cancelled(self):
         """Java 下载被用户取消（下载列表页/退出时）：记录标记，结束时显示"已取消"。"""
-        _log.info(_tr("log.java.autodl_cancelled"))
+        _log.info(_tr("log.info.javaAutoDlCancelled"))
         self._java_cancelled = True
 
     def _on_java_download_finished(self, ok):
@@ -311,26 +341,34 @@ class mdtLauncher(QProcess):
             self._java_download_attempts = 0
             cancelled = self._java_cancelled
             self._java_cancelled = False
-            _log.info(_tr("log.java.autodl_finished", ok, cancelled))
+            _log.info(_tr("log.info.javaAutoDlFinished", ok, cancelled))
             if cancelled:
                 self.java_cancelled.emit()   # main 显示"Java下载已取消"
             else:
                 self.java_done.emit(False)   # main 显示"下载失败"
             return
-        _log.info(_tr("log.java.autodl_success"))
+        _log.info(_tr("log.info.javaAutoDlSuccess"))
         self.java_done.emit(ok)
+        # 新装的 JDK 已经落在盘上：让 javaManager 子线程重扫一遍候选表
+        # （扫完广播 changed，设置页/游戏管理页的 Java 选项跟着刷新；
+        #  下面 _restart_after_java 拿到的就是这份新缓存）
+        javaManager.scan()
         # 等待一秒让"Java部署完成"显示后再重新启动游戏
         QTimer.singleShot(1000, self._restart_after_java)
 
     def _restart_after_java(self):
         """Java 下载完成后：刷新 Java 设置并重新启动游戏。"""
-        _log.info(_tr("log.java.autodl_restart"))
+        _log.info(_tr("log.info.javaAutoDlRestart"))
         try:
-            javas = javaScanner.getJavas()
+            # force：这里必须无视缓存重扫，否则可能拿到下载前那份旧候选表，
+            # 新装的 JDK 就被跳过了（此处在子线程刚扫过之后，通常直接命中）
+            javas = javaManager.getJavas(force=True)
             if javas:
                 self.settings["javaPaths"] = javas
-                chosen = next((j for j in javas if j[1].startswith("17.")), None) or javas[0]
-                self.settings["javaPath"] = chosen[0]
+                # 与实例解析共用一套挑选口径（优先 17，其次最高版本）
+                chosen = mdtManager.pickJava(javas)
+                if chosen:
+                    self.settings["javaPath"] = chosen
         except Exception:
             pass
         mdt_name = self.data.get("mdtName") or self.settings.get("defaultGame")
@@ -345,6 +383,12 @@ class mdtLauncher(QProcess):
 
     def _on_finished(self, exitCode):
         # Qt6: QProcess.finished(int exitCode)，仅一个参数（Qt5 的 ExitStatus 已移除）
+        # 退出码要落进日志：非 0 时 Windows 的异常码按有符号 int 读是负数
+        # （0xC0000005 访问违例 = -1073741819），只看十进制认不出是什么，所以补一个十六进制。
+        text = "process exit with %d" % exitCode
+        if exitCode != 0:
+            text += " (0x%08X)" % (exitCode & 0xFFFFFFFF)
+        self.log.emit({"type": "info" if exitCode == 0 else "error", "text": text})
         self._emit_finished(exitCode)
         # 游戏进程真正结束：单独发出 game_finished（区别于生命周期结束）
         try:
@@ -406,14 +450,32 @@ class mdtLauncher(QProcess):
             pass
 
     # ================== 日志输出 ==================
+    # 子进程是 Windows 上的 JVM，System.out 按系统 ANSI 代码页写字节（简中下是 GBK），
+    # 而日志文件是 UTF-8。固定按 UTF-8 解码会把整条中文行变成 �——游戏日志里的
+    # 「UDP session 1 游戏回程 845890 包」就是这么丢的。改成灵活解码：按候选表逐个试，
+    # ASCII 行与编码无关、哪条都能解，只有非 ASCII 行才区分得出来，第一个解得通的胜出，
+    # 全解不了才 replace 兜底。mbcs 就是 Windows 的 ANSI 代码页本身，
+    # 比 locale.getpreferredencoding() 稳——后者会被 Python 的 UTF-8 模式改成 utf-8。
+    # 注意：某串字节同时是两种编码的合法序列时无从分辨，只能认先命中的那条。
+    _ENCODINGS = ("utf-8", "mbcs", "gbk")
+
+    def _decode(self, raw: bytes) -> str:
+        """灵活解码一段子进程输出；候选编码全试完仍失败才按 UTF-8 替换，永不抛异常。"""
+        for enc in self._ENCODINGS:
+            try:
+                return raw.decode(enc)
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return raw.decode("utf-8", errors="replace")
+
     def on_stdout(self):
         while self.canReadLine():
-            line = self.readLine().data().decode("utf-8", errors="replace").strip()
+            line = self._decode(self.readLine().data()).strip()
             if line:
                 self.game_log.emit({"type": "info", "text": line})
 
     def read_stderr(self):
         while self.canReadLine():
-            line = self.readLine().data().decode("utf-8", errors="replace").strip()
+            line = self._decode(self.readLine().data()).strip()
             if line:
                 self.game_log.emit({"type": "error", "text": line})

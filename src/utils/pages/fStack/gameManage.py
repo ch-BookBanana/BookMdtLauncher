@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from ...bus import bus
-from ...javaScanner import javaScanner
+from ...javaManager import javaManager
 from ...mdtManager import mdtManager
 from ...options.items import Bool, Combo
 from ...options.scrolls import Scroll
@@ -101,6 +101,14 @@ class GameManage(Scroll):
         self.root.mdtManager.on_game_changed.connect(self._on_game_changed)
         self.root.launcher.game_started.connect(self._sync_running)
         self.root.launcher.lifecycle_finished.connect(self._sync_running)
+        # Java 候选表归 javaManager 扫（子线程 + TTL 缓存）：本页开着时跟着看，
+        # 出栈就 unwatch（见 on_close），不常驻扫盘
+        javaManager.watch()
+        javaManager.changed.connect(self._on_java_changed)
+
+    def _on_java_changed(self, javas):
+        """全局 Java 候选表变了（含首次扫完）：重填本页那行选择。"""
+        self.java.fill(javas)
 
     def refresh(self):
         """按当前实例刷新顶部；没指定实例或实例已失效（msg 为 None）时顶部留空。"""
@@ -147,12 +155,14 @@ class GameManage(Scroll):
         mdt_signal = self.root.mdtManager.on_game_changed
         launcher = self.root.launcher
         for signal, slot in ((mdt_signal, self._on_game_changed),
+                             (javaManager.changed, self._on_java_changed),
                              (launcher.game_started, self._sync_running),
                              (launcher.lifecycle_finished, self._sync_running)):
             try:
                 signal.disconnect(slot)
             except (RuntimeError, TypeError):
                 pass
+        javaManager.unwatch()
 
     class Folders(QWidget):
         """数据 / 蓝图 / 模组三个文件夹入口：点一下就在文件管理器里打开对应目录。
@@ -759,8 +769,7 @@ class GameManage(Scroll):
             具体路径          - 已选定的 Java
         头两项是固定项（文案随语言刷），其余按全局候选表显示版本号、路径挂 tooltip。
         校验与失败码全交给 mdtManager.edit()，这里只负责把当前值画出来。
-        候选表与设置页共用 settings["javaPaths"]，只有它为空时才真跑一次嗅探，
-        且只在展开下拉框时才填，进页面不扫盘。
+        候选表交给 javaManager（有缓存，子线程扫）：changed 一到就重填，本页不自己扫盘。
         """
 
         AUTO = "auto"   # 「自动匹配」在 combo 里的占位值（写回 BML.json 时落成 null）
@@ -790,8 +799,12 @@ class GameManage(Scroll):
                 return None
             return self.root.mdtManager.getMdtRaw(self.game).get("javaPath")
 
-        def fill(self):
-            """按全局 Java 候选重填一遍，并把实例当前的选择对上去。"""
+        def fill(self, javas=None):
+            """按全局 Java 候选重填一遍，并把实例当前的选择对上去。
+
+            javas 是 javaManager.changed 送来的候选表；不长传就用 settings 里那一份，
+            自己削一遍失效项（展开下拉框时走这条）。
+            """
             combo = self.combo
             combo.blockSignals(True)
             combo.clear()
@@ -800,15 +813,13 @@ class GameManage(Scroll):
                 # 实例无效（没指定或已失效）：顶部本来就是空的，这行也不该可点
                 combo.setEnabled(False)
             else:
-                javas = self.root.settings["javaPaths"]
-                if javas:
+                if javas is None:
+                    javas = self.root.settings["javaPaths"]
                     # 遍历副本：边遍历边 remove 会漏掉紧挨着的元素
-                    for java in list(javas):
-                        if not javaScanner.isJava(java[0]):
-                            javas.remove(java)
+                    javas = [java for java in list(javas) if javaManager.isJava(java[0])]
                 else:
-                    javas = javaScanner.getJavas()
-                    self.root.settings["javaPaths"] = javas
+                    javas = list(javas)
+                self.root.settings["javaPaths"] = javas
                 current = self._current()
                 self._none = not javas
                 combo.setEnabled(True)
@@ -825,9 +836,16 @@ class GameManage(Scroll):
                 else:
                     index = combo.findData(current)
                     if index < 0:
+                        # 记法变过（绝对 ↔ 相对），候选表里那条就是它：按真身对回来，
+                        # 免得同一个 Java 在列表里出现两次
+                        for i in range(combo.count()):
+                            if javaManager.sameJava(combo.itemData(i), current):
+                                index = i
+                                break
+                    if index < 0:
                         # 记录里的 Java 已不在候选里（卸载/换盘）：照样列出来，
                         # 否则界面显示的选项跟 BML.json 里的实际值对不上
-                        combo.addItem("v%s" % (javaScanner.getJavaVersion(current) or "?"), current)
+                        combo.addItem("v%s" % (javaManager.getJavaVersion(current) or "?"), current)
                         combo.setItemData(combo.count() - 1, current, Qt.ToolTipRole)
                         index = combo.count() - 1
                 combo.setCurrentIndex(index)

@@ -580,12 +580,24 @@ class Start(Page):
                 self.settings.clicked.connect(lambda: self.root.window.floatingStack.add_page(GameManage(self.root.settings["defaultGame"], self, self.root)))
 
             def on_start_clicked(self):
-                """开始游戏：无可用 Java 时自动触发下载流程（launcher 会发 java_missing）。"""
+                """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""
                 root = self.root
                 if root.java_flow is not None:
                     return  # 已有 Java 下载流程在运行
-                # 手动指定了 Java 则直接用，否则 launcher 内部自动选择并校验
-                root.launcher.run(root.settings["defaultGame"])
+                launcher = root.launcher
+                if launcher.going:
+                    return  # 已有一个实例在跑/在启动，让 launcher 自己报 gameRunning
+                game = root.settings["defaultGame"]
+                # 提前拦：解析口径与启动流程完全一致（同一个 _resolve_java），
+                # 缺 Java 就不放行进启动流程——否则界面会先闪一下「启动中」、
+                # 日志里还会多出一段准备记录，再退回「未检测到Java」。
+                # 拦下后仍走 launcher 的缺失善后：发 java_missing → 自动下载 →
+                # 装好后 _restart_after_java 自己重新启动
+                _, problem = launcher._resolve_java(game)
+                if problem:
+                    launcher._java_unavailable(problem, game)
+                    return
+                launcher.run(game)
 
             def langing(self):
                 self.start.setText(self.root.langer.get("wid.pages.start.startbtn"))

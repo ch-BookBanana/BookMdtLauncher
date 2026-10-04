@@ -23,8 +23,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     dest  : jdk zip 下载目标路径（BML/.tmp/Java/）
 - 下载：QDownloader 全程子线程运行并注册到全局路由表；
 - 解压：解压到 BML/.Java/<version>/bin/java.exe（zip 顶层目录自动剥离）。
-- 中断续传：下载/解压中断时保留 javaDownload.json，
-  程序下次启动读取并继续流程（resume=True）。
+- 中断续传：只有非正常中断（进程被杀 / 断电）会保留 javaDownload.json，
+  程序下次启动读取并继续流程（resume=True）；用户主动取消会清掉该记录，
+  否则下次启动会把已放弃的下载当"未完成"捡回来自己重下。
 """
 
 import os
@@ -122,6 +123,20 @@ def save_info(info):
         with open(JAVA_INFO_PATH, "w", encoding="utf-8") as f:
             json.dump(info, f, ensure_ascii=False, separators=(',', ':'))
     except Exception:
+        pass
+
+
+def clear_info():
+    """删除 javaDownload.json：取消即放弃，下次启动不再续传。
+
+    get_status() 靠这条记录判断"有未完成的下载"，留着它下次启动就会接管续传：
+    用户刚点过取消，启动器却自己又下载起来。取消路径必须把记录一起清掉。
+    """
+    try:
+        if os.path.isfile(JAVA_INFO_PATH):
+            os.remove(JAVA_INFO_PATH)
+            _log.info(_tr("log.info.javaRecordCleared"))
+    except OSError:
         pass
 
 
@@ -251,7 +266,7 @@ class JavaDownloadFlow(QObject):
     # ---------- 公开接口 ----------
     def start(self):
         """开始 Java 下载/解压流程（非阻塞，结果通过信号返回）。"""
-        _log.info(_tr("log.java.flow_start", self.resume, self.dest))
+        _log.info(_tr("log.info.javaFlowStart", self.resume, self.dest))
         if self.resume:
             info = load_info() or {}
             status = info.get("status")
@@ -279,10 +294,11 @@ class JavaDownloadFlow(QObject):
         self._start_download()
 
     def cancel(self):
-        """取消流程：停止 QDownloader 与解压线程（保留 javaDownload.json 供续传）。"""
-        _log.info(_tr("log.java.cancel"))
+        """取消流程：停止 QDownloader 与解压线程，并清掉下载记录（放弃续传）。"""
+        _log.info(_tr("log.info.javaCancel"))
         self._is_cancelled = True
         self.shutdown()
+        clear_info()
 
     def shutdown(self):
         """停止并等待所有内部子线程退出（下载线程 + 解压线程）。
@@ -291,7 +307,7 @@ class JavaDownloadFlow(QObject):
         调用后所有 QThread 均已退出，可安全释放引用而不触发
         "QThread: Destroyed while thread is still running"。
         """
-        _log.info(_tr("log.java.shutdown"))
+        _log.info(_tr("log.info.javaShutdown"))
         # 1. 下载线程
         dl = self._downloader
         self._downloader = None
@@ -320,7 +336,7 @@ class JavaDownloadFlow(QObject):
         if status != self._last_status:
             self._last_status = status
             self._last_pct = -1   # 换阶段后第一个进度帧必发
-            _log.info(_tr("log.java.status", status))
+            _log.info(_tr("log.info.javaStatus", status))
             self.status_changed.emit(status)
 
     def _emit_progress(self, done, total):
@@ -335,7 +351,7 @@ class JavaDownloadFlow(QObject):
             return
         self._last_pct = pct
         if self._is_paused:
-            _log.info(_tr("log.java.progress_suppressed", pct))
+            _log.info(_tr("log.info.javaProgressSuppressed", pct))
             return
         self.progress.emit(done, total)
 
@@ -387,7 +403,7 @@ class JavaDownloadFlow(QObject):
         dl.start()
 
     def _on_source_selected(self, url):
-        _log.info(_tr("log.java.source_selected", url))
+        _log.info(_tr("log.info.javaSourceSelected", url))
         self._info["url"] = url
         self._info["updated_at"] = int(time.time())
         save_info(self._info)
@@ -399,25 +415,25 @@ class JavaDownloadFlow(QObject):
         而不是像以前那样被静默跳过。
         """
         if speed < 0:
-            _log.warning(_tr("log.java.source_probe_failed", url))
+            _log.warning(_tr("log.warning.javaSourceProbeFailed", url))
         else:
-            _log.info(_tr("log.java.source_probed", url, _fmt_speed(speed)))
+            _log.info(_tr("log.info.javaSourceProbed", url, _fmt_speed(speed)))
 
     def _on_download_paused_changed(self, paused):
         """下载暂停/恢复：记录暂停状态并转发给 UI（带当前百分比）。"""
         self._is_paused = bool(paused)
         pct = self._last_pct if self._last_pct >= 0 else 0
-        _log.info(_tr("log.java.dl_paused" if paused else "log.java.dl_resumed", pct))
+        _log.info(_tr("log.info.javaDlPaused" if paused else "log.info.javaDlResumed", pct))
         self.paused_changed.emit(paused, pct)
 
     def _on_download_cancelled(self):
         """下载被取消（用户取消/退出时）：善后释放 QDownloader 并结束流程。
 
-        保留 javaDownload.json（status 保持 downloading），下次启动续传；
+        清掉 javaDownload.json（取消即放弃，下次启动不再续传）；
         发 cancelled 信号让 UI 显示"已取消"，不误报"下载失败"。
         """
         self._is_cancelled = True
-        _log.info(_tr("log.java.dl_cancelled"))
+        _log.info(_tr("log.info.javaDlCancelled"))
         dl = self._downloader
         self._downloader = None
         if dl is not None:
@@ -426,11 +442,12 @@ class JavaDownloadFlow(QObject):
                 dl.deleteLater()
             except Exception:
                 pass
+        clear_info()
         self.cancelled.emit()
         self.finished.emit(False)
 
     def _on_download_finished(self, ok):
-        _log.info(_tr("log.java.dl_finished", ok, self._is_cancelled))
+        _log.info(_tr("log.info.javaDlFinished", ok, self._is_cancelled))
         # 无论成功失败都释放并删除 QDownloader。
         # 必须先 wait_thread 确保下载线程完全退出，否则销毁仍运行的 QThread
         # 会触发 Qt 致命错误（QThread: Destroyed while thread is still running）。
@@ -456,9 +473,9 @@ class JavaDownloadFlow(QObject):
             self.finished.emit(False)
             return
         self._is_cancelled = False
-        _log.info(_tr("log.java.extract_start", self.dest))
+        _log.info(_tr("log.info.javaExtractStart", self.dest))
         if not os.path.isfile(self.dest):
-            self.error.emit(_tr("log.java.extract_missing", self.dest))
+            self.error.emit(_tr("log.error.javaExtractMissing", self.dest))
             self._info["status"] = "error"
             save_info(self._info)
             self._emit_status("error")
@@ -499,7 +516,7 @@ class JavaDownloadFlow(QObject):
                 thread.wait(5000)
             except Exception:
                 pass
-        _log.info(_tr("log.java.extract_finished", ok, self._is_cancelled))
+        _log.info(_tr("log.info.javaExtractFinished", ok, self._is_cancelled))
         if not ok or self._is_cancelled:
             if not self._is_cancelled:
                 self._info["status"] = "error"

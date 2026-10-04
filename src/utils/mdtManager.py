@@ -22,7 +22,7 @@ from PySide6.QtGui import QPixmap
 
 import os, zipfile, json, logging
 from .path_utils import getPath
-from .javaScanner import javaScanner
+from .javaManager import javaManager
 from .QThTimer import QThTimer
 
 _log = logging.getLogger("Main.MdtManager")
@@ -477,6 +477,25 @@ class mdtManager(QObject):
 
 
     @classmethod
+    def pickJava(cls, javas):
+        """从候选表里挑一个 Java：优先 17，其次最高版本；挑不出返回 None。
+
+        候选表形如 [["C:/.../java.exe", "17.0.2"], ...]，有效性由探测方保证。
+        实例解析、全局解析、Java 下载完成后的重选都走这一套口径。
+        """
+        best_path, best_major = None, -1
+        for path, version in javas:
+            try:
+                major = int(str(version).split(".")[0])
+            except ValueError:
+                continue
+            if major == 17:
+                return path
+            if major > best_major:
+                best_path, best_major = path, major
+        return best_path
+
+    @classmethod
     def getMdtData(cls, subdir_name, settings):
         """返回指定子目录的 BML.json 内容，失败返回默认值。
 
@@ -484,7 +503,9 @@ class mdtManager(QObject):
             None           - 自动匹配（settings["javaPath"]=None 时占位，不写入 BML.json）
             "<:|follow|:>" - 跟随全局设置（写入 BML.json 的标识符）
             具体路径       - 已选定的 Java
-        具体路径不可用（Java 缺失/无效）时直接改为 "<:|follow|:>" 写入并返回，
+        实例选定的具体路径失效（被卸载/移走）时改回 "<:|follow|:>" 写回，
+        并立刻重扫一遍候选表再解析：Java 可能是用户中途装上的，沿用旧候选表
+        会把“有 Java”当成“没有 Java”，白白多走一趟下载。
         """
         cls._retrieve_mdt_data(subdir_name)
         data_path = getPath(os.path.join(cls.base_dir, subdir_name, "BML.json"))
@@ -492,35 +513,29 @@ class mdtManager(QObject):
         if os.path.isfile(data_path):
             with open(data_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-        if (data["javaPath"] == cls.FOLLOW and settings["javaPath"] is None) or data["javaPath"] is None:
-            # 自动选择：优先 17，其次最高版本
-            max_vers = -1
-            max_path = None
-            for path, version in settings["javaPaths"]:
-                vers = version.split(".")[0]
-                if int(vers) > max_vers:
-                    max_vers = int(vers)
-                    max_path = path
-                if vers == "17":
-                    max_path = path
-                    max_vers = 17
-                    break
-            data["javaPath"] = max_path
-        elif data["javaPath"] == cls.FOLLOW:
-            data["javaPath"] = settings["javaPath"]
 
-        # 仅校验具体路径：不可用 → 改回 follow 写入并返回
-        # （None 表示自动匹配，不参与 isJava 校验，也不写入 BML.json）
+        # 具体路径失效：改回 follow 写回，并重扫候选表（结果同步回全局 settings）
         java_path = data["javaPath"]
-        if java_path and java_path != cls.FOLLOW and not javaScanner.isJava(java_path):
-            data["javaPath"] = cls.FOLLOW
-            try:
-                with open(data_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
-            except Exception:
-                pass
-            return data
-        return data   
+        if java_path and java_path != cls.FOLLOW and not javaManager.isJava(java_path):
+            java_path = cls.FOLLOW
+            cls.setData(subdir_name, ["javaPath"], cls.FOLLOW)
+            javas = javaManager.getJavas()
+            if javas:
+                settings["javaPaths"] = javas
+
+        # 解析 follow / None：全局选定的具体路径优先，否则在候选表里自动挑
+        if java_path == cls.FOLLOW:
+            java_path = settings["javaPath"]
+        if java_path is None:
+            java_path = cls.pickJava(settings["javaPaths"])
+
+        # 最终校验：解析结果同样可能失效（例如全局选中的那个刚被卸载）
+        # （None 表示自动匹配，不参与 isJava 校验，也不写入 BML.json）
+        if java_path and not javaManager.isJava(java_path):
+            java_path = cls.FOLLOW
+            cls.setData(subdir_name, ["javaPath"], cls.FOLLOW)
+        data["javaPath"] = java_path
+        return data
 
     @classmethod
     def getMdtRaw(cls, subdir_name):
@@ -698,7 +713,7 @@ class mdtManager(QObject):
             """设置实例使用的 Java：path=None 表示跟随全局设置。"""
             if path is None:
                 return self.set("javaPath", self._scanner.FOLLOW)
-            if not path or not javaScanner.isJava(path):
+            if not path or not javaManager.isJava(path):
                 return self._fail("invalidJava")
             return self.set("javaPath", path)
 

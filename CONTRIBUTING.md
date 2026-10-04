@@ -20,7 +20,7 @@ BookMDTLauncher/
         ├── mdtLauncher.py      # 游戏进程启动器（QProcess）
         ├── mdtLocker.py        # 游戏实例锁：运行期间禁止改名 / 删除实例
         ├── mdtServer.py        # Mindustry 服务器 UDP 查询
-        ├── javaScanner.py      # 本地 Java 并发嗅探（轻量）
+        ├── javaManager.py      # 本地 Java 发现与校验（PATH / 常见目录 / 注册表）
         ├── javaDownload.py     # Java 自动下载 / 解压
         ├── QDownloader.py      # 多线程断点续传下载器
         ├── QThTimer.py         # 跨线程定时器框架

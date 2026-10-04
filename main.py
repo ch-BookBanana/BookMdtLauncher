@@ -31,7 +31,7 @@ from PySide6.QtGui import (
     QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QPainterPath, QCursor, QAction
 )
 from PySide6.QtWidgets import (
-    QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QGridLayout, QStackedWidget, QLineEdit, QPushButton, QLabel,
+    QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QLineEdit, QPushButton, QLabel,
     QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -46,6 +46,7 @@ try:
     from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
     from src.utils.QThTimer import QThTimer
     from src.utils.api.githubAPI import GithubAPI
+    from src.utils.javaManager import javaManager
     from src.utils import javaDownload
     from src.utils.QDownloader import QDownloader
     from src.utils.utils import _is_mdt_download, change_color, t
@@ -114,7 +115,7 @@ try:
             self.loadSettings()
 
             self.langer = self.Langer(self, self)
-            # 工具模块日志 i18n：注入 langer.get 翻译函数（未注入时日志回退为 key 本身）
+            javaManager.settings = self.settings
             javaDownload.set_tr_func(self.langer.get)
             mdt_set_tr_func(self.langer.get)
             self.logger._cleanup_old_logs()
@@ -124,9 +125,7 @@ try:
 
             self.launcher = mdtLauncher(self, self.settings)
             self.githubAPI = GithubAPI()
-            # settings 传 dict；parent 必须 QObject（Main 不是，传 None）；root 存 Main 引用
             self.mdtManager = mdtManager(self.settings, parent=None, root=self)
-            # checkGame 变更 gameList（newGame/deleteGame/nameChanged）后自动落盘
             self.mdtManager.on_game_changed.connect(self._on_game_changed)
             if self.settings["github"]["token_enc"]:
                 raw = self._decrypt_settings_token()
@@ -189,7 +188,7 @@ try:
                 self.launcher.kill_game(blocking=True)
             except Exception:
                 pass
-            # 取消 Java 下载/解压流程（保留 javaDownload.json，下次启动续传）
+            # 取消 Java 下载/解压流程（并清掉 javaDownload.json：取消即放弃，不再续传）
             try:
                 self._java_cancel_all()
             except Exception:
@@ -413,12 +412,12 @@ try:
             try:
                 Main._atomic_write_json(getPath(self._SETTINGS_PATH), self.settings)
                 try:
-                    self.logger.info(self.langer.get("log.info.savesettings"))
+                    self.logger.info(self.langer.get("log.info.saveSettings"))
                 except Exception:
                     self.logger.info("Settings saved")
             except Exception as e:
                 try:
-                    self.logger.error(self.langer.get("log.error.savesettings") + "\n--Exception: " + str(e), exc_info=True)
+                    self.logger.error(self.langer.get("log.error.saveSettings") + "\n--Exception: " + str(e), exc_info=True)
                 except Exception:
                     self.logger.error("Failed to save settings\n--Exception: " + str(e), exc_info=True)
 
@@ -445,7 +444,7 @@ try:
 
                 # 广播主题变化：各控件的 lighting 已自行接在总线上
                 bus.set_theme(is_light)
-                self.logger.info(t(self.langer.get("log.info.changetheme"), "light" if is_light else "dark"))
+                self.logger.info(t(self.langer.get("log.info.themeChange"), "light" if is_light else "dark"))
             finally:
                 # 完成：重新启用绘制（异常也保证恢复，避免窗口卡在不绘制状态）
                 self.window.setUpdatesEnabled(True)
@@ -2047,14 +2046,14 @@ try:
                                             # 检测循环日志：记录读取到的 Java 任务状态（含暂停/恢复切换），
                                             # 用于排查信号竞争导致的"暂停后被覆盖成正在下载"
                                             if _paused != self._last_java_paused:
-                                                self.root.logger.info(t(self.root.langer.get("log.dl.java_state"),
+                                                self.root.logger.info(t(self.root.langer.get("log.info.dlJavaState"),
                                                                         "paused" if _paused else "downloading",
                                                                         _pct,
                                                                         os.path.basename(_dest) or _dest))
                                                 self._last_java_paused = _paused
                                             break
                                 except Exception as e:
-                                    self.root.logger.warning(t(self.root.langer.get("log.dl.java_sync_error"), repr(e)))
+                                    self.root.logger.warning(t(self.root.langer.get("log.warning.dlJavaSyncError"), repr(e)))
                                 all_tasks = dict(actives)
                                 all_tasks.update(pendings)
                                 # 移除已消失的任务卡片
@@ -2098,7 +2097,7 @@ try:
                                     except Exception:
                                         pass
                                 except Exception as e:
-                                    self.root.logger.error(t(self.root.langer.get("log.dl.resume_failed"), task_id, e))
+                                    self.root.logger.error(t(self.root.langer.get("log.error.dlResumeFailed"), task_id, e))
 
                             def _delete_task(self, state_file):
                                 task_dir = os.path.dirname(state_file) if state_file else None
@@ -2115,7 +2114,7 @@ try:
                                         mdir = os.path.dirname(dest)
                                         if os.path.isdir(mdir):
                                             shutil.rmtree(mdir, ignore_errors=True)
-                                        self.root.logger.info(t(self.root.langer.get("log.dl.mdt_delete_cleaned"),
+                                        self.root.logger.info(t(self.root.langer.get("log.info.dlMdtDeleteCleaned"),
                                                                 os.path.basename(mdir) or mdir))
                                 except Exception:
                                     pass
@@ -2313,12 +2312,12 @@ try:
                                         os.makedirs(os.path.dirname(dfile), exist_ok=True)
                                         with open(dfile, "w", encoding="utf-8") as f:
                                             json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
-                                        _state = self.root.langer.get("log.java.paused_state" if paused else "log.java.resumed_state")
-                                        self.root.logger.info(t(self.root.langer.get("log.dl.mdt_paused_state"),
+                                        _state = self.root.langer.get("log.info.javaPausedState" if paused else "log.info.javaResumedState")
+                                        self.root.logger.info(t(self.root.langer.get("log.info.dlMdtPausedState"),
                                                                 _state,
                                                                 os.path.basename(os.path.dirname(dest)) or ""))
                                     except Exception as e:
-                                        self.root.logger.warning(t(self.root.langer.get("log.dl.mdt_paused_error"), repr(e)))
+                                        self.root.logger.warning(t(self.root.langer.get("log.warning.dlMdtPausedError"), repr(e)))
 
                                 def _on_secondary_clicked(self):
                                     # 运行中：取消（子线程执行阻塞式取消，取消后删除 mdt 目标文件夹）；
@@ -2335,7 +2334,7 @@ try:
                                                         try:
                                                             if os.path.isdir(mdir):
                                                                 shutil.rmtree(mdir, ignore_errors=True)
-                                                            self.root.logger.info(t(self.root.langer.get("log.dl.mdt_cancel_cleaned"),
+                                                            self.root.logger.info(t(self.root.langer.get("log.info.dlMdtCancelCleaned"),
                                                                                     os.path.basename(mdir) or mdir))
                                                         except Exception:
                                                             pass
@@ -2608,7 +2607,7 @@ try:
                     try:
                         os.remove(os.path.join(self.log_dir, oldest))
                         # 清理日志时使用主 logger 记录
-                        self._loggers[self.base_logger_name].info(t(self.root.langer.get("log.info.cleanoldlogs"), oldest))
+                        self._loggers[self.base_logger_name].info(t(self.root.langer.get("log.info.cleanOldLogs"), oldest))
                     except Exception as e:
                         pass
 
