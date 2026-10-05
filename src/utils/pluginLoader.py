@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 两种形态都收：
     BML/plugins/hello/          一个目录
-    BML/plugins/hello.zip       一个压缩包（解压到 BML/.tmp/plugins/ 再按目录加载）
+    BML/plugins/hello.zip       一个压缩包（解压到 BML/.tmp/unpacked/ 再按目录加载）
 zip 是为了分发方便 —— 下载一个文件丢进 plugins/ 就能用。
 
 两条硬规矩
@@ -57,8 +57,11 @@ __all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all",
            "unload", "loaded", "ensure_dirs",
            "plugin_langs", "PLUGIN_DIR", "MANIFEST"]
 
+# 插件目录**只有这一个**。zip 插件的解压暂存区不叫 plugins —— 它是
+# 「把压缩包摊开好按目录加载」的临时落点，每次发现都重解，跟其他临时文件
+# 一个待遇；名字里再带 plugins 就成了第二个「插件目录」，找插件的人会找错。
 PLUGIN_DIR = "BML/plugins"
-PLUGIN_CACHE = "BML/.tmp/plugins"     # zip 插件的解压落点（跟其他临时文件一个待遇）
+PLUGIN_UNPACK = "BML/.tmp/unpacked"
 MANIFEST = "plugin.json"
 
 # 插件不得触达的顶层模块名（BMLCore 是唯一的合法入口）
@@ -332,7 +335,7 @@ def discover(base=None, cache=None):
     目录与 .zip 两种形态都收。
     """
     base = base or getPath(PLUGIN_DIR)
-    cache = cache or getPath(PLUGIN_CACHE)
+    cache = cache or getPath(PLUGIN_UNPACK)
     found = []
     if not os.path.isdir(base):
         return found
