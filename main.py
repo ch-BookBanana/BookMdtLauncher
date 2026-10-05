@@ -176,6 +176,10 @@ try:
             self.signals.register("stackClosed", Signal(object, bool))
             # Java 任务状态：下载列表的轮询 → 启动页的进度文字（只改字不切页）
             self.signals.register("java_status", Signal(str, object))
+            # 插件集合变了（卸载 / 加载失败回滚）：宿主据此把它盖过的东西收回来。
+            # 必须赶在 load_all() 之前注册 —— 加载期就有插件可能失败并发这条。
+            self.signals.register("plugins_changed", Signal())
+            self.signals.on("plugins_changed", self._on_plugins_changed)
 
             # 加载插件。位置有讲究：必须早于建窗口 —— 插件在 setup() 里往扩展点
             # 登记，而界面要到构建时才去读那些条目；同时又必须晚于 events.bind()
@@ -451,6 +455,40 @@ try:
                     self.logger.error(self.langer.get("core.log.error.saveSettings") + "\n--Exception: " + str(e), exc_info=True)
                 except Exception:
                     self.logger.error("Failed to save settings\n--Exception: " + str(e), exc_info=True)
+
+        def _on_plugins_changed(self):
+            """插件集合变了：把它盖过的三样收回来。
+
+            插件能盖的三样，各自的重算入口宿主本来就有：
+              * 语言包 —— plugin_langs 是 load 时合并进去的，重载一次就没了它；
+              * 样式片段 —— apply_theme 每次重新收 core.qss；
+              * 托盘菜单项 —— 托盘照 core.tray.menu 重建。
+
+            **页面（core.pages）不在此列**：左栏按钮与三栏控件是启动时建好的，
+            要让插件页面能热摘，得让页容器支持重建 —— 那是另一件事。所以卸掉一个
+            带页面的插件要重启才干净。
+
+            启动期（窗口还没建）也会收到这条：那时 theme/lang 的最终状态还由启动
+            流程自己定，所以这里做守卫。
+            """
+            try:
+                self.langer.load(self.langer.current_lang)
+            except Exception as e:
+                try:
+                    self.logger.warning(f"插件变更后重载语言失败：{e}")
+                except Exception:
+                    pass
+            if getattr(self, "window", None) is not None:
+                try:
+                    self.apply_theme()
+                except Exception:
+                    pass
+            tray = getattr(self, "tray", None)
+            if tray is not None:
+                try:
+                    tray.reload_plugin_items()
+                except Exception:
+                    pass
 
         def apply_theme(self):
             is_light = bool(self.settings["theme"])
@@ -1447,21 +1485,35 @@ try:
                 self.menu.addSeparator()  # 添加分隔线
 
                 # 扩展项（core.tray.menu）：插件自己给 QAction，托盘只负责摆位置。
-                # 文案由托盘在 langing() 里按条目的 title 重设，语言切换跟着走。
+                # 它们连同兜底那条分隔线由 reload_plugin_items() 维护 ——
+                # 插件卸载后要把它的项摘掉，不能建好就不管。
                 self._plugin_actions = []
-                for e in registry.entries("core.tray.menu"):
-                    act = e.init(Box(parent=self, entry=e))
-                    self.menu.addAction(act)
-                    self._plugin_actions.append((act, e))
-                if self._plugin_actions:
-                    self.menu.addSeparator()
+                self._plugin_sep = self.menu.addSeparator()
 
                 self.menu_close = QAction("", self)
                 self.menu_close.triggered.connect(QApplication.quit)
                 self.menu.addAction(self.menu_close)
 
+                self.reload_plugin_items()
                 self.langing()
                 self.setContextMenu(self.menu)
+
+            def reload_plugin_items(self):
+                """按 core.tray.menu 重建扩展项。
+
+                插在「关闭」之前；没有扩展项时兜底那条分隔线自己藏起来，
+                免得菜单里留一条孤零零的横线。
+                """
+                for act, _e in self._plugin_actions:
+                    self.menu.removeAction(act)
+                    act.deleteLater()
+                self._plugin_actions = []
+                for e in registry.entries("core.tray.menu"):
+                    act = e.init(Box(parent=self, entry=e))
+                    self.menu.insertAction(self.menu_close, act)
+                    self._plugin_actions.append((act, e))
+                self._plugin_sep.setVisible(bool(self._plugin_actions))
+                self.langing()
 
             def langing(self):
                 self.menu_close.setText(self.root.langer.get("core.tray.menu.close"))

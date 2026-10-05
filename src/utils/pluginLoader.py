@@ -49,6 +49,24 @@ zip 是为了分发方便 —— 下载一个文件丢进 plugins/ 就能用。
 失败打 [id]加载失败:\n<traceback>；缺依赖、依赖成环、清单不合法这类没有
 traceback，就写原因 —— 格式一样，排查时不必分两种读法。
 
+插件失败之后
+--------------
+**登记的是全有或全无**：插件写注册表走一次加载会话（见 registry.begin/commit/abort），
+setup 跑到一半抛异常就整块丢掉 —— 不会在正表里留下半截条目（那会让界面冒出点不动
+的项，重试还撞「已存在条目」），连它自己 declare 出来的扩展点也一起消失。
+
+会话管不到的另外两样由加载器自己收：
+  * 事件订阅 —— 不在注册表里，按命名空间摘一遍；
+  * teardown —— setup 可能只做了一半，尽力试一次，抛什么都吞掉。
+
+**插件能盖的三样，卸载/失败后会自己回来**：语言包、样式片段（core.qss）、
+托盘菜单项。做法是加载器发一条 plugins_changed，宿主收到后重载语言、重收样式、
+重建托盘 —— 这三样都不在注册表里，光摘条目它们不会自己回去。
+
+**有一处回不来：页面（core.pages）**。左栏按钮与三栏控件是启动时建好的，
+要让插件页面能热摘得让页容器支持重建，那是另一件事。所以卸掉一个带页面的插件
+要重启才干净 —— 这是已知限制，不是忘了做。
+
 两条硬规矩
 ----------
 1. **插件只能 import BMLCore**。import src.* 或 main 会被闸门当场拦下 ——
@@ -71,7 +89,7 @@ from dataclasses import dataclass, field
 from .path_utils import getPath
 
 __all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all", "load_one",
-           "unload", "loaded", "ensure_dirs",
+           "unload", "loaded", "state", "ensure_dirs",
            "plugin_langs", "PLUGIN_DIR", "PLUGIN_CACHE", "MANIFEST"]
 
 PLUGIN_DIR = "BML/plugins"
@@ -336,7 +354,12 @@ def plugin_langs(lang):
 
 # ─────────────────────────── 发现 / 加载 ───────────────────────────
 
-_STATE = {"loaded": []}
+# 加载状态机：三张表就是全部状态，别处不再各留一份
+#   pending  未加载：已发现、还没轮到（load_all 从它取活，取走就移出）
+#   loading  加载中：正在加载的那条链，**有序** —— 报成环时从这儿截
+#   loaded   已加载：加载成功的，按加载顺序（plugin_langs 靠它决定谁盖谁的文案）
+# 三张表都存 PluginInfo；失败的不进 loaded，失败原因在 info.error 上。
+_STATE = {"pending": [], "loading": [], "loaded": []}
 
 
 def ensure_dirs(base=None):
@@ -413,6 +436,7 @@ def load_one(info):
     正常启动走 load_all，依赖与日志都在那一层。
     """
     from ..BMLCore import API_VERSION
+    from .registry import registry
 
     if info.error:
         return info
@@ -428,6 +452,11 @@ def load_one(info):
         return info
 
     mod_name = "bml_plugin_" + info.id.replace(".", "_")
+    inst = None
+    # 登记走一次**加载会话**：插件写进暂存区，跑完才并进正表。
+    # 这样「setup 跑到一半抛异常」不会在正表里留下半截条目（界面会冒出点不动
+    # 的项，重试还撞「已存在条目」）—— 而且不必靠事后按命名空间去擦。
+    registry.begin()
     try:
         with _SrcImportGuard(), _PluginDir(info.path):
             spec = importlib.util.spec_from_file_location(mod_name, entry_path)
@@ -442,13 +471,64 @@ def load_one(info):
             # 清单与类上都有 id 时以清单为准（清单才是加载器认的那个）
             inst.id = info.id
             inst.setup()
-    except Exception:
+    except (Exception, SystemExit):
+        # SystemExit 也要接住：插件在 setup 里 sys.exit() 时 except Exception
+        # 抓不到它，会一路穿到宿主那个「启动失败」弹窗 —— 而这里的规矩是
+        # 一个插件坏掉不许拖垮别的（更不能拖垮启动）。
+        # KeyboardInterrupt 故意不接：那是用户在按 Ctrl+C，得让它出去。
         info.error = traceback.format_exc(limit=6)
         sys.modules.pop(mod_name, None)
+        registry.abort()
+        _cleanup_failed(info, inst)
         return info
+    except BaseException:
+        # 上面不接的那些（比如 Ctrl+C）：会话必须关掉，否则下一个插件会注册进
+        # 一个没人提交的陈旧暂存区
+        registry.abort()
+        raise
+    else:
+        # 跑完了：暂存区并进正表。插件登记到这一刻才对别人可见 ——
+        # 也就是说别的插件不可能看到它「一半」的样子。
+        registry.commit()
 
     info.instance = inst
     return info
+
+
+def _cleanup_failed(info, inst=None):
+    """插件没跑完时的收尾。
+
+    注册表那部分已经由会话回滚了（abort），这里管会话管不到的：
+      * 事件 —— 它不在注册表里，没法回滚，按命名空间摘一遍；
+      * teardown —— setup 可能只做了一半，尽力试一次，抛什么都吞掉。
+    """
+    from .events import events
+
+    try:
+        events.drop_namespace(info.id)
+    except Exception:
+        events.logger.error(f"回滚插件事件失败：{info.id}\n{traceback.format_exc(limit=4)}",
+                            name="Plugin")
+    if inst is not None:
+        try:
+            inst.teardown()
+        except (Exception, SystemExit):
+            events.logger.warning(f"回滚时 teardown 抛异常（已忽略）：{info.id}",
+                                  name="Plugin")
+    _notify_changed()
+
+
+def _notify_changed():
+    """插件集合变了：让宿主把它盖过的东西收回来（语言包 / 样式 / 托盘项）。
+
+    宿主没 bind、或没注册这个名字时静默跳过 —— emit 对未注册的名字本来就静默，
+    加载器不额外假设宿主长什么样。
+    """
+    try:
+        from .events import events
+        events.emit("plugins_changed")
+    except Exception:
+        pass
 
 
 def _expose_api():
@@ -467,6 +547,16 @@ def _expose_api():
     return BMLCore
 
 
+def state():
+    """三张表的快照（副本）—— 排查「谁还在加载中 / 谁没轮到」时用。"""
+    return {k: list(v) for k, v in _STATE.items()}
+
+
+def _loading_ids():
+    """加载中那条链的 id（有序）。成环时从重复出现的那个截到末尾就是环本身。"""
+    return [i.id for i in _STATE["loading"]]
+
+
 def load_all(base=None):
     """发现并加载全部插件（含依赖），返回清单列表（含失败项）。
 
@@ -477,60 +567,73 @@ def load_all(base=None):
     _expose_api()
     infos = discover(base)
     by_id = {i.id: i for i in infos}
-    # 按**真实加载顺序**记（依赖在前、依赖者在后），不是发现顺序：
-    # plugin_langs 靠这份顺序决定谁盖谁的文案，而依赖是会被提前拉起来的 ——
-    # 用发现顺序的话，依赖包目录名恰好排在后面时，它的语言包会盖掉依赖者的。
-    order = []
-    for info in infos:
-        _load_tree(info, by_id, (), order)
-    _STATE["loaded"] = order
+    # 未加载表：全部已发现的；加载中/已加载清空重来
+    _STATE["pending"] = list(infos)
+    _STATE["loading"] = []
+    _STATE["loaded"] = []
+
+    for info in list(_STATE["pending"]):
+        _load_tree(info, by_id)
     return infos
 
 
-def _load_tree(info, by_id, chain, order):
+def _load_tree(info, by_id):
     """加载 info —— 先把它的依赖拉起来，再加载自己。
 
-    chain 是「当前正在加载的这条链」（不含自己），用来挡依赖成环：
-    A→B→A 不挡就是无限递归，表现像卡死，比报错难查得多。
-    order 按加载成功的先后收集，最后成为 _STATE["loaded"]。
+    状态全在三张表里：
+      * 要动一个插件，先把它从**未加载**移到**加载中**（移出去就不可能再被
+        当作「还没轮到」重来一遍，也就没有重试环）；
+      * 依赖若已经在**加载中**表里，那就是图里的一条回边 = 成环；
+      * 成功了才进**已加载**表，失败只把原因留在 info.error 上。
 
-    已经在链上的插件也不重复打「开始加载」；依赖走同一套日志（递归进来说），
-    所以读日志的人看到的就是「谁在等谁」。
+    这条链同时就是日志的顺序：依赖递归进来说，读日志的人看到的就是「谁在等谁」。
     """
     from .events import events
 
-    if info.ok or info.reported:
+    if info.ok or info.reported or info in _STATE["loaded"]:
         return                      # 已经起来了，或失败原因已经报过一遍
     if info.error:
         # 发现期就坏掉的（清单不合法 / zip 解不开）：没有依赖可谈，直接报
+        _drop_pending(info)
         _report_fail(info)
         return
-    if info.id in chain:
-        _fail(info, "依赖成环：" + " -> ".join(chain + (info.id,)))
-        return
 
-    events.logger.info(f"[{info.id}]开始加载", name="Plugin")
+    _drop_pending(info)
+    _STATE["loading"].append(info)
+    try:
+        events.logger.info(f"[{info.id}]开始加载", name="Plugin")
 
-    for dep_id in info.dependencies:
-        dep = by_id.get(dep_id)
-        if dep is None:
-            _fail(info, f"缺少依赖：{dep_id}（没有这个插件）")
-            return
-        if dep_id == info.id or dep_id in chain:
-            _fail(info, "依赖成环：" + " -> ".join(chain + (info.id, dep_id)))
-            return
-        if not dep.ok:
-            _load_tree(dep, by_id, chain + (info.id,), order)
-        if not dep.ok:
-            _fail(info, f"依赖加载失败：{dep_id}")
-            return
+        for dep_id in info.dependencies:
+            dep = by_id.get(dep_id)
+            if dep is None:
+                _fail(info, f"缺少依赖：{dep_id}（没有这个插件，或者它的清单没读出来）")
+                return
+            if dep_id in _loading_ids():
+                # 回边：环就是加载中表里从 dep_id 那一段，末尾补回它自己。
+                # 这样报出来的是**环本身**，不带「从入口怎么走到这儿」那一段。
+                ids = _loading_ids()
+                _fail(info, "依赖成环：" + " -> ".join(ids[ids.index(dep_id):] + [dep_id]))
+                return
+            if not dep.ok:
+                _load_tree(dep, by_id)
+            if not dep.ok:
+                _fail(info, f"依赖加载失败：{dep_id}")
+                return
 
-    load_one(info)
-    if info.ok:
-        order.append(info)
-        events.logger.info(f"[{info.id}]加载完成", name="Plugin")
-    else:
-        _report_fail(info)
+        load_one(info)
+        if info.ok:
+            _STATE["loaded"].append(info)
+            events.logger.info(f"[{info.id}]加载完成", name="Plugin")
+        else:
+            _report_fail(info)
+    finally:
+        _STATE["loading"].remove(info)
+
+
+def _drop_pending(info):
+    """把它从「未加载」里移出去 —— 已经决定要处理它了。"""
+    if info in _STATE["pending"]:
+        _STATE["pending"].remove(info)
 
 
 def _fail(info, why):
@@ -573,9 +676,16 @@ def unload(info):
                             name="Plugin")
     try:
         info.instance.teardown()
-    except Exception:
+    except (Exception, SystemExit):
+        # 同 load_one：SystemExit 也得接住，卸载一个插件不该把启动器带走
         events.logger.error(f"插件 teardown 抛异常：{info.id}\n{traceback.format_exc(limit=4)}",
                             name="Plugin")
     info.instance = None
-    _STATE["loaded"] = [i for i in _STATE["loaded"] if i.id != info.id]
+    info.error = ""
+    info.reported = False
+    for table in ("pending", "loading", "loaded"):
+        _STATE[table] = [i for i in _STATE[table] if i.id != info.id]
+    # 摘完登记还得让宿主重算「它盖过的」：语言包、样式片段、托盘菜单项。
+    # 这三样都不在注册表里，光摘条目它们不会自己回去。
+    _notify_changed()
     return True

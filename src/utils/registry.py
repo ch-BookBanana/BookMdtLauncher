@@ -230,12 +230,111 @@ def simple(cls, **extra):
 
 
 class Registry:
-    """扩展点登记中心。实例只有一个（模块底部 registry），但类可单独实例化便于测试。"""
+    """扩展点登记中心。实例只有一个（模块底部 registry），但类可单独实例化便于测试。
+
+    加载会话（begin / commit / abort）
+    ---------------------------------
+    插件 setup 跑到一半抛异常时，它之前登记的东西不能留在正表里 —— 界面会冒出
+    半截条目（点下去还可能炸），重试也会撞「已存在条目」。所以插件登记做成
+    **全有或全无**：
+
+        registry.begin()   开一个会话，之后插件写的都进暂存区
+        registry.commit()  跑完了，把暂存区并进正表
+        registry.abort()   没跑完，整块丢掉（连它本次 declare 的扩展点一起）
+
+    为什么不是「失败了按命名空间擦」：擦不干净（插件自己 declare 出来的扩展点
+    擦不掉），而且每条失败路径都得记得擦一次 —— 靠记性的事迟早漏。
+
+    会话期间**读**看到的是两张表之和：插件在 setup 里要读宿主的扩展点、
+    要读依赖交出来的服务（依赖已经 commit 过了，在正表里），这些必须照常可见。
+    所以只把「写」导向暂存区，读是合并视图。
+    """
 
     RESERVED = _RESERVED
 
     def __init__(self):
         self.data = {}
+        # 会话中的暂存区（形状与 data 一样：{point: block}）。
+        # 同一个扩展点可能两边都有块：正表那块带 schema（以及已提交的条目），
+        # 暂存区那块装本次会话新加的条目。查询要合起来看。
+        self._stage = None
+
+    # ─────────────────────────── 加载会话 ───────────────────────────
+
+    def in_session(self):
+        """当前是否在加载会话里。"""
+        return self._stage is not None
+
+    def begin(self):
+        """开一个加载会话。已经在会话里就报错 —— 嵌套说明调用方搞错了。"""
+        if self._stage is not None:
+            raise RegistryError("已经在加载会话里，不能嵌套（插件 setup 里别再开一个）")
+        self._stage = {}
+        return self
+
+    def commit(self):
+        """把会话登记的并进正表：先声明新扩展点，再落条目。返回并进去的条数。"""
+        stage, self._stage = self._stage, None
+        if not stage:
+            return 0
+        n = 0
+        for point, block in stage.items():
+            res = {k: v for k, v in block.items() if k in self.RESERVED}
+            if res:
+                # 本次会话声明的新扩展点，连 schema 一起并过去。
+                # 正表已有同名点时 declare 是幂等的（schema 一样就返回）。
+                self.declare(point,
+                             registrant=res["__registrant__"],
+                             fields=res["__fields__"],
+                             required=res["__required__"],
+                             built=res.get("__built_fields__", ()),
+                             kind=res.get("__kind__", "class"),
+                             doc=res.get("__doc__", ""))
+            for key, fields in block.items():
+                if key in self.RESERVED:
+                    continue
+                self.add(point, key, **{k: v for k, v in fields.items() if k != _BUILT})
+                if _BUILT in fields:
+                    self.bind(point, key, **fields[_BUILT])
+                n += 1
+        return n
+
+    def abort(self):
+        """丢掉这次会话的全部登记。返回丢掉的条数（新扩展点不算条数）。"""
+        stage, self._stage = self._stage, None
+        if not stage:
+            return 0
+        return sum(1 for block in stage.values()
+                   for key in block if key not in self.RESERVED)
+
+    def _blocks_of(self, point):
+        """这个扩展点上「有条目」的块，按 [正表, 暂存区] 给（暂存区可能没有）。"""
+        out = []
+        real = self.data.get(point)
+        if real is not None:
+            out.append(real)
+        if self._stage is not None:
+            stage = self._stage.get(point)
+            if stage is not None:
+                out.append(stage)
+        return out
+
+    def _write_block(self, point):
+        """写条目该落到哪块：会话中落暂存区（正表那块只读着用），否则落正表。"""
+        if self._stage is None:
+            return self.data.setdefault(point, {})
+        return self._stage.setdefault(point, {})
+
+    def _find_entry(self, point, key):
+        """取条目**本身**（暂存区优先，它更新）。没有就返回 None。
+
+        注意返回的是 block[key] 而不是 block —— 调用方（bind / entry / add 查重）
+        要的都是那条目的字段。
+        """
+        for block in reversed(self._blocks_of(point)):
+            if key not in self.RESERVED and key in block:
+                return block[key]
+        return None
 
     # ─────────────────────────── 声明扩展点 ───────────────────────────
 
@@ -286,15 +385,26 @@ class Registry:
                 )
             return point
 
-        self.data[point] = block
+        # 会话中声明的新点先落暂存区：abort 时它要跟着一起消失
+        #（否则会留下一个没人用的空扩展点，重试时还撞「已声明」）。
+        target = self._stage if self._stage is not None else self.data
+        if point in target:
+            diff = [k for k, v in block.items() if target[point].get(k) != v]
+            if diff:
+                raise RegistryError(
+                    f"扩展点 {point!r} 已声明且 schema 不同（{', '.join(diff)}）"
+                )
+            return point
+        target[point] = block
         return point
 
     def declared(self, point):
-        return point in self.data
+        return point in self.data or (
+            self._stage is not None and point in self._stage)
 
     def points(self):
-        """所有已声明的扩展点名。"""
-        return list(self.data)
+        """所有已声明的扩展点名（含会话中新声明的）。"""
+        return sorted(set(self.data) | set(self._stage or ()))
 
     def meta(self, point):
         """扩展点自身的元信息（副本，改它不影响注册表）。"""
@@ -315,7 +425,8 @@ class Registry:
                 f"{point}: 条目 key {key!r} 不合法，必须是 <namespace>.<name>"
                 f"（如 core.start / com.example.hello.main）"
             )
-        if key in block:
+        # 查重要看两张表：正表里已有的、以及本次会话里刚加的
+        if self._find_entry(point, key) is not None:
             raise RegistryError(f"{point} 里已存在条目 {key!r}（不允许静默覆盖）")
 
         allowed = set(block["__fields__"])
@@ -328,8 +439,8 @@ class Registry:
         if missing:
             raise RegistryError(f"{point}.{key}: 缺必填字段 {missing}")
 
-        block[key] = dict(fields)
-        return Entry(point, key, block["__registrant__"], block[key],
+        self._write_block(point)[key] = dict(fields)
+        return Entry(point, key, block["__registrant__"], dict(fields),
                      block.get("__built_fields__", ()))
 
     def provide(self, point, key, obj, **meta):
@@ -351,7 +462,7 @@ class Registry:
         才开始构建。产物走 __built__，不参与 __fields__ 校验。
         """
         block = self._block(point)
-        raw = block.get(key)
+        raw = self._find_entry(point, key)
         if not isinstance(raw, dict) or key in self.RESERVED:
             raise RegistryError(f"{point} 里没有条目 {key!r}，无法回填构建产物")
         slots = block.get("__built_fields__") or ()
@@ -367,7 +478,7 @@ class Registry:
     def unbind(self, point, key, *names):
         """摘掉构建产物（界面重建 / 卸载前）。不带 names 则清空该条目的全部产物。"""
         block = self._block(point)
-        raw = block.get(key)
+        raw = self._find_entry(point, key)
         if not isinstance(raw, dict) or key in self.RESERVED:
             raise RegistryError(f"{point} 里没有条目 {key!r}，无法摘除构建产物")
         slot = raw.get(_BUILT)
@@ -397,14 +508,18 @@ class Registry:
         """
         block = self._block(point)
         out = []
-        for key, fields in block.items():
-            if key in self.RESERVED:
-                continue
-            e = Entry(point, key, block["__registrant__"], dict(fields),
-                      block.get("__built_fields__", ()))
-            if where and any(e.fields.get(k) != v for k, v in where.items()):
-                continue
-            out.append(e)
+        seen = set()
+        # 正表 + 暂存区：会话中插件刚加的条目也得看得见
+        for src in self._blocks_of(point):
+            for key, fields in src.items():
+                if key in self.RESERVED or key in seen:
+                    continue
+                seen.add(key)
+                e = Entry(point, key, block["__registrant__"], dict(fields),
+                          block.get("__built_fields__", ()))
+                if where and any(e.fields.get(k) != v for k, v in where.items()):
+                    continue
+                out.append(e)
         if order_by:
             out.sort(key=lambda e: (e.fields.get(order_by, DEFAULT_ORDER), e.key))
         return out
@@ -412,9 +527,10 @@ class Registry:
     def entry(self, point, key):
         """取单个条目；不存在时给出「这个扩展点有哪些条目」的提示。"""
         block = self._block(point)
-        fields = block.get(key)
+        fields = self._find_entry(point, key)
         if not isinstance(fields, dict) or key in self.RESERVED:
-            have = sorted(k for k in block if k not in self.RESERVED)
+            have = sorted(k for src in self._blocks_of(point)
+                          for k in src if k not in self.RESERVED)
             raise RegistryError(f"{point} 里没有条目 {key!r}；现有：{have or '（空）'}")
         return Entry(point, key, block["__registrant__"], dict(fields),
                      block.get("__built_fields__", ()))
@@ -428,12 +544,14 @@ class Registry:
         而不是让界面构建到第 3 个条目才炸。
         """
         problems = []
-        for point, block in self.data.items():
+        for point in self.points():
+            block = self._block(point)
             allowed = set(block.get("__fields__", ()))
             required = set(block.get("__required__", ()))
-            for key, fields in block.items():
-                if key in self.RESERVED:
-                    continue
+            entries = {}
+            for src in self._blocks_of(point):
+                entries.update({k: v for k, v in src.items() if k not in self.RESERVED})
+            for key, fields in entries.items():
                 if not _is_entry_key(key):
                     problems.append(f"{point}: 条目 key {key!r} 不是 <namespace>.<name> 形式")
                 if not isinstance(fields, dict):
@@ -453,12 +571,13 @@ class Registry:
         只摘条目，不动扩展点本身的声明 —— 扩展点归声明者，不该被插件带走。
         """
         removed = 0
-        for point, block in self.data.items():
-            doomed = [k for k in block
-                      if k not in self.RESERVED and _namespace_of(k) == ns]
-            for k in doomed:
-                del block[k]
-                removed += 1
+        for table in (self.data, self._stage or {}):
+            for point, block in table.items():
+                doomed = [k for k in block
+                          if k not in self.RESERVED and _namespace_of(k) == ns]
+                for k in doomed:
+                    del block[k]
+                    removed += 1
         return removed
 
     def clear(self):
@@ -482,9 +601,15 @@ class Registry:
     # ─────────────────────────── 内部 ───────────────────────────
 
     def _block(self, point):
+        # schema 优先看正表：正表有这块说明这个点早就声明过；正表没有才看暂存区
+        # （本次会话刚 declare 的新点）。暂存区里为「正表已有的点」建的块只装
+        # 新条目、不带 RESERVED，所以不能拿它当 schema 用。
         block = self.data.get(point)
+        if block is None and self._stage is not None:
+            block = self._stage.get(point)
         if block is None:
-            known = ", ".join(sorted(self.data)) or "（尚未声明任何扩展点）"
+            known = ", ".join(sorted(set(self.data) | set(self._stage or ()))) \
+                or "（尚未声明任何扩展点）"
             raise RegistryError(
                 f"扩展点 {point!r} 尚未声明，请先 registry.declare(...)；已声明：{known}"
             )
