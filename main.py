@@ -48,7 +48,7 @@ try:
     from src.utils.api.githubAPI import GithubAPI
     from src.utils.javaManager import javaManager
     from src.utils import javaDownload
-    from src.utils.QDownloader import QDownloader
+    from src.utils.QDownloader import QDownloader, shutdown_all as _qd_shutdown_all
     from src.utils.utils import _is_mdt_download, change_color, t
     from src.utils.options.scrolls import Scroll
     from src.utils.bus import bus
@@ -57,8 +57,14 @@ try:
                                      ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,
                                      TBT_MINIMIZE, app_icon)
     from src.utils.on_start import startup
+    from src.utils.on_start.java import attach as _attach_java_ui
+    from src.utils.registry import Box, registry
     from src.utils.pages.fOverlay._init import FloatingOverlay
     from src.utils.pages.fStack._init import FloatingStack
+    from src.utils.pages.start import Start
+    from src.utils.pages.download import Download
+    from src.utils.pages.game import Game
+    from src.utils.pages.setting import Setting
 
 
 
@@ -162,7 +168,6 @@ try:
             app.aboutToQuit.connect(self._cleanup_on_quit)
 
             # Java 下载流程的 UI 回调/辅助函数由 src/utils/on_start/java.py 挂载（保持 self._java_* 调用点不变）
-            from src.utils.on_start.java import attach as _attach_java_ui
             _attach_java_ui(self)
 
             startup.register(self)
@@ -204,7 +209,6 @@ try:
             except Exception:
                 pass
             try:
-                from src.utils.QDownloader import shutdown_all as _qd_shutdown_all
                 _qd_shutdown_all()
             except Exception:
                 pass
@@ -2435,17 +2439,10 @@ try:
 
                         # 页面走注册中心：这里只声明「有哪些页面、什么顺序、谁是默认」，
                         # 构建统一在下面的循环里 —— 加一个页面只需加一条 registry.add。
-                        # 注意属性名（start/download/game/setting）不是内部私有的：
-                        #   src/utils/on_start/java.py:97,102 → window.main.main.start.left.main
-                        #                                     → window.main.main.start.main.stack
-                        #   src/utils/pages/start.py:326    → window.main.main.download
-                        # 它们按名字反向点进页面内部控件，改名要连带一起改。
-                        # （这条「从外部摸进页面内部」的链，正是后面要消掉的耦合。）
-                        from src.utils.pages.start import Start
-                        from src.utils.pages.download import Download
-                        from src.utils.pages.game import Game
-                        from src.utils.pages.setting import Setting
-                        from src.utils.registry import Box, registry
+                        # 属性名（start/download/game/setting）不是内部私有的：
+                        # on_start/java.py 按 key 取到 Start 后调它的具名入口
+                        # （java_show_progress / java_finish），registry.bind 回填的产物
+                        # 也用这些名字，改名要连带一起改。
 
                         # 宿主体交给注册器：页面据此取三栏容器，不必再顺着
                         # parent.parent 猜「我的祖父有三栏」。这也是插件页能独立
