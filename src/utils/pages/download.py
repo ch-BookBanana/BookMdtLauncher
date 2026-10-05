@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 from ..options.scrolls import Scroll
 from ..utils import change_color
+from ..resources import (NAV_MENU)
 
 from ._init import *
 from .downloads.game import Game
@@ -142,7 +143,7 @@ class Download(Page):
             self.btns_ = []
 
 
-            self.game = self.add_page(Game,"wid.pages.download.game", "src/assets/nav/menu.png")
+            self.game = self.add_page(Game,"wid.pages.download.game", NAV_MENU)
 
         def add_page(self, page_cls, text=None, icon=None):
             btn = self.parent.left.add_btn(text, icon)

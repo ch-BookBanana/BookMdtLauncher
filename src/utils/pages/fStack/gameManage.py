@@ -10,6 +10,7 @@ from ...options.items import Bool, Combo
 from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import change_color, openFolder, t
+from ...resources import (FILE_FOLDER, TBT_CLOSE)
 
 
 def group_of(settings, game):
@@ -222,7 +223,7 @@ class GameManage(Scroll):
             if self.light == light:
                 return
             self.light = light
-            self.icon = change_color(getPath("src/assets/files/folder.png"),
+            self.icon = change_color(getPath(FILE_FOLDER),
                                      QColor(22, 22, 22) if light else QColor(255, 255, 255))
             for button in self.buttons:
                 button.setIcon(self.icon)
@@ -470,7 +471,7 @@ class GameManage(Scroll):
             def lighting(self, light):
                 # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
                 color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
-                icon = change_color("src/assets/tribtns/close.png", color)
+                icon = change_color(TBT_CLOSE, color)
                 self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
 
             def _close(self):

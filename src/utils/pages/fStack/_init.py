@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QHBoxLayout, QPushButton, QStackedWidget, QVBoxLay
 
 from ...bus import bus
 from ...utils import change_color
+from ...resources import (NAV_BACK, TBT_CLOSE)
 
 
 class FloatingStack(QWidget):
@@ -129,11 +130,11 @@ class FloatingStack(QWidget):
             self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
             # 内置退出按钮（左箭头，返回上一页）
-            self.back = self.NavBtn(self, self.root, "src/assets/nav/back.png", "text.return", self.parent.pop_page)
+            self.back = self.NavBtn(self, self.root, NAV_BACK, "text.return", self.parent.pop_page)
             self.layout.addWidget(self.back,0,Qt.AlignHCenter)
 
             # 清空整个栈按钮（叉号）
-            self.btn_close = self.NavBtn(self, self.root, "src/assets/tribtns/close.png", "wid.top.close", self.parent.clear)
+            self.btn_close = self.NavBtn(self, self.root, TBT_CLOSE, "wid.top.close", self.parent.clear)
             self.layout.addWidget(self.btn_close,0,Qt.AlignHCenter)
 
         def refresh(self):

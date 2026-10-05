@@ -52,6 +52,10 @@ try:
     from src.utils.utils import _is_mdt_download, change_color, t
     from src.utils.options.scrolls import Scroll
     from src.utils.bus import bus
+    from src.utils.resources import (ACT_DL_LIST, ACT_TIPS, BRAND_GITHUB, BTN_DOWNLOAD,
+                                     BTN_GAME, BTN_SETTING, BTN_START, ICON_APP_DARK,
+                                     ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,
+                                     TBT_MINIMIZE, app_icon)
     from src.utils.on_start import startup
     from src.utils.pages.fOverlay._init import FloatingOverlay
     from src.utils.pages.fStack._init import FloatingStack
@@ -829,7 +833,7 @@ try:
                             
                             def lighting(self, light: bool):
                                 color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
-                                logo = change_color(getPath("src/assets/tribtns/close.png"),color)
+                                logo = change_color(getPath(TBT_CLOSE),color)
                                 icon = QIcon(logo.pixmap(30,30))
 
                                 self.setIcon(icon)
@@ -1083,7 +1087,7 @@ try:
                                 self.layout.addStretch(1)
 
                             def langing(self):
-                                self.tokenTipsIcon.setPixmap(change_color(getPath("src/assets/actions/tips.png"), QColor(255, 165, 0)).pixmap(QSize(18, 18)))
+                                self.tokenTipsIcon.setPixmap(change_color(getPath(ACT_TIPS), QColor(255, 165, 0)).pixmap(QSize(18, 18)))
                                 self.tokenTipsText.setText(self.root.langer.get("github.settings.tokenTips"))
                                 self.tokenTitle.setText(self.root.langer.get("github.settings.tokenTitle"))
                                 self.tokenSaveBtn.setText(self.root.langer.get("text.save"))
@@ -1451,7 +1455,7 @@ try:
                         self.layout.addWidget(self.label, 1)
 
                     def lighting(self, light: bool):
-                        logo = getPath("src/assets/icons/" + ("dark.png" if light else "light.png"))
+                        logo = getPath(app_icon(light))
                         pix = QPixmap(logo)
                         if pix.isNull():
                             self.root.logger.error(f"Logo image not found: {logo}")
@@ -1716,7 +1720,7 @@ try:
                         self.layout.addStretch(1)
 
                         self.root.logger.debug("init QW.windowL.mainL.topL.tbt_mini")
-                        self.tbt_mini = self.TriBtn([getPath("src/assets/tribtns/minimize.png")], self, self.root)
+                        self.tbt_mini = self.TriBtn([getPath(TBT_MINIMIZE)], self, self.root)
                         self.tbt_mini.clicked.connect(lambda: self.root.window.showMinimized())
                         self.layout.addWidget(self.tbt_mini)
                         self.layout.addSpacing(5)
@@ -1724,8 +1728,8 @@ try:
                         self.root.logger.debug("init QW.windowL.mainL.topL.tbt_max")
                         self.tbt_max = self.TriBtn(
                             [
-                                getPath("src/assets/tribtns/maximize.png"),
-                                getPath("src/assets/tribtns/maximize2.png")
+                                getPath(TBT_MAXIMIZE),
+                                getPath(TBT_MAXIMIZE2)
                             ],
                             self, self.root)
                         self.tbt_max.clicked.connect(self.maxmize)
@@ -1733,7 +1737,7 @@ try:
                         self.layout.addSpacing(5)
 
                         self.root.logger.debug("init QW.windowL.mainL.topL.tbt_close")
-                        self.tbt_close = self.TriBtn([getPath("src/assets/tribtns/close.png")], self, self.root)
+                        self.tbt_close = self.TriBtn([getPath(TBT_CLOSE)], self, self.root)
                         self.tbt_close.clicked.connect(lambda: self.close_())
                         self.tbt_close.setStyleSheet("QPushButton:hover{background: red;}")
                         self.layout.addWidget(self.tbt_close)
@@ -1781,7 +1785,7 @@ try:
                             self.setStyleSheet("QPushButton {border-radius: 15px;}")
 
                         def lighting(self, light):
-                            self.setIcon(QIcon(change_color(getPath("src/assets/brands/github.png"),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
+                            self.setIcon(QIcon(change_color(getPath(BRAND_GITHUB),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
                             self.setIconSize(QSize(28, 28))
 
                         def _update_tooltip(self):
@@ -1906,7 +1910,7 @@ try:
                             self.setStyleSheet("QPushButton {border-radius: 15px;}")
 
                         def lighting(self, light):
-                            self.setIcon(QIcon(change_color(getPath("src/assets/actions/dl_list.png"),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
+                            self.setIcon(QIcon(change_color(getPath(ACT_DL_LIST),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
                             self.setIconSize(QSize(30,30))
 
                         class DlListPage(QWidget):
@@ -2407,15 +2411,25 @@ try:
                         self.right = self.Right_(self,self.root)
                         self.layout.addWidget(self.right,0)
 
+                        # 内置页面表：顺序即左栏导航顺序，加一个页面只需要在这里加一行。
+                        # 注意属性名（start/download/game/setting）不是内部私有的：
+                        #   src/utils/on_start/java.py:97,102 → window.main.main.start.left.main
+                        #                                     → window.main.main.start.main.stack
+                        #   src/utils/pages/start.py:326    → window.main.main.download
+                        # 它们按名字反向点进页面内部控件，改名要连带一起改。
+                        # （这条「从外部摸进页面内部」的链，正是后面要消掉的耦合。）
                         from src.utils.pages.start import Start
                         from src.utils.pages.download import Download
                         from src.utils.pages.game import Game
                         from src.utils.pages.setting import Setting
 
-                        self.start = Start(self,self.root,"wid.pages.start",getPath("src/assets/buttons/start.png"))
-                        self.download = Download(self,self.root,"wid.pages.download",getPath("src/assets/buttons/download.png"))
-                        self.game = Game(self,self.root,"wid.pages.game",getPath("src/assets/buttons/game.png"))
-                        self.setting = Setting(self,self.root,"wid.pages.setting",getPath("src/assets/buttons/setting.png"))
+                        for attr, cls, key, icon in (
+                            ("start",    Start,    "wid.pages.start",    BTN_START),
+                            ("download", Download, "wid.pages.download", BTN_DOWNLOAD),
+                            ("game",     Game,     "wid.pages.game",     BTN_GAME),
+                            ("setting",  Setting,  "wid.pages.setting",  BTN_SETTING),
+                        ):
+                            setattr(self, attr, cls(self, self.root, key, getPath(icon)))
 
                     class Left_(QStackedWidget):
                         def __init__(self, parent=None, root=None):
@@ -2482,7 +2496,7 @@ try:
                 theme = "light" if self.root.winreg.taskbar_theme() == "dark" else "dark"
                 if self.theme != theme:
                     self.theme = theme
-                    icon_path = getPath(f"src/assets/icons/{theme}.png")
+                    icon_path = getPath(ICON_APP_LIGHT if theme == "light" else ICON_APP_DARK)
 
                     # 检查文件是否存在，防止路径错误导致无图标
                     if not os.path.exists(icon_path):

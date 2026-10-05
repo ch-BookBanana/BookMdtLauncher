@@ -16,6 +16,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from ._init import *
+from ..resources import (ACT_INTRO, ACT_OFF, ACT_ON, ACT_TIPS)
 
 
 class Bool(QWidget):
@@ -102,11 +103,11 @@ class Bool(QWidget):
         self.tips.setToolTip(self.root.langer.get(self.tips_))
 
     def lighting(self,light):
-        self.btnpix =[change_color(getPath("src/assets/actions/btn_on.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35)),change_color(getPath("src/assets/actions/btn_off.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35))]
+        self.btnpix =[change_color(getPath(ACT_ON),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35)),change_color(getPath(ACT_OFF),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35))]
         if self.introable:
-            self.intro.setPixmap(change_color(getPath("src/assets/actions/intro.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
         if self.tipsable:
-            self.tips.setPixmap(change_color(getPath("src/assets/actions/tips.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
 
 
 class Slider(QWidget):
@@ -221,9 +222,9 @@ class Slider(QWidget):
 
     def lighting(self,light):
         if self.introable:
-            self.intro.setPixmap(change_color(getPath("src/assets/actions/intro.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
         if self.tipsable:
-            self.tips.setPixmap(change_color(getPath("src/assets/actions/tips.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
 
     def langing(self):
         self.text.setText(self.root.langer.get(self.text_))
@@ -354,6 +355,6 @@ class Combo(QWidget):
 
     def lighting(self,light):
         if self.introable:
-            self.intro.setPixmap(change_color(getPath("src/assets/actions/intro.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
         if self.tipsable:
-            self.tips.setPixmap(change_color(getPath("src/assets/actions/tips.png"),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))

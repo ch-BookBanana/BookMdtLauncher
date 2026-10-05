@@ -30,6 +30,7 @@ import threading
 
 from .mdtManager import mdtManager
 from .path_utils import getPath
+from .resources import (FILE_IMAGE)
 
 
 def change_color(path, color: QColor):
@@ -172,7 +173,7 @@ def _cache_md_images(html, base_url, session, cache_dir, on_image=None):
     if cache_dir is None:
         cache_dir = getPath("BML/.tmp/mdimg")
     os.makedirs(cache_dir, exist_ok=True)
-    fallback = getPath("src/assets/files/file-image.png")
+    fallback = getPath(FILE_IMAGE)
 
     def _local_path(full):
         """url → 缓存文件路径（sha1 前 16 位 + 扩展名）"""

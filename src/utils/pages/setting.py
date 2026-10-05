@@ -30,6 +30,7 @@ from ..options.texts import Title
 
 from ..path_utils import getPath
 from ..utils import change_color, t
+from ..resources import (ACT_UNITS, FILE_FOLDER, TBT_CLOSE)
 
 from ._init import *
 
@@ -154,7 +155,7 @@ class Setting(Page):
             self.btns_ = []
 
 
-            self.launcher = self.add_page("wid.pages.setting.launcher","src/assets/actions/units.png",self.Launcher)
+            self.launcher = self.add_page("wid.pages.setting.launcher",ACT_UNITS,self.Launcher)
 
             
 
@@ -422,7 +423,7 @@ class Setting(Page):
 
                 def lighting(self, light: bool):
                     color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
-                    self.btn_close.setIcon(QIcon(change_color(getPath("src/assets/tribtns/close.png"), color).pixmap(24, 24)))
+                    self.btn_close.setIcon(QIcon(change_color(getPath(TBT_CLOSE), color).pixmap(24, 24)))
 
                 # ---------- 确定：把认出的 java.exe 交给外面记进候选表 ----------
                 def _on_ok(self):
@@ -453,7 +454,7 @@ class Setting(Page):
                 if getattr(self,"_t3_add_light",None) == light:
                     return
                 self._t3_add_light = light
-                self._t3_add.setIcon(change_color(getPath("src/assets/files/folder.png"),
+                self._t3_add.setIcon(change_color(getPath(FILE_FOLDER),
                                                   QColor(22,22,22) if light else QColor(255,255,255)))
 
             def langing(self):

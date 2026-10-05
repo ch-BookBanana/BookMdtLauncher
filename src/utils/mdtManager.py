@@ -24,6 +24,7 @@ import os, zipfile, json, logging
 from .path_utils import getPath
 from .javaManager import javaManager
 from .QThTimer import QThTimer
+from .resources import (ICON_MDT)
 
 _log = logging.getLogger("Main.MdtManager")
 
@@ -64,7 +65,7 @@ def _parse_simple_config_typed(content: str) -> dict:
 
 class mdtManager(QObject):
     base_dir = getPath("BML/.Mindustrys")
-    DEFAULT_ICON = "src/assets/icons/mdt/mdt.png"
+    DEFAULT_ICON = ICON_MDT
     # 实例名长度上限（字符）。名字既是目录名也是界面上到处显示的标题，
     # NTFS 允许的 255 对 UI 毫无意义，太长会把列表、标题栏、下载卡片撑坏。
     # 下载页的输入框与管理模块的改名共用这一个值（check_name 是唯一校验入口）。

@@ -27,6 +27,7 @@ from src.utils.path_utils import getPath
 from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
+from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING)
 
 from ._init import *
 from .fStack.gameManage import GameManage
@@ -569,7 +570,7 @@ class Start(Page):
                 self.settings = self.Btn(self,self.root,"110,65,151")
                 self.settings.setFixedSize(50,50)
                 self.settings.setIconSize(QSize(25,25))
-                self.settings.setIcon(QIcon(QPixmap(getPath("src/assets/buttons/setting.png")).scaled(50,50,Qt.KeepAspectRatio,Qt.FastTransformation)))
+                self.settings.setIcon(QIcon(QPixmap(getPath(BTN_SETTING)).scaled(50,50,Qt.KeepAspectRatio,Qt.FastTransformation)))
                 self.layout.addWidget(self.settings,2,2,1,1)
 
                 self.mod = self.Btn(self,self.root,"52, 152, 219")
@@ -764,8 +765,8 @@ class Start(Page):
                     if self.light != light:
                         self.light = light
                         color = QColor(25,25,25) if light else QColor(220,220,220)
-                        self.foldPix[1] = change_color(getPath("src/assets/actions/eye.png"), color)
-                        self.foldPix[0] = change_color(getPath("src/assets/actions/eye-off.png"), color)
+                        self.foldPix[1] = change_color(getPath(ACT_EYE), color)
+                        self.foldPix[0] = change_color(getPath(ACT_EYE_OFF), color)
                     self._sync_fold_icon()
 
                 def add_many(self, names):
@@ -991,7 +992,7 @@ class Start(Page):
                 self.png = 0
                 self.pixs = [None,None]
                 self.init_wid()
-                self.setPixmap(QPixmap(getPath("src/assets/backg/1.png")))
+                self.setPixmap(QPixmap(getPath(BACKG_MAIN)))
 
             def init_wid(self):
                 self.pngs = [QLabel(self),QLabel(self)]

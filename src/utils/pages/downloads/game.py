@@ -33,6 +33,9 @@ from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import _apply_md_image, change_color, md_to_html, t
 from ...bus import bus
+from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
+                          FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
+                          NAV_LINK, NAV_MENU, TBT_CLOSE)
 
 
 class Game(QWidget):
@@ -173,9 +176,11 @@ class Game(QWidget):
             self.pages_ = []
             self.btns_ = []
 
-            self.add_page(self.Origin, "wid.pages.download.origin","src/assets/icons/mdt/mdt.png" ,color=False)
-            self.add_page(self.MindustryX, "MindustryX","src/assets/icons/mdt/mdtx.png" ,color=False)
-            self.add_page(self.MindustryARC, "MdtArc","src/assets/icons/mdt/mdtarc.png" ,color=False)
+            # 下载源表：顺序即顶部页签顺序。每个源的仓库 / README / 图标 / 缓存文件名
+            # 都写在各自 Template 子类的类属性上，这里只声明「有哪些源、按什么顺序排」。
+            # 加一个下载源 = 写一个 Template 子类 + 在这里加一行。
+            for cls in (self.Origin, self.MindustryX, self.MindustryARC):
+                self.add_page(cls, cls.title_key, cls.iconPath, color=False)
 
         def add_page(self, page_cls, text=None, icon=None, color=True):
             btn = self.parent.top.add_btn(text, icon, color=color)
@@ -601,8 +606,8 @@ class Game(QWidget):
                 def lighting(self,light):
                     if self.light != light:
                         self.light = light
-                        self.btnPix[1] = change_color(getPath("src/assets/actions/eye.png"),QColor(25,25,25) if light else QColor(220,220,220))
-                        self.btnPix[0] = change_color(getPath("src/assets/actions/eye-off.png"),QColor(25,25,25) if light else QColor(220,220,220))
+                        self.btnPix[1] = change_color(getPath(ACT_EYE),QColor(25,25,25) if light else QColor(220,220,220))
+                        self.btnPix[0] = change_color(getPath(ACT_EYE_OFF),QColor(25,25,25) if light else QColor(220,220,220))
                     self.button.setIcon(QIcon(self.btnPix[int(self.contentW.isVisible())]))
 
                 def showEvent(self,event):
@@ -864,15 +869,15 @@ class Game(QWidget):
                         self.layout.addStretch(1)
 
                         # right-side action buttons
-                        self.btn_download = self.RBtn(getPath("src/assets/buttons/download.png"), "wid.pages.download.item.download", self, self.root)
+                        self.btn_download = self.RBtn(getPath(BTN_DOWNLOAD), "wid.pages.download.item.download", self, self.root)
                         self.layout.addWidget(self.btn_download, 0)
                         self.btn_download.clicked.connect(lambda:self.root.window.floatingOverlay.add_page(self.template.Download(self,self.root,self.data)))
 
-                        self.btn_repoInfo = self.RBtn(getPath("src/assets/nav/menu.png"), "wid.pages.download.item.repoInfo", self, self.root)
+                        self.btn_repoInfo = self.RBtn(getPath(NAV_MENU), "wid.pages.download.item.repoInfo", self, self.root)
                         self.layout.addWidget(self.btn_repoInfo, 0)
                         self.btn_repoInfo.clicked.connect(lambda:self.root.window.floatingStack.add_page(self.template.RepoInfo(self,self.root,self.data,self.pixmap)))
                         
-                        self.btn_link = self.RBtn(getPath("src/assets/nav/link.png"), "wid.pages.download.item.link", self, self.root)
+                        self.btn_link = self.RBtn(getPath(NAV_LINK), "wid.pages.download.item.link", self, self.root)
                         self.layout.addWidget(self.btn_link, 0)
                         self.btn_link.clicked.connect(self.open_release)
 
@@ -1046,7 +1051,7 @@ class Game(QWidget):
                 def lighting(self, light: bool):
                     # 关闭按钮图标：随主题取色（本页其余控件由全局 qss 控制）
                     color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
-                    icon = change_color("src/assets/tribtns/close.png", color)
+                    icon = change_color(TBT_CLOSE, color)
                     self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
 
                 # ---------- 名称默认值与去重 ----------
@@ -1501,11 +1506,11 @@ class Game(QWidget):
 
                     def lighting(self, light):
                         color = QColor(0, 0, 0) if light else QColor(255, 255, 255)
-                        icon = change_color("src/assets/files/file.png", color)
+                        icon = change_color(FILE_GENERIC, color)
                         pixmap = icon.pixmap(24, 24)
                         if not pixmap.isNull():
                             self.icon.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                        bicon = change_color("src/assets/buttons/download.png", color)
+                        bicon = change_color(BTN_DOWNLOAD, color)
                         bpixmap = bicon.pixmap(18, 18)
                         if not bpixmap.isNull():
                             self.btn_download.setIcon(QIcon(bpixmap.scaled(16, 16, Qt.KeepAspectRatio, Qt.FastTransformation)))
@@ -1513,11 +1518,17 @@ class Game(QWidget):
                     
 
         class Origin(Template):
+            # ── 下载源元信息：注册与展示的唯一出处 ──
+            # 以前这些值一半写在 __init__ 里、一半又当参数传给 add_page()，
+            # 同一份数据两处维护；现在集中在类属性上，Main 只按表读取。
+            title_key   = "wid.pages.download.origin"
+            introUrl    = "https://raw.githubusercontent.com/Anuken/Mindustry/master/README.md"
+            releaseRepo = "Anuken/Mindustry"
+            iconPath    = ICON_MDT
+            cache_name  = ".origin.json"
+
             def __init__(self, parent=None, root=None, text=None, icon=None):
-                self.introUrl = "https://raw.githubusercontent.com/Anuken/Mindustry/master/README.md"
-                self.releaseRepo = "Anuken/Mindustry"
-                self.iconPath = "src/assets/icons/mdt/mdt.png"
-                self.tmpPath = getPath("BML/.tmp/search/games/.origin.json")
+                self.tmpPath = getPath(f"BML/.tmp/search/games/{self.cache_name}")
                 self.classs = {}
                 super().__init__(parent, root, text, icon)
                 self.setClasss()
@@ -1583,11 +1594,15 @@ class Game(QWidget):
                 }
 
         class MindustryX(Template):
+            # ── 下载源元信息（详见 Origin 的说明）──
+            title_key   = "MindustryX"
+            introUrl    = "https://raw.githubusercontent.com/TinyLake/MindustryX/refs/heads/main/README.md"
+            releaseRepo = "TinyLake/MindustryX"
+            iconPath    = ICON_MDTX
+            cache_name  = "mindustryx.json"
+
             def __init__(self, parent=None, root=None, text=None, icon=None):
-                self.introUrl = "https://raw.githubusercontent.com/TinyLake/MindustryX/refs/heads/main/README.md"
-                self.releaseRepo = "TinyLake/MindustryX"
-                self.iconPath = "src/assets/icons/mdt/mdtx.png"
-                self.tmpPath = getPath("BML/.tmp/search/games/mindustryx.json")
+                self.tmpPath = getPath(f"BML/.tmp/search/games/{self.cache_name}")
                 self.classs = {}
                 super().__init__(parent, root, text, icon)
                 self.init_wid()
@@ -1622,7 +1637,7 @@ class Game(QWidget):
                 self.betaTips.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
                 self.betaTips.setMaximumWidth(600)
                 try:
-                    self.betaTipsIcon.setPixmap(change_color(getPath("src/assets/actions/tips.png"), QColor(255,165,0)).pixmap(QSize(18,18)))
+                    self.betaTipsIcon.setPixmap(change_color(getPath(ACT_TIPS), QColor(255,165,0)).pixmap(QSize(18,18)))
                 except Exception:
                     pass
                 self.betaTipsText.setText(self.root.langer.get("wid.pages.download.mindustryx.betaTips"))
@@ -1785,11 +1800,15 @@ class Game(QWidget):
                 return full_cache
 
         class MindustryARC(Template):
+            # ── 下载源元信息（详见 Origin 的说明）──
+            title_key   = "MdtArc"
+            introUrl    = "https://raw.githubusercontent.com/squi2rel/Mindustry-CN-ARC/refs/heads/master/README.md"
+            releaseRepo = "Jackson11500/Mindustry-CN-ARC-Builds"
+            iconPath    = ICON_MDTARC
+            cache_name  = "mindustryarc.json"
+
             def __init__(self, parent=None, root=None, text=None, icon=None):
-                self.introUrl = "https://raw.githubusercontent.com/squi2rel/Mindustry-CN-ARC/refs/heads/master/README.md"
-                self.releaseRepo = "Jackson11500/Mindustry-CN-ARC-Builds"
-                self.iconPath = "src/assets/icons/mdt/mdtarc.png"
-                self.tmpPath = getPath("BML/.tmp/search/games/mindustryarc.json")
+                self.tmpPath = getPath(f"BML/.tmp/search/games/{self.cache_name}")
                 self.classs = {}
                 super().__init__(parent, root, text, icon)
                 self.scroll_layout.setContentsMargins(1, 1, 1, 1)
