@@ -19,7 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 插件放哪
 --------
     BML/plugins/<插件目录>/
-    ├── plugin.json     元信息（id / name / version / api / entry）
+    ├── plugin.json     元信息（id / name / version / api / entry / dependencies）
     ├── main.py         入口，里面得有一个 Plugin 子类
     ├── lang/*.json     可选，自己的语言包
     └── assets/*        可选，自己的图标
@@ -29,8 +29,25 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 两种形态都收：
     BML/plugins/hello/          一个目录
-    BML/plugins/hello.zip       一个压缩包（解压到 BML/.tmp/unpacked/ 再按目录加载）
+    BML/plugins/hello.zip       一个压缩包（解压到 BML/.tmp/plugins/ 再按目录加载）
 zip 是为了分发方便 —— 下载一个文件丢进 plugins/ 就能用。
+
+依赖与加载日志
+--------------
+清单里的 dependencies 写「依赖哪些插件 id」（数组；只有一个时写字符串也认）。
+加载一个插件前先把它的依赖拉起来 —— 依赖也在 BML/plugins 里，找不到就算这个
+插件加载失败，不静默跳过（少一个依赖却照常跑起来，坏的是几层之外的表现）。
+
+日志按「谁在等谁」打，依赖先起来：
+
+    [com.example.a]开始加载
+    [com.example.b]开始加载      ← 依赖走同一套，递归进来说
+    [com.example.b]加载完成
+    [com.example.a]加载完成
+
+已经起来的、以及正在这条链上的（成环），都不会再打一遍「开始加载」。
+失败打 [id]加载失败:\n<traceback>；缺依赖、依赖成环、清单不合法这类没有
+traceback，就写原因 —— 格式一样，排查时不必分两种读法。
 
 两条硬规矩
 ----------
@@ -53,15 +70,12 @@ from dataclasses import dataclass, field
 
 from .path_utils import getPath
 
-__all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all",
+__all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all", "load_one",
            "unload", "loaded", "ensure_dirs",
-           "plugin_langs", "PLUGIN_DIR", "MANIFEST"]
+           "plugin_langs", "PLUGIN_DIR", "PLUGIN_CACHE", "MANIFEST"]
 
-# 插件目录**只有这一个**。zip 插件的解压暂存区不叫 plugins —— 它是
-# 「把压缩包摊开好按目录加载」的临时落点，每次发现都重解，跟其他临时文件
-# 一个待遇；名字里再带 plugins 就成了第二个「插件目录」，找插件的人会找错。
 PLUGIN_DIR = "BML/plugins"
-PLUGIN_UNPACK = "BML/.tmp/unpacked"
+PLUGIN_CACHE = "BML/.tmp/plugins"     # zip 插件的解压落点（跟其他临时文件一个待遇）
 MANIFEST = "plugin.json"
 
 # 插件不得触达的顶层模块名（BMLCore 是唯一的合法入口）
@@ -86,10 +100,13 @@ class PluginInfo:
     entry: str = "main.py"
     author: str = ""
     description: str = ""
+    dependencies: tuple = ()         # 依赖的插件 id（清单里的 dependencies）
 
     source: str = ""                # 来自目录还是 zip 文件（界面显示/排查用）
     instance: object = None          # 加载成功后的 Plugin 实例
     error: str = ""                  # 非空 = 加载失败（界面据此标红）
+    reported: bool = field(default=False, repr=False)   # 失败日志是否已打过
+
 
     @property
     def ok(self):
@@ -162,6 +179,15 @@ def _read_manifest(folder):
     if pid.split(".")[0] == "core":
         raise PluginLoadError(f"id {pid!r} 用了保留命名空间 core（内置都在 core.* 下）")
 
+    deps = data.get("dependencies") or []
+    if isinstance(deps, str):
+        deps = [deps]                      # 只依赖一个时写字符串也认
+    if not isinstance(deps, list):
+        raise PluginLoadError("plugin.json 的 dependencies 必须是数组")
+    deps = tuple(str(d).strip() for d in deps if str(d).strip())
+    if pid in deps:
+        raise PluginLoadError(f"依赖了自己：{pid}")
+
     entry = (data.get("entry") or "main.py").strip()
     return PluginInfo(
         id=pid, path=folder, entry=entry,
@@ -170,6 +196,7 @@ def _read_manifest(folder):
         api=str(data.get("api") or "1.x"),
         author=(data.get("author") or "").strip(),
         description=(data.get("description") or "").strip(),
+        dependencies=deps,
     )
 
 
@@ -335,7 +362,7 @@ def discover(base=None, cache=None):
     目录与 .zip 两种形态都收。
     """
     base = base or getPath(PLUGIN_DIR)
-    cache = cache or getPath(PLUGIN_UNPACK)
+    cache = cache or getPath(PLUGIN_CACHE)
     found = []
     if not os.path.isdir(base):
         return found
@@ -374,7 +401,12 @@ def _find_plugin_class(mod, entry_name):
 
 
 def load_one(info):
-    """加载单个插件。任何异常都被吞进 info.error，不往外抛。"""
+    """加载单个插件本身（**不解析依赖、不打进度日志**）。
+
+    它是最底层那一步：导入入口、找 Plugin 子类、实例化、setup()。
+    任何异常都被吞进 info.error，不往外抛。公开给测试与「手动装一个」用；
+    正常启动走 load_all，依赖与日志都在那一层。
+    """
     from ..BMLCore import API_VERSION
 
     if info.error:
@@ -431,28 +463,79 @@ def _expose_api():
 
 
 def load_all(base=None):
-    """发现并加载全部插件，返回清单列表（含失败项）。
+    """发现并加载全部插件（含依赖），返回清单列表（含失败项）。
 
     必须是「逐个隔离」：一个插件坏掉只写进它自己的 error，
     绝不向外抛 —— 宿主启动流程整个包在一个大 try 里，抛出去就是启动失败弹窗。
+    日志格式见模块说明（[id]开始加载 / 加载完成 / 加载失败:\n<traceback>）。
     """
-    from .registry import registry
-    from .events import events
-
     _expose_api()
     infos = discover(base)
+    by_id = {i.id: i for i in infos}
     for info in infos:
-        load_one(info)
-        if info.ok:
-            events.logger.info(f"插件已加载：{info.id} v{info.version}", name="Plugin")
-        else:
-            # 只记第一行，完整 traceback 留在 info.error 里给插件管理界面看
-            head = (info.error or "").strip().splitlines()[-1:]
-            events.logger.error(
-                f"插件加载失败：{info.id} —— {head[0] if head else info.error}",
-                name="Plugin")
+        _load_tree(info, by_id, ())
     _STATE["loaded"] = [i for i in infos if i.ok]
     return infos
+
+
+def _load_tree(info, by_id, chain):
+    """加载 info —— 先把它的依赖拉起来，再加载自己。
+
+    chain 是「当前正在加载的这条链」（不含自己），用来挡依赖成环：
+    A→B→A 不挡就是无限递归，表现像卡死，比报错难查得多。
+
+    已经在链上的插件也不重复打「开始加载」；依赖走同一套日志（递归进来说），
+    所以读日志的人看到的就是「谁在等谁」。
+    """
+    from .events import events
+
+    if info.ok or info.reported:
+        return                      # 已经起来了，或失败原因已经报过一遍
+    if info.error:
+        # 发现期就坏掉的（清单不合法 / zip 解不开）：没有依赖可谈，直接报
+        _report_fail(info)
+        return
+    if info.id in chain:
+        _fail(info, "依赖成环：" + " -> ".join(chain + (info.id,)))
+        return
+
+    events.logger.info(f"[{info.id}]开始加载", name="Plugin")
+
+    for dep_id in info.dependencies:
+        dep = by_id.get(dep_id)
+        if dep is None:
+            _fail(info, f"缺少依赖：{dep_id}（没有这个插件）")
+            return
+        if dep_id == info.id or dep_id in chain:
+            _fail(info, "依赖成环：" + " -> ".join(chain + (info.id, dep_id)))
+            return
+        if not dep.ok:
+            _load_tree(dep, by_id, chain + (info.id,))
+        if not dep.ok:
+            _fail(info, f"依赖加载失败：{dep_id}")
+            return
+
+    load_one(info)
+    if info.ok:
+        events.logger.info(f"[{info.id}]加载完成", name="Plugin")
+    else:
+        _report_fail(info)
+
+
+def _fail(info, why):
+    """给「不是异常」的失败定原因（缺依赖 / 成环）并报出去。"""
+    info.error = why
+    _report_fail(info)
+
+
+def _report_fail(info):
+    """报一次加载失败 —— 同一条只报一次（它可能既是某人的依赖、又轮到它自己）。"""
+    from .events import events
+
+    if info.reported:
+        return
+    info.reported = True
+    events.logger.error(f"[{info.id}]加载失败:\n{info.error}", name="Plugin")
 
 
 def loaded():
