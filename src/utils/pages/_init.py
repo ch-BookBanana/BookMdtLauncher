@@ -78,7 +78,7 @@ class Page():
     子类只做两件事：
       1. 用类属性声明自己是谁（name 语言键 / icon 图标 / order 顺序 / default 默认页）；
       2. 实现 init_wid() 建自己的三栏内容。
-    注册交给 @page("core.xxx") 装饰器（见 pages/start.py 末尾），
+    注册交给 @page("core.xxx") 装饰器（写在页面类上，见 pages/start.py），
     装配方按注册表构建，不认识任何一个页面类。
 
     构造只需要一个 btn（导航按钮，装配方建好注入）；页容器从注册表取

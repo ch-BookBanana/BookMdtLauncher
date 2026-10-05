@@ -14,21 +14,22 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-内置界面：声明扩展点契约 + import 各页面模块完成登记。
+内置界面：声明扩展点契约 + 调用各页面模块的 register()。
 
-各页面模块在自己末尾往扩展点登记条目（见 pages/start.py 末尾），所以
-「有哪些内置页面」的出处在这里，而不在 main.py —— main.py 只 import 本模块
-触发登记，再按 registry.entries(...) 构建，不认识任何一个页面类。
+各页面模块导出顶层 register()，本文件逐个调（见文件末尾）。import 本身
+不登记任何东西，所以「有哪些内置条目」在这里一眼看得全，不必翻到各模块
+末尾去数。main.py 只 import 本模块，再按 registry.entries(...) 构建，
+不认识任何一个页面类。
 
-加一个内置页面 = 写页面模块（末尾自登记）+ 在下面加一行 import。
-导航顺序由各条目的 order 决定，import 顺序不影响它。
+加一个内置页面 = 写页面模块（带 register()）+ 在末尾加两行（import + 调）。
+导航顺序由各条目的 order 决定，调用顺序不影响它。
 
 为什么契约集中在这里声明
 ------------------------
 声明是**静态契约**，必须在任何登记发生之前就位。原先各扩展点的 declare
 散在 init_wid 里（构建期才执行），而插件是在 Main 构造期加载的 —— 那时界面
 还没建，插件一 add 就撞上「扩展点 'core.setting.items' 尚未声明」。
-集中到这里 = import 即声明，早于一切登记（内置的、插件的都在其后）。
+集中到这里 = 本模块一被 import 就声明完，早于一切登记（内置的、插件的都在其后）。
 
 顺带一个好处：所有扩展点长什么样，在一个文件里看得全。
 """
@@ -97,12 +98,20 @@ registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
                  doc="游戏管理页的区块（文件夹 / Java …）")
 
 # ─────────────────────────── 内置条目登记 ───────────────────────────
-# 下面这几行 import 会执行各页面模块末尾的 registry.add，
-# 所以必须排在契约声明之后。
+# 每个页面模块导出顶层 register()，这里逐个调 —— import 本身不登记。
+# 「有哪些内置条目」于是全在这一个文件里看得见，不必翻到各模块末尾去数；
+# 调用顺序必须排在契约声明之后（register 里的 add 会校验契约）。
 
-from . import start      # noqa: E402,F401
-from . import download   # noqa: E402,F401
-from . import game       # noqa: E402,F401
-from . import setting    # noqa: E402,F401
+from . import start                # noqa: E402,F401
+from . import download             # noqa: E402,F401
+from . import game                 # noqa: E402,F401
+from . import setting              # noqa: E402,F401
+from .downloads import game as _download_sources   # noqa: E402,F401
 from .fStack import gameManager    # noqa: E402,F401
-gameManager.register()             # 容器入口自登记（功能页在它文件末尾自己登记）
+
+start.register()                   # core.start.bottom（底部按钮页）
+download.register()                # core.download.tabs（左栏页签）
+setting.register()                 # core.setting.pages + core.setting.items
+_download_sources.register()       # core.download.sources（三个下载源）
+gameManager.register()             # core.overlays + 管理浮层的功能页与区块
+

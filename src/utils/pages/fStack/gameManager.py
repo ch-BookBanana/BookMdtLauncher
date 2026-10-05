@@ -14,25 +14,18 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-游戏管理浮层：左栏功能菜单 + 右栏内容。
+游戏管理浮层：容器 GameManager + 它的功能页（当前只有「设置」这一页）。
 
-形态和设置页一样（左栏选、右栏看），区别只在于它活在浮层里、对象是某一个
-游戏实例。
+GameManager 是纯容器：左栏功能菜单从 core.gameManager.pages 读，右栏装页面，
+它不认识任何一个具体页。形态和设置页一样（左栏选、右栏看），区别只在于
+它活在浮层里、对象是某一个游戏实例。
 
     左栏（core.gameManager.pages）        右栏
     ├── 设置  → GameSettings（文件夹 / Java / 改名 / 删除…）
     └── …     将来加 Mods、存档之类
 
-加一页 = 写一个模块 + 在它末尾加一条 registry.add（见 gameSettings.py 末尾），
-本文件一行都不用动 —— 它是纯容器，不认识任何一个具体页。
-"""
-"""游戏管理浮层：容器 GameManager + 它的功能页（当前只有「设置」这一页）。
-
-GameManager 是纯容器：左栏功能菜单从 core.gameManager.pages 读，右栏装页面。
-本文件末尾，GameSettings 把**自身**登记进那个扩展点 —— 容器不认识任何一个
-具体页，加一页 = 写一个模块（末尾登记），容器一行都不用动。
-
-形态与设置页一致（左栏选、右栏看），区别只在于它活在浮层里、对象是某一个实例。
+加一页 = 写一个模块 + 在自己的 register() 里加一条 registry.add，本文件一行
+都不用动。容器入口也由本文件的 register() 交给 core.overlays。
 """
 
 import os
@@ -57,14 +50,17 @@ from ...utils import change_color, openFolder, t
 
 
 class GameManager(QWidget):
-    """某个实例的游戏管理浮层。"""
+    """**指定实例**的游戏管理浮层。
 
+    管哪个实例由打开的人给（见 register 里的 b.game），这里不摸全局默认值：
+    摸全局的话这个浮层就只能管默认那一个，想给别的实例开管理没处表达，
+    而且「为什么管的是它」会藏进构造函数里 —— 出事时只看得到一个 None。
+    """
 
-    def __init__(self, parent=None, game=None):
+    def __init__(self, game, parent=None):
         super().__init__()
         self.parent = parent
-        # 管哪个实例：不靠调用方传，取当前默认那个（改名/切默认后跟着换）
-        self.game = game if game is not None else events.settings["defaultGame"]
+        self.game = game
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.init_wid()
 
@@ -194,9 +190,9 @@ class GameSettings(Scroll):
         self.line.setProperty("wid", "line")
         self.scroll_layout.addWidget(self.line, 0)
 
-        # 区块从注册表取：加一个区块 = 写一个 QWidget 子类 + 在本文件末尾加一条
-        # registry.add。登记在**模块加载时**做一次（见文件末尾）—— 不能写在这里：
-        # init_wid 每次构建都会跑，重复登记会直接撞「已存在条目」。
+        # 区块从注册表取：加一个区块 = 写一个 QWidget 子类 + 在本文件 register()
+        # 里加一条。登记写在这里的话，init_wid 每构建一次就跑一次，
+        # 第二次构建会直接撞「已存在条目」。
         for e in registry.entries("core.gameSettings.sections"):
             wid = e.init(Box(parent=self, entry=e))
             setattr(self, e.attr, self.add(wid, e.get("spacing", 0)))
@@ -1002,33 +998,27 @@ class GameSettings(Scroll):
             super().langing()   # 左侧标题
             self._texts()
 
-# GameSettings 的区块：本文件定义了它们，所以在这里交出去（模块加载时一次）。
-registry.add("core.gameSettings.sections", "core.gameSettings.folders",
-             init=lambda b: GameSettings.Folders(b.parent),
-             attr="folders", order=10, spacing=10)
-registry.add("core.gameSettings.sections", "core.gameSettings.java",
-             init=lambda b: GameSettings.Java(b.parent),
-             attr="java", order=20, spacing=20)
-
-
-# 往 core.gameManager.pages 登记自己：GameManager 左栏的「设置」那一页。
-# 本页管的是某个实例，实例名从 GameManager 现取（b.parent.game）——
-# 因此在 GameManager 里改名后，这里跟着换，不用自己同步。
-registry.add("core.gameManager.pages", "core.gameManager.settings",
-             init=lambda b: GameSettings(b.parent.game, b.parent),
-             order=10, title="core.wid.pages.gameManager.settings")
-
-
 def register():
-    """把 GameManager 登记进浮层扩展点。
+    """本文件定义的东西，在这里一次性交出去。由 pages/builtin.py 调用一次。
 
-    与文件末尾 GameSettings 那条登记分开写是有意的：
-      * GameSettings 是「本文件定义了它，所以本文件把它交出去」；
-      * GameManager 是**容器的入口** —— 谁要打开游戏管理，从注册表按 key 取，
-        不必 import 这个类（start.py 就是这么用的）。
-
-    由 pages/builtin.py 在契约声明之后调用一次。
+    GameManager 是**容器的入口** —— 谁要打开游戏管理，从注册表按 key 取，
+    不必 import 这个类（start.py 就是这么用的）。
     """
+    # 管哪个实例走 Box 上下文：开浮层的人才知道（start.py 传当前显示那个）
     registry.add("core.overlays", "core.gameManager",
-                 init=lambda b: GameManager(b.parent),
+                 init=lambda b: GameManager(b.game, b.parent),
                  order=10, title="core.wid.pages.gameManager")
+
+    # 左栏那个「设置」功能页。它管的是**某个实例**，实例名从 GameManager
+    # 现取（b.parent.game）—— 容器里改了名，这里跟着换，不用自己同步。
+    registry.add("core.gameManager.pages", "core.gameManager.settings",
+                 init=lambda b: GameSettings(b.parent.game, b.parent),
+                 order=10, title="core.wid.pages.gameManager.settings")
+
+    # 设置页里的两个区块。本文件定义了它们，所以本文件交出去。
+    registry.add("core.gameSettings.sections", "core.gameSettings.folders",
+                 init=lambda b: GameSettings.Folders(b.parent),
+                 attr="folders", order=10, spacing=10)
+    registry.add("core.gameSettings.sections", "core.gameSettings.java",
+                 init=lambda b: GameSettings.Java(b.parent),
+                 attr="java", order=20, spacing=20)

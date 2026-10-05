@@ -177,16 +177,38 @@ class Box:
     box.btn     配套按钮（扩展点声明了 btn 产物槽位时才有，否则为 None）
 
     b.title 这类读取直接代理到条目，省得每次都写 b.entry.title。
+
+    本次上下文
+    ----------
+    关键词参数就是上下文：Box(parent=…, entry=…, game="<:|default|:>")，
+    init 里 b.game 就取得到。用在「只有构建这一刻才知道」的东西上 ——
+    比如开游戏管理浮层时才知道要管**哪个实例**：
+
+        self.add("core.overlays", "x", init=lambda b: Mgr(b.game, b.parent))
+
+    静态元信息（title/icon/order…）该写在条目字段里；上下文只放一次性的。
+    两者重名时以本次上下文为准。没给又去读，会当场抛 AttributeError
+    并把可用的上下文列出来 —— 好过默默给个 None 让上层隔很远才炸。
     """
 
-    __slots__ = ("parent", "root", "entry", "btn")
+    __slots__ = ("parent", "entry", "btn", "_ctx")
 
-    def __init__(self, parent=None, entry=None, btn=None):
+    def __init__(self, parent=None, entry=None, btn=None, **ctx):
         self.parent = parent
         self.entry = entry
         self.btn = btn
+        self._ctx = ctx
 
     def __getattr__(self, item):
+        # 正常查找失败才走到这里：先看本次上下文，再看条目字段。
+        # 条目自己的报错带着扩展点名与可用字段清单，比在这里再包一层有用，
+        # 所以原样放它出去。
+        try:
+            ctx = object.__getattribute__(self, "_ctx")
+        except AttributeError:
+            ctx = {}
+        if item in ctx:
+            return ctx[item]
         try:
             entry = object.__getattribute__(self, "entry")
         except AttributeError:

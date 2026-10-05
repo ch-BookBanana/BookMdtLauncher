@@ -319,8 +319,8 @@ class Start(Page):
                 self.init_wid()
                 
             def init_wid(self):
-                # 从注册表取：登记在模块加载时做一次（见文件末尾）——
-                # 写在这里的话，第二次构建就会撞「已存在条目」。
+                # 从注册表取：本模块的 register() 登记一次（由 pages/builtin.py 调）。
+                # 登记写在这里的话，第二次构建就会撞「已存在条目」。
                 for e in registry.entries("core.start.bottom"):
                     setattr(self, e.attr,
                             e.init(Box(parent=self, entry=e)))
@@ -625,7 +625,7 @@ class Start(Page):
                 self.start.clicked.connect(self.on_start_clicked)
                 self.settings.clicked.connect(lambda: events.emit(
                     "stackRequested",
-                    _open_game_manager(self)))
+                    _open_game_manager(self, events.settings["defaultGame"])))
 
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""
@@ -1074,30 +1074,36 @@ class Start(Page):
                 super().resizeEvent(event)
 
 
-def _open_game_manager(parent):
+def _open_game_manager(parent, game):
     """打开游戏管理浮层：从注册表取，本文件不必认识 GameManager 这个类。
 
     容器在 gameManager.py 的 register() 里登记（由 pages/builtin.py 调用）。
+
+    管哪个实例由**这里**说清楚（走 Box 上下文），浮层自己不去摸全局默认值 ——
+    否则「谁的设置」就成了浮层的隐藏前提，别的入口想给指定实例开管理没法表达。
     """
     ov = registry.entry("core.overlays", "core.gameManager")
-    return ov.init(Box(parent=parent, entry=ov))
+    return ov.init(Box(parent=parent, entry=ov, game=game))
 
-# ── 底部按钮页的登记（模块加载时一次）──
-# init 从 Box.parent（承载它们的 Bottom 实例）上取嵌套类，所以不必捕获 self，
-# 也就没有「谁先构建」的问题。attr 是绑回 Bottom 上的属性名。
+def register():
+    """底部按钮页的登记。由 pages/builtin.py 调用一次。
 
-registry.add("core.start.bottom", "core.start.bottom.start",
-             init=lambda b: b.parent.Start(b.parent),
-             attr="start", order=10)
-registry.add("core.start.bottom", "core.start.bottom.mod",
-             init=lambda b: b.parent.Mod(b.parent),
-             attr="mod", order=20)
-registry.add("core.start.bottom", "core.start.bottom.world",
-             init=lambda b: b.parent.World(b.parent),
-             attr="world", order=30)
-registry.add("core.start.bottom", "core.start.bottom.launch",
-             init=lambda b: b.parent.Launch(b.parent),
-             attr="launch", order=40)
-registry.add("core.start.bottom", "core.start.bottom.suspend",
-             init=lambda b: b.parent.Suspend(b.parent),
-             attr="suspend", order=50)
+    init 从 Box.parent（承载它们的 Bottom 实例）上取嵌套类，所以不必捕获 self，
+    也就没有「谁先构建」的问题。attr 是绑回 Bottom 上的属性名。
+    """
+
+    registry.add("core.start.bottom", "core.start.bottom.start",
+                 init=lambda b: b.parent.Start(b.parent),
+                 attr="start", order=10)
+    registry.add("core.start.bottom", "core.start.bottom.mod",
+                 init=lambda b: b.parent.Mod(b.parent),
+                 attr="mod", order=20)
+    registry.add("core.start.bottom", "core.start.bottom.world",
+                 init=lambda b: b.parent.World(b.parent),
+                 attr="world", order=30)
+    registry.add("core.start.bottom", "core.start.bottom.launch",
+                 init=lambda b: b.parent.Launch(b.parent),
+                 attr="launch", order=40)
+    registry.add("core.start.bottom", "core.start.bottom.suspend",
+                 init=lambda b: b.parent.Suspend(b.parent),
+                 attr="suspend", order=50)

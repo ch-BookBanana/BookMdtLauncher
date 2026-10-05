@@ -85,7 +85,7 @@ class Download(Page):
             self.pages_ = []
             self.btns_ = []
 
-            # 页签从注册表取：登记在模块加载时做一次（见文件末尾）。
+            # 页签从注册表取：本模块的 register() 登记一次（由 pages/builtin.py 调）。
             for e in registry.entries("core.download.tabs"):
                 page = self.add_page(e)
                 setattr(self, e.name, page)          # self.game
@@ -106,10 +106,13 @@ class Download(Page):
 
 
 
-# ── 左栏页签的登记（模块加载时一次）──
-# init 从 Box.parent（承载它的下载页 Main 实例）取宿主；title/icon 走条目字段。
+def register():
+    """左栏页签的登记。由 pages/builtin.py 调用一次。
 
-registry.add("core.download.tabs", "core.download.game",
-             init=lambda b: Game(b.parent, b.title, b.icon),
-             order=10,
-             title="core.wid.pages.download.game", icon=NAV_MENU)
+    init 从 Box.parent（承载它的下载页 Main 实例）取宿主；title/icon 走条目字段。
+    """
+
+    registry.add("core.download.tabs", "core.download.game",
+                 init=lambda b: Game(b.parent, b.title, b.icon),
+                 order=10,
+                 title="core.wid.pages.download.game", icon=NAV_MENU)

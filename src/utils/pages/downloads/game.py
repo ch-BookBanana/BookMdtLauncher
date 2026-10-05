@@ -78,32 +78,6 @@ def _item_action_link(b):
     return btn
 
 
-_ITEM_ACTIONS_ADDED = False
-
-
-def _register_item_actions():
-    """登记列表项的操作按钮。
-
-    幂等靠这个模块级标志，**不能**用 registry.declared(point) 当守卫 ——
-    契约声明已经集中到 pages/builtin.py（import 即声明），那个判断一上来
-    就是 True，条目会一条都登记不上。这里的幂等要管的是「add 过没有」。
-    """
-    global _ITEM_ACTIONS_ADDED
-    if _ITEM_ACTIONS_ADDED:
-        return
-    _ITEM_ACTIONS_ADDED = True
-    point = "core.download.item.actions"
-    registry.add(point, "core.download.item.download",
-                 init=_item_action_download, attr="btn_download", order=10,
-                 title="core.wid.pages.download.item.download", icon=BTN_DOWNLOAD)
-    registry.add(point, "core.download.item.repoInfo",
-                 init=_item_action_repo, attr="btn_repoInfo", order=20,
-                 title="core.wid.pages.download.item.repoInfo", icon=NAV_MENU)
-    registry.add(point, "core.download.item.link",
-                 init=_item_action_link, attr="btn_link", order=30,
-                 title="core.wid.pages.download.item.link", icon=NAV_LINK)
-
-
 class Game(QWidget):
     def __init__(self, parent=None, text=None, icon=None):
         super().__init__()
@@ -238,7 +212,7 @@ class Game(QWidget):
             self.pages_ = []
             self.btns_ = []
 
-            # 下载源从注册表取：登记在模块加载时做一次（见文件末尾）。
+            # 下载源从注册表取：本模块的 register() 登记一次（由 builtin.py 调）。
             for e in registry.entries("core.download.sources"):
                 page = self.add_page(e, color=e.get("color", True))
                 registry.bind("core.download.sources", e.key, main=page, btn=page.btn)
@@ -925,9 +899,9 @@ class Game(QWidget):
 
                         self.layout.addStretch(1)
 
-                        # 右侧操作按钮走注册中心：加一个按钮 = 写一个 init + 一条 registry.add。
-                        # 回调在 init 里接（按钮自己知道该弹什么），这里只管摆位置与统一控显隐。
-                        _register_item_actions()
+                        # 右侧操作按钮走注册中心：加一个按钮 = 写一个 init + 一条
+                        # registry.add（见本模块 register()）。回调在 init 里接
+                        # （按钮自己知道该弹什么），这里只管摆位置与统一控显隐。
                         self._action_btns = []
                         for e in registry.entries("core.download.item.actions"):
                             btn = e.init(Box(parent=self, entry=e))
@@ -1928,21 +1902,36 @@ class Game(QWidget):
                     "assets": assets,
                 }
 
-# ── 下载源的登记（模块加载时一次）──
-# init 由源自己提供（装配方不猜构造签名）：宿主实例从 Box.parent 来，类从闭包来。
-# 仓库 / README / 缓存文件名仍由各 Template 子类的类属性提供，
-# 这里只把界面要用的语言键与图标登记一份。
+def register():
+    """下载源与列表项操作按钮的登记。由 pages/builtin.py 调用一次。
 
-def _src_init(cls):
-    return lambda b: cls(b.parent, b.title, b.icon)
+    init 由源自己提供（装配方不猜构造签名）：宿主实例从 Box.parent 来，类从闭包来。
+    仓库 / README / 缓存文件名仍由各 Template 子类的类属性提供，
+    这里只把界面要用的语言键与图标登记一份。
+    """
 
+    def _src_init(cls):
+        return lambda b: cls(b.parent, b.title, b.icon)
+    registry.add("core.download.sources", "core.origin",
+                 init=_src_init(Game.Main.Origin), order=10, color=False,
+                 title=Game.Main.Origin.title_key, icon=Game.Main.Origin.iconPath)
+    registry.add("core.download.sources", "core.mindustryx",
+                 init=_src_init(Game.Main.MindustryX), order=20, color=False,
+                 title=Game.Main.MindustryX.title_key, icon=Game.Main.MindustryX.iconPath)
+    registry.add("core.download.sources", "core.mindustryarc",
+                 init=_src_init(Game.Main.MindustryARC), order=30, color=False,
+                 title=Game.Main.MindustryARC.title_key, icon=Game.Main.MindustryARC.iconPath)
 
-registry.add("core.download.sources", "core.origin",
-             init=_src_init(Game.Main.Origin), order=10, color=False,
-             title=Game.Main.Origin.title_key, icon=Game.Main.Origin.iconPath)
-registry.add("core.download.sources", "core.mindustryx",
-             init=_src_init(Game.Main.MindustryX), order=20, color=False,
-             title=Game.Main.MindustryX.title_key, icon=Game.Main.MindustryX.iconPath)
-registry.add("core.download.sources", "core.mindustryarc",
-             init=_src_init(Game.Main.MindustryARC), order=30, color=False,
-             title=Game.Main.MindustryARC.title_key, icon=Game.Main.MindustryARC.iconPath)
+    # 列表项右侧的操作按钮：init 用 b.parent（那个 Item）现取宿主，
+    # 所以不必等 Item 建出来才登记 —— 原先靠一个模块级标志在 Item.__init__
+    # 里懒登记，现在条目在这就位，Item 只管摆位置。
+    point = "core.download.item.actions"
+    registry.add(point, "core.download.item.download",
+                 init=_item_action_download, attr="btn_download", order=10,
+                 title="core.wid.pages.download.item.download", icon=BTN_DOWNLOAD)
+    registry.add(point, "core.download.item.repoInfo",
+                 init=_item_action_repo, attr="btn_repoInfo", order=20,
+                 title="core.wid.pages.download.item.repoInfo", icon=NAV_MENU)
+    registry.add(point, "core.download.item.link",
+                 init=_item_action_link, attr="btn_link", order=30,
+                 title="core.wid.pages.download.item.link", icon=NAV_LINK)
