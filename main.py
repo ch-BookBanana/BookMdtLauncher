@@ -41,6 +41,8 @@ import ctypes
 import ctypes.wintypes
 
 try:
+    from src.utils.langer import Langer
+    from src.utils.logger import Logger
     from src.utils.path_utils import getPath
     from src.utils.pages._init import open_overlay
     from src.utils.settings import Settings
@@ -105,7 +107,7 @@ try:
             # self.settings 时这里跟着走。
             events.bind(self)
             self.winreg = self.Winreg(self, self)
-            self.logger = self.Logger(self)
+            self.logger = Logger()
             self.logger.info("\n------------Book MDT Launcher------------"
                             f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
                             f"\n-version: {init['version']}"
@@ -127,7 +129,10 @@ try:
             app.aboutToQuit.connect(self.saveSettings)
             self.loadSettings()
 
-            self.langer = self.Langer(self, self)
+            # L1：翻译。插件覆盖项走注入（plugin_langs），于是这里不必 import
+            # 插件层，也就不存在「次基层 ← 插件层」那条反依赖。
+            self.langer = Langer(settings=self.settings, logger=self.logger,
+                                 winreg=self.winreg, overrides=pluginLoader.plugin_langs)
             # 翻译也是注入的（基层不 import 上层）
             self.settings.set_tr(self.langer.get)
             # 从这里起，改设置自动排一次防抖存盘 —— 各处不必再记着调 saveSettings
@@ -165,6 +170,9 @@ try:
             self.signals.register("stackClosed", Signal(object, bool))
             # Java 任务状态：下载列表的轮询 → 启动页的进度文字（只改字不切页）
             self.signals.register("java_status", Signal(str, object))
+            # 插件重载是**命令**（有动作、不需要回值）：走事件，谁都能请求
+            self.signals.register("reload_plugins", Signal())
+            self.signals.on("reload_plugins", lambda *_: self.reload_plugins())
             # 插件集合变了（卸载 / 加载失败回滚）：宿主据此把它盖过的东西收回来。
             # 必须赶在 load_all() 之前注册 —— 加载期就有插件可能失败并发这条。
             self.signals.register("plugins_changed", Signal())
@@ -321,6 +329,35 @@ try:
         def saveSettings(self):
             """写 settings.json（原子替换，写不进去只记日志）。"""
             self.settings.save()
+
+        def reload_plugins(self, retry=True):
+            """重载插件层：全部卸载 → 重走一遍 → 界面按注册表对账。
+
+            什么时候用：手动装了 / 删了 / 改了插件之后，不必重启启动器；
+            或者某个插件上次加载失败被标注停用了，用户改好后想再试一次
+            （retry=True 会连停用名单里的一起重试；失败就再标回去）。
+
+            界面（页面 / 托盘 / 样式 / 语言）不在这里逐个收拾 —— 它们各自挂在
+            plugins_changed 上对账。这里只补一次语言与样式，保证「插件集合的
+            最终状态」被完整应用一次（卸载过程中是逐条触发的）。
+            """
+            try:
+                for info in list(pluginLoader.loaded()):
+                    pluginLoader.unload(info)
+                infos = pluginLoader.load_all(retry_disabled=retry)
+                ok = [i for i in infos if i.ok]
+                bad = [i for i in infos if not i.ok]
+                self.logger.info(
+                    "插件已重载：%d 个加载成功%s"
+                    % (len(ok), "，%d 个失败（已标注停用）" % len(bad) if bad else ""),
+                    name="Plugin")
+                # 界面不必在这里逐个收拾：load_all 末尾会发 plugins_changed，
+                # 语言 / 样式 / 托盘 / 页面各自挂在它上面按注册表对账。
+                return infos
+            except Exception:
+                self.logger.error("重载插件失败：\n" + traceback.format_exc(limit=6),
+                                  name="Plugin")
+                return []
 
         def _on_plugins_changed(self):
             """插件集合变了：把它盖过的三样收回来。
@@ -1433,6 +1470,11 @@ try:
                 self._plugin_actions = []
                 self._plugin_sep = self.menu.addSeparator()
 
+                # 重新加载插件：装了/改了插件之后不必重启启动器
+                self.menu_reload = QAction("", self)
+                self.menu_reload.triggered.connect(self._reload_plugins)
+                self.menu.addAction(self.menu_reload)
+
                 self.menu_close = QAction("", self)
                 self.menu_close.triggered.connect(QApplication.quit)
                 self.menu.addAction(self.menu_close)
@@ -1440,6 +1482,13 @@ try:
                 self.reload_plugin_items()
                 self.langing()
                 self.setContextMenu(self.menu)
+
+            def _reload_plugins(self):
+                """（托盘项）重载插件层。
+
+                延到事件循环里做：菜单得先收起来，重载本身要动界面。
+                """
+                QTimer.singleShot(0, self.root.reload_plugins)
 
             def reload_plugin_items(self):
                 """按 core.tray.menu 重建扩展项。
@@ -1460,6 +1509,7 @@ try:
 
             def langing(self):
                 self.menu_close.setText(self.root.langer.get("core.tray.menu.close"))
+                self.menu_reload.setText(self.root.langer.get("core.tray.menu.reloadPlugins"))
                 for act, e in getattr(self, "_plugin_actions", ()):
                     act.setText(self.root.langer.get(e.title))
 
@@ -1477,298 +1527,6 @@ try:
                     icon = QIcon(icon_path)
                     self.setIcon(icon)
                     self.root.logger.info(t(self.root.langer.get("core.log.info.trayTheme"), "light" if theme == "light" else "dark"))
-
-        class Logger():
-            """日志（基层）。
-
-            它只依赖注入进来的两样：settings（读 maxLogNum）与 tr（翻译）。
-            拿不到就退化成默认值/英文原文 —— 基层不往上依赖，
-            否则「设置还没建好就没法打日志」这种事会一直缠着启动流程。
-            """
-
-            # 命令行 `--log=<级别>`（只认 `=`，级别取 LEVELS 的键，默认 info）
-            LOG_ARG = "--log="
-            LEVELS = {
-                "debug": logging.DEBUG,
-                "info": logging.INFO,
-                "warning": logging.WARNING,
-                "error": logging.ERROR,
-                "critical": logging.CRITICAL,
-            }
-
-            def __init__(self, parent=None, settings=None, tr=None):
-                self.parent = parent
-                self._settings = settings
-                self._tr = tr
-                # 缓存已创建的 logger 实例，避免重复创建
-                self._loggers = {}
-                # 日志级别来自命令行（--log=debug），默认 INFO
-                self.level = self._parse_level()
-                # 初始化基础配置
-                self._setup_base_logging()
-
-            @classmethod
-            def _parse_level(cls):
-                """解析 `--log=<级别>`：只接受 `=` 形式，取值必须是 LEVELS 里的键。
-
-                `--log:debug`、`--log debug` 等写法一概不接收，回退 INFO。
-                """
-                for arg in sys.argv[1:]:
-                    if arg.startswith(cls.LOG_ARG):
-                        value = arg[len(cls.LOG_ARG):].strip().lower()
-                        if value in cls.LEVELS:
-                            return cls.LEVELS[value]
-                return logging.INFO
-
-            def _setup_base_logging(self):
-                """
-                配置根 Logger ("Main") 的 Handler 和格式。
-                其他子 Logger 将共享这些 Handler。
-                """
-                loglevel = self.level
-                self.base_logger_name = "Main"
-
-                # 获取或创建主 logger
-                main_logger = logging.getLogger(self.base_logger_name)
-                main_logger.setLevel(loglevel)
-
-                # 防止重复添加 handler
-                if main_logger.handlers:
-                    self._loggers[self.base_logger_name] = main_logger
-                    return
-
-                # 控制台 handler
-                console = logging.StreamHandler()
-                console.setLevel(loglevel)
-
-                # 文件 handler 配置
-                self.log_dir = getPath("BML/logs")
-                os.makedirs(self.log_dir, exist_ok=True)
-
-                now = datetime.now()
-                timestamp = now.strftime("%Y%m%d%H%M%S") + f".{now.microsecond // 1000:03d}"
-                timestamp_file = os.path.join(self.log_dir, f"{timestamp}.log")
-                latest_file = os.path.join(self.log_dir, "latest.log")
-
-                file_handler_timestamp = logging.FileHandler(timestamp_file, encoding="utf-8")
-                file_handler_latest = logging.FileHandler(latest_file, mode='w', encoding="utf-8")
-
-                file_handler_timestamp.setLevel(loglevel)
-                file_handler_latest.setLevel(loglevel)
-
-                # 设置日志格式：包含 %(name)s 以区分不同模块
-                formatter = logging.Formatter('[%(asctime)s] [%(name)s/%(levelname)s]: %(message)s')
-                console.setFormatter(formatter)
-                file_handler_timestamp.setFormatter(formatter)
-                file_handler_latest.setFormatter(formatter)
-
-                # 将 handler 添加到主 logger
-                main_logger.addHandler(console)
-                main_logger.addHandler(file_handler_timestamp)
-                main_logger.addHandler(file_handler_latest)
-
-                self._loggers[self.base_logger_name] = main_logger
-
-            def set_settings(self, settings):
-                """设置建得比日志晚（日志要读 maxLogNum），建完回填给它。"""
-                self._settings = settings
-                return self
-
-            def set_tr(self, tr):
-                """翻译也是注入的：宿主挂了 Langer 之后回填。"""
-                self._tr = tr
-                return self
-
-            def _t(self, key, fallback):
-                if self._tr is None:
-                    return fallback
-                try:
-                    got = self._tr(key)
-                    return got if got and got != key else fallback
-                except Exception:
-                    return fallback
-
-            def _get_logger(self, name=None):
-                """
-                获取指定名称的 logger。
-                如果 name 为 None 或 "Main"，返回主 logger。
-                否则返回 "Main.{name}" 的子 logger。
-                """
-                if not name or name == "Main":
-                    target_name = self.base_logger_name
-                else:
-                    # 使用层级命名，例如 "Main.Cmd"，这样它们会共享 Main 的 Handler
-                    target_name = f"{self.base_logger_name}.{name}"
-
-                if target_name not in self._loggers:
-                    logger = logging.getLogger(target_name)
-                    # 子 logger 默认继承父 logger 的级别和 handler，无需额外配置
-                    # 但如果需要单独控制级别，可以在此设置：
-                    # logger.setLevel(logging.DEBUG)
-                    self._loggers[target_name] = logger
-
-                return self._loggers[target_name]
-
-            def _cleanup_old_logs(self):
-                max_num = self._settings["maxLogNum"] if self._settings is not None else 50
-                if not os.path.exists(self.log_dir):
-                    return
-                files = [f for f in os.listdir(self.log_dir) if f.endswith('.log') and f != 'latest.log']
-                files.sort()
-                while len(files) > max_num:
-                    oldest = files.pop(0)
-                    try:
-                        os.remove(os.path.join(self.log_dir, oldest))
-                        # 清理日志时使用主 logger 记录
-                        self._loggers[self.base_logger_name].info(
-                            t(self._t("core.log.info.cleanOldLogs",
-                                      "cleaned old log: $1"), oldest))
-                    except Exception as e:
-                        pass
-
-            # 修改日志方法，增加 name 参数，默认为 None (即 Main)
-            def debug(self, msg, name=None):
-                self._get_logger(name).debug(msg)
-
-            def info(self, msg, name=None):
-                self._get_logger(name).info(msg)
-
-            def warning(self, msg, name=None):
-                self._get_logger(name).warning(msg)
-
-            def error(self, msg, name=None, exc_info=False):
-                self._get_logger(name).error(msg, exc_info=exc_info)
-
-            def critical(self, msg, name=None):
-                self._get_logger(name).critical(msg)
-
-        class Langer():
-            def __init__(self, parent=None, root=None):
-                self.parent = parent
-                self.root = root
-
-                # 确定最终使用的语言
-                final_lang = self.root.settings["language"]
-
-                # 1. 检查配置的语言是否可用
-                if final_lang not in self.get_langs():
-                    if final_lang is not None:
-                        self.root.logger.warning(f"Language '{final_lang}' not found, using system display language: " + str(self.root.winreg.display_language()))
-
-                    # 2. 尝试使用系统语言
-                    sys_lang = self.root.winreg.display_language()
-                    if sys_lang and sys_lang in self.get_langs():
-                        final_lang = sys_lang
-                    else:
-                        # 3.  fallback 到 en-US
-                        if sys_lang:
-                            self.root.logger.warning(f"System display language '{sys_lang}' not found, using: en-US")
-                        else:
-                            self.root.logger.warning("System display language detection failed, using: en-US")
-                        final_lang = "en-US"
-
-                    # 更新设置中的语言为最终确定的语言
-                    self.root.settings["language"] = final_lang
-                    self.root.saveSettings()
-
-                self.current_lang = final_lang
-                self.default_lang = "en-US"  # 定义默认回退语言
-
-                self.load(self.current_lang)
-
-            def load(self, lang):
-                """加载语言文件并自动刷新所有支持多语言的控件"""
-                lang_path = getPath(f"src/lang/{lang}.json")
-                default_lang_path = getPath(f"src/lang/{self.default_lang}.json")
-
-                try:
-                    with open(lang_path, "r", encoding="utf-8") as f:
-                        self.langs = json.load(f)
-                    # 插件语言包（<插件>/langs/<lang>.json）覆盖内置同名键 ——
-                    # 插件想改哪句文案，直接在自己的语言包里写那个键即可。
-                    from src.utils.pluginLoader import plugin_langs
-                    self.langs.update(plugin_langs(lang))
-                    self.parent.settings["language"] = lang
-                except Exception as e:
-                    self.root.logger.error(f"Failed to load language file {lang_path}: {e}")
-                    self.langs = {}
-
-                # 预加载默认语言以便快速回退，避免每次get都读取文件
-                try:
-                    if lang != self.default_lang:
-                        with open(default_lang_path, "r", encoding="utf-8") as f:
-                            self.default_langs = json.load(f)
-                    else:
-                        self.default_langs = self.langs
-                except Exception as e:
-                    self.root.logger.warning(f"Failed to load default language file {default_lang_path}: {e}")
-                    self.default_langs = {}
-
-                # 广播语言变化：各控件的 langing 已自行接在总线上，
-                # 延到事件循环里统一刷新，避免阻塞本次语言文件的加载
-                QTimer.singleShot(0, bus.set_lang)
-                self.root.logger.info(self.get("core.init.load"))
-
-            def get(self, key):
-                """
-                获取翻译文本，支持三级回退：
-                1. 当前语言 (zh-CN)
-                2. 默认语言 (en-US)
-                3. 原键名
-
-                键带命名空间：内置一律 core.*，插件用 <插件id>.* —— 这样插件
-                语言包里的某条键能精确对上要盖的内置文案，而不是靠猜。
-                另外认一次没有前缀的老键：迁移期漏改的地方会去掉 core. 再找，
-                不至于把键名直接显示给用户。
-                """
-                candidates = (key, key[5:] if key.startswith("core.") else "core." + key)
-                for k in candidates:
-                    if k in self.langs:
-                        return self.langs[k]
-                    if k in self.default_langs:
-                        return self.default_langs[k]
-                return key
-
-            def get_langs(self):
-                langs = []
-                lang_dir = getPath("src/lang")
-                try:
-                    if not os.path.exists(lang_dir):
-                        return langs
-                    for file in os.listdir(lang_dir):
-                        if file.endswith(".json"):
-                            langs.append(file.replace(".json", ""))
-                except Exception as e:
-                    self.root.logger.error(f"Failed to list language files: {e}")
-                return langs
-
-            def get_langs_info(self):
-                """
-                获取所有语言文件的名称及 init 信息。
-                返回字典：键为语言文件名（不带后缀），值为列表 [init, init.en]
-                """
-                info = {}
-                lang_dir = getPath("src/lang")
-                try:
-                    if not os.path.exists(lang_dir):
-                        return info
-                    for file in os.listdir(lang_dir):
-                        if file.endswith(".json"):
-                            lang_name = file.replace(".json", "")
-                            lang_path = os.path.join(lang_dir, file)
-                            try:
-                                with open(lang_path, "r", encoding="utf-8") as f:
-                                    data = json.load(f)
-                                info[lang_name] = [
-                                    data.get("init", lang_name),
-                                    data.get("init.en", lang_name)
-                                ]
-                            except Exception as e:
-                                self.root.logger.error(f"Failed to read language file {lang_path}: {e}")
-                                info[lang_name] = [lang_name, lang_name]
-                except Exception as e:
-                    self.root.logger.error(f"Failed to list language files: {e}")
-                return info
 
         class Winreg():
             def __init__(self, parent=None, root=None):

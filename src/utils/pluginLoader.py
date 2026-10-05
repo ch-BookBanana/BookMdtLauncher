@@ -89,11 +89,13 @@ from dataclasses import dataclass, field
 from .path_utils import getPath
 
 __all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all", "load_one",
-           "unload", "loaded", "state", "ensure_dirs",
-           "plugin_langs", "PLUGIN_DIR", "PLUGIN_CACHE", "MANIFEST"]
+           "unload", "loaded", "state", "enable", "disable", "disabled_ids",
+           "ensure_dirs", "plugin_langs", "PLUGIN_DIR", "PLUGIN_CACHE", "MANIFEST"]
 
 PLUGIN_DIR = "BML/plugins"
 PLUGIN_CACHE = "BML/.tmp/plugins"     # zip 插件的解压落点（跟其他临时文件一个待遇）
+# 上次加载失败、已标注停用的插件 id 列表（存在设置里，要活过一次启动）
+DISABLED_KEY = "disabledPlugins"
 MANIFEST = "plugin.json"
 
 # 插件不得触达的顶层模块名（BMLCore 是唯一的合法入口）
@@ -121,6 +123,7 @@ class PluginInfo:
     dependencies: tuple = ()         # 依赖的插件 id（清单里的 dependencies）
 
     source: str = ""                # 来自目录还是 zip 文件（界面显示/排查用）
+    disabled: bool = False           # 被标注停用（上次加载失败，见 disabled_ids）
     instance: object = None          # 加载成功后的 Plugin 实例
     error: str = ""                  # 非空 = 加载失败（界面据此标红）
     reported: bool = field(default=False, repr=False)   # 失败日志是否已打过
@@ -622,6 +625,69 @@ def _expose_api():
     return BMLCore
 
 
+def disabled_ids():
+    """被标注停用的插件 id（上次加载失败的）。
+
+    存在 settings["disabledPlugins"] 里 —— 它得活过一次启动，
+    否则「标注禁用」就没意义：下次照样一头撞上去。
+    """
+    try:
+        from .events import events
+        settings = events.settings
+    except Exception:
+        return []
+    ids = settings.get(DISABLED_KEY) if settings is not None else None
+    return list(ids) if isinstance(ids, list) else []
+
+
+def _write_disabled(ids):
+    """写停用名单并**立刻**落盘。
+
+    这里原先 `except Exception: return` 静默吞掉了失败 —— 结果是一个 ImportError
+    让「标注了禁用」根本没写进文件，下次启动照样一头撞上去，而且一点动静都没有。
+    现在：拿不到宿主（测试环境）就安静返回；写不进设置/落不了盘都要吭声。
+    """
+    from .events import events
+
+    try:
+        settings = events.settings
+    except Exception:
+        return False                    # 没 bind 宿主：没什么可写的
+    try:
+        settings[DISABLED_KEY] = list(ids)
+    except Exception:
+        events.logger.error("写停用名单失败：\n" + traceback.format_exc(limit=4),
+                            name="Plugin")
+        return False
+    try:
+        events.saveSettings()           # 别等退出：下次启动要靠它
+    except Exception as e:
+        events.logger.warning(f"停用名单没能立刻落盘（退出时还会整体存一次）：{e}",
+                              name="Plugin")
+    return True
+
+
+def enable(pid):
+    """把某个插件从停用名单里去掉（用户说「我修好了」）。返回是否真的去掉了。"""
+    ids = disabled_ids()
+    if pid not in ids:
+        return False
+    ids.remove(pid)
+    _write_disabled(ids)
+    _notify_changed()
+    return True
+
+
+def disable(pid, why=""):
+    """把某个插件标进停用名单并存盘，返回是否新标上。"""
+    ids = disabled_ids()
+    if pid in ids:
+        return False
+    ids.append(pid)
+    _write_disabled(ids)
+    return True
+
+
 def state():
     """三张表的快照（副本）—— 排查「谁还在加载中 / 谁没轮到」时用。"""
     return {k: list(v) for k, v in _STATE.items()}
@@ -632,23 +698,53 @@ def _loading_ids():
     return [i.id for i in _STATE["loading"]]
 
 
-def load_all(base=None):
+def load_all(base=None, *, retry_disabled=False):
     """发现并加载全部插件（含依赖），返回清单列表（含失败项）。
 
     必须是「逐个隔离」：一个插件坏掉只写进它自己的 error，
     绝不向外抛 —— 宿主启动流程整个包在一个大 try 里，抛出去就是启动失败弹窗。
     日志格式见模块说明（[id]开始加载 / 加载完成 / 加载失败:\n<traceback>）。
+
+    上次加载失败被标注停用的（settings["disabledPlugins"]）默认**跳过** ——
+    不跳过的话每次启动都要重演一遍同样的失败与回滚。用户改好了想重试就传
+    retry_disabled=True（宿主的重载动作会这么调），那时名单先清掉。
     """
+    from .events import events
+
+    # 先把自己上一轮加载的卸掉 —— load_all 于是可以反复调（「重载插件」就是这么
+    # 用的）。不卸的话第二次会撞「已存在条目」，而且三张表会和正表对不上。
+    for old in list(_STATE["loaded"]):
+        unload(old)
+
     _expose_api()
     infos = discover(base)
     by_id = {i.id: i for i in infos}
+    if retry_disabled:
+        # 用户说「我修好了」：先把名单清掉再试；再失败会重新标上
+        _write_disabled([])
+        off = set()
+    else:
+        off = set(disabled_ids())
+
     # 未加载表：全部已发现的；加载中/已加载清空重来
     _STATE["pending"] = list(infos)
     _STATE["loading"] = []
     _STATE["loaded"] = []
 
     for info in list(_STATE["pending"]):
+        if info.id in off:
+            info.disabled = True
+            info.reported = True        # 别走到「开始加载」，它这轮就没被加载
+            _drop_pending(info)
+            events.logger.info(f"[{info.id}]已停用，跳过（上次加载失败已标注；"
+                               f"修好后用 enable() 或把手动触发一次重载）", name="Plugin")
+            continue
         _load_tree(info, by_id)
+
+    # 加载完也通知一声：谁按注册表建界面（页面 / 托盘 / 样式 / 语言）都得在
+    # **集合稳定之后**收口一次。只在卸载/失败时发是不够的 —— 重载这条路最后
+    # 一次重建会落在卸载阶段（那时注册表是空的），插件的托盘项就这么没了。
+    _notify_changed()
     return infos
 
 
@@ -689,6 +785,12 @@ def _load_tree(info, by_id):
                 ids = _loading_ids()
                 _fail(info, "依赖成环：" + " -> ".join(ids[ids.index(dep_id):] + [dep_id]))
                 return
+            if dep.disabled:
+                # 依赖被停用了：依赖者起不来，把它也标上 —— 不然每次启动都要
+                # 白跑一遍、刷同样的失败。
+                _fail(info, f"依赖已被停用：{dep_id}")
+                disable(info.id, "依赖被停用")
+                return
             if not dep.ok:
                 _load_tree(dep, by_id)
             if not dep.ok:
@@ -718,13 +820,24 @@ def _fail(info, why):
 
 
 def _report_fail(info):
-    """报一次加载失败 —— 同一条只报一次（它可能既是某人的依赖、又轮到它自己）。"""
+    """报一次加载失败 —— 同一条只报一次（它可能既是某人的依赖、又轮到它自己）。
+
+    顺手把它标进停用名单：下次启动不再重演同样的失败与回滚
+    （改好了要重试，走 load_all(retry_disabled=True) 或 enable(id)）。
+    """
     from .events import events
 
     if info.reported:
         return
     info.reported = True
     events.logger.error(f"[{info.id}]加载失败:\n{info.error}", name="Plugin")
+    # 「已标注停用」单独打一行、排在失败之后 —— 它是**后果**不是原因，
+    # 所以不追加进 info.error（那会坑到所有比对错误文本的地方）。
+    if disable(info.id, "加载失败"):
+        events.logger.info(
+            f"[{info.id}]已标注停用，下次启动不再加载它"
+            f"（修好后调 pluginLoader.enable(id)，或手动触发一次插件重载）",
+            name="Plugin")
 
 
 def loaded():

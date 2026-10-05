@@ -158,6 +158,7 @@
     "core.wid.pages.setting.launcher.java.add": "Java 추가",
     "core.wid.pages.setting.launcher.java.add.ok": "Java $1 인식됨",
 
+    "core.tray.menu.reloadPlugins": "플러그인 다시 로드",
     "core.tray.menu.close": "닫기",
 
     "core.github.token":       "GitHub\n\n--코어 API--\n남은 횟수:$1\n리셋:$2\n--검색 API--\n남은 횟수:$3\n리셋:$4",

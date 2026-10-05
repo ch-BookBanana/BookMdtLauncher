@@ -158,6 +158,7 @@
     "core.wid.pages.setting.launcher.java.add": "Javaを追加",
     "core.wid.pages.setting.launcher.java.add.ok": "Java $1 を認識しました",
 
+    "core.tray.menu.reloadPlugins": "プラグインを再読み込み",
     "core.tray.menu.close": "閉じる",
 
     "core.github.token":       "GitHub\n\n--コアAPI--\n残り回数:$1\nリセット:$2\n--検索API--\n残り回数:$3\nリセット:$4",
