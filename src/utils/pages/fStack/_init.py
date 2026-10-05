@@ -19,6 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
+from ...events import events
 from ...bus import bus
 from ...utils import change_color
 from ...resources import (NAV_BACK, TBT_CLOSE)
@@ -155,7 +156,7 @@ class FloatingStack(QWidget):
                 self.setAttribute(Qt.WA_StyledBackground, False)
                 self.setProperty("wid","tbtn")
                 self.langing()
-                self.lighting(self.root.settings["theme"])
+                self.lighting(events.settings["theme"])
                 bus.bind(self)
                 if callback is not None:
                     # clicked 自带 checked(bool) 参数，必须丢弃：
@@ -168,7 +169,7 @@ class FloatingStack(QWidget):
                 self.setIcon(QIcon(logo.pixmap(48,48)))
 
             def langing(self):
-                self.setToolTip(self.root.langer.get(self.tip_key_))
+                self.setToolTip(events.lang.get(self.tip_key_))
 
     class Main(QStackedWidget):
         def __init__(self,parent=None,root=None):

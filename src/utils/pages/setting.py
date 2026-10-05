@@ -22,6 +22,7 @@ from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QHBoxLayout, QLabel,
                                QPushButton, QStackedWidget, QVBoxLayout)
 
+from ..events import events
 from ..javaManager import javaManager
 
 from ..options.items import Bool, Combo
@@ -103,8 +104,8 @@ class Setting(Page):
 
             def langing(self):
                 if self.text_ is not None:
-                    self.text.setText(self.root.langer.get(self.text_))
-                    self.setToolTip(self.root.langer.get(self.text_))
+                    self.text.setText(events.lang.get(self.text_))
+                    self.setToolTip(events.lang.get(self.text_))
 
             def lighting(self, light: bool):
                 if self.icon_ is not None:
@@ -120,7 +121,7 @@ class Setting(Page):
                         )
                         self.icon.setPixmap(smooth_pixmap)
                     else:
-                        self.root.logger.warning(f"Failed to load pixmap for {self.icon_}")
+                        events.logger.warning(f"Failed to load pixmap for {self.icon_}")
 
 
             def setText(self, _text):
@@ -129,7 +130,7 @@ class Setting(Page):
 
             def setIcon(self, _icon):
                 self.icon_ = _icon
-                self.lighting(self.root.settings["theme"])
+                self.lighting(events.settings["theme"])
     
     class Main(Mainw):
         def __init__(self, parent=None, root=None):
@@ -210,7 +211,7 @@ class Setting(Page):
                 self.langing()
 
             def langing(self):
-                self._title.setText(self.root.langer.get(self.text))
+                self._title.setText(events.lang.get(self.text))
             
 
             def add(self, wid, spacing=0):
@@ -258,19 +259,19 @@ class Setting(Page):
                     setattr(self, e.attr, wid)
 
                 # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
-                self._t1_theme.btn.setChecked(self.root.settings["theme"])
-                self._t1_theme.push.connect(self.root.setTheme)
+                self._t1_theme.btn.setChecked(events.settings["theme"])
+                self._t1_theme.push.connect(events.setTheme)
 
                 def _t1_lang_showEvent(self,combo):
-                    items = self.root.langer.get_langs_info()
+                    items = events.lang.get_langs_info()
                     combo.clear()
                     for lang_name, lang_info in items.items():
                         combo.addItem(f"{lang_info[0]}",lang_name)
                         combo.setItemData(combo.count()-1,lang_info[1], Qt.ToolTipRole)
-                    combo.setCurrentIndex(combo.findData(self.root.settings["language"]))
+                    combo.setCurrentIndex(combo.findData(events.settings["language"]))
                 _t1_lang_showEvent(self,self._t1_lang.combo)
                 self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
-                self._t1_lang.combo.activated.connect(lambda: self.root.langer.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == self.root.settings["language"] else None)
+                self._t1_lang.combo.activated.connect(lambda: events.lang.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == events.settings["language"] else None)
 
                 # 添加 Java：挂在选择框下面（尺寸跟游戏管理那排按钮一致）
                 # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写
@@ -289,67 +290,67 @@ class Setting(Page):
                 self._t3_select_hasjava = True
                 def _t3_select_fill(javas=None):
                     if javas is None:
-                        javas = self.root.settings["javaPaths"]
+                        javas = events.settings["javaPaths"]
                     else:
                         javas = list(javas)
-                    self.root.settings["javaPaths"] = javas
+                    events.settings["javaPaths"] = javas
                     # 失效路径不进下拉框（设置里那份保持原样：硬盘插回来还能用）
                     show = [java for java in javas if javaManager.isJava(java[0])]
                     combo = self._t3_select.combo
                     combo.clear()
                     if not show:
                         self._t3_select_hasjava = False
-                        combo.addItem(self.root.langer.get("wid.pages.setting.launcher.java.select.none"),"nojava")
+                        combo.addItem(events.lang.get("wid.pages.setting.launcher.java.select.none"),"nojava")
                         return
                     self._t3_select_hasjava = True
-                    combo.addItem(self.root.langer.get("wid.pages.setting.launcher.java.select.auto"),"auto")
+                    combo.addItem(events.lang.get("wid.pages.setting.launcher.java.select.auto"),"auto")
                     for java in show:
                         combo.addItem(f"v{java[1]}",java[0])
                         combo.setItemData(combo.count()-1,java[0],Qt.ToolTipRole)
                     select = "auto"
-                    chosen = self.root.settings["javaPath"]
+                    chosen = events.settings["javaPath"]
                     for java in show:
                         # 记法可能变过（绝对 ↔ 相对），比真身而不是比字符串
                         if chosen and javaManager.sameJava(chosen, java[0]):
                             select = java[0]
-                    self.root.settings["javaPath"] = select if select != "auto" else None
+                    events.settings["javaPath"] = select if select != "auto" else None
                     combo.setCurrentIndex(combo.findData(select))
 
                 QTimer.singleShot(0,lambda: _t3_select_fill())
                 self._t3_select.combo.popupAboutToShow.connect(lambda:_t3_select_fill())
-                self._t3_select.combo.activated.connect(lambda:(self.root.settings.__setitem__("javaPath",self._t3_select.combo.currentData() if (self._t3_select.combo.currentData() != "auto") else None)))
+                self._t3_select.combo.activated.connect(lambda:(events.settings.__setitem__("javaPath",self._t3_select.combo.currentData() if (self._t3_select.combo.currentData() != "auto") else None)))
                 javaManager.changed.connect(lambda javas: _t3_select_fill(javas))
 
                 def _t3_add_java(java):
                     # 记进候选表（javaManager 与两个页面的下拉框都读这一份）：先剔掉指向同一个
                     # java.exe 的旧条目（写法不同也算同一个），再按路径排序
                     java = javaManager.resolve(java)
-                    javas = [item for item in list(self.root.settings["javaPaths"])
+                    javas = [item for item in list(events.settings["javaPaths"])
                              if item and not javaManager.sameJava(item[0], java)]
                     javas.append([javaManager.record(java),javaManager.getJavaVersion(java)])
                     javas.sort(key=lambda item: item[0].lower())
-                    self.root.settings["javaPaths"] = javas
-                    self.root.saveSettings()
+                    events.settings["javaPaths"] = javas
+                    events.saveSettings()
                     _t3_select_fill()
 
                 def _t3_add_clicked():
                     # 先选目录：认得出 <目录>/bin/java.exe 才往下走，认不出弹浮层说明原因
-                    folder = QFileDialog.getExistingDirectory(self,self.root.langer.get("wid.pages.setting.launcher.java.add"))
+                    folder = QFileDialog.getExistingDirectory(self,events.lang.get("wid.pages.setting.launcher.java.add"))
                     if not folder:
                         return
                     java = os.path.join(folder,"bin","java.exe")
                     error = None
                     if not javaManager.isJava(java):
-                        error = t(self.root.langer.get("log.warning.javaAddInvalid"),folder)
-                        self.root.logger.warning(error,name="Java")
-                    self.root.signals.emit(
+                        error = t(events.lang.get("log.warning.javaAddInvalid"),folder)
+                        events.logger.warning(error,name="Java")
+                    events.emit(
                         "overlayRequested",
                         self.AddJava(self.root,folder,_t3_add_java,error))
 
                 self._t3_add.clicked.connect(lambda: _t3_add_clicked())
 
                 self.langing()
-                self.lighting(bool(self.root.settings["theme"]))
+                self.lighting(bool(events.settings["theme"]))
 
             class AddJava(QWidget):
                 """添加 Java 的叠加浮层：目录已经在外面选好了，这里只交代「认出了哪个 Java」。
@@ -371,7 +372,7 @@ class Setting(Page):
                     self.setProperty("wid", "color2")
                     self.init_wid()
                     self.langing()
-                    self.lighting(bool(self.root.settings.get("theme")))
+                    self.lighting(bool(events.settings.get("theme")))
                     bus.bind(self)
 
                 def init_wid(self):
@@ -446,17 +447,17 @@ class Setting(Page):
 
                 # ---------- 文案 / 主题 ----------
                 def langing(self):
-                    self.title.setText(self.root.langer.get("wid.pages.setting.launcher.java.add"))
+                    self.title.setText(events.lang.get("wid.pages.setting.launcher.java.add"))
                     self.dir.setText(self.folder)
-                    self.btn_ok.setText(self.root.langer.get("text.yes"))
-                    self.btn_close.setToolTip(self.root.langer.get("wid.top.close"))
+                    self.btn_ok.setText(events.lang.get("text.yes"))
+                    self.btn_close.setToolTip(events.lang.get("wid.top.close"))
                     if self.error is not None:
                         # 错误态：目录不可用，提示行只说原因
                         self.msg.setStyleSheet("font-size: 13px; color: #e06c6c;")
                         self.msg.setText(self.error)
                         return
                     self.msg.setStyleSheet("font-size: 13px; color: #f0b731;")
-                    self.msg.setText(t(self.root.langer.get("wid.pages.setting.launcher.java.add.ok"),
+                    self.msg.setText(t(events.lang.get("wid.pages.setting.launcher.java.add.ok"),
                                        javaManager.getJavaVersion(self.java)))
 
                 def lighting(self, light: bool):
@@ -472,7 +473,7 @@ class Setting(Page):
                 def _close(self):
                     """出叠并销毁；防手滑连点两次 × 时对象已没了。"""
                     try:
-                        self.root.signals.emit("overlayClosed", self, True)
+                        events.emit("overlayClosed", self, True)
                     except RuntimeError:
                         pass
 
@@ -498,11 +499,11 @@ class Setting(Page):
             def langing(self):
                 super().langing()
                 try:
-                    self._t3_add.setText(self.root.langer.get("wid.pages.setting.launcher.java.add"))
+                    self._t3_add.setText(events.lang.get("wid.pages.setting.launcher.java.add"))
                     t3SelecIndex1 = self._t3_select.combo.findData("nojava")
                     t3SelecIndex2 = self._t3_select.combo.findData("auto")
-                    if t3SelecIndex1 >= 0:self._t3_select.combo.setItemText(t3SelecIndex1,self.root.langer.get("wid.pages.setting.launcher.java.select.none"))
-                    if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,self.root.langer.get("wid.pages.setting.launcher.java.select.auto"))
+                    if t3SelecIndex1 >= 0:self._t3_select.combo.setItemText(t3SelecIndex1,events.lang.get("wid.pages.setting.launcher.java.select.none"))
+                    if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,events.lang.get("wid.pages.setting.launcher.java.select.auto"))
                 except : pass
 
 

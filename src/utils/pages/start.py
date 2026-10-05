@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBut
 
 from src.utils.path_utils import getPath
 
+from ..events import events
 from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
@@ -131,15 +132,15 @@ class Start(Page):
         super().__init__(parent, root, text, logo, btn)
         # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtManager 事件（替代 1 秒轮询）
         self.left.refresh()
-        self.root.mdtManager.on_game_changed.connect(self.left._on_game_changed)
-        self.root.launcher.game_launched.connect(self._on_game_launched)
-        self.root.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
-        self.root.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
-        self.root.launcher.lifecycle_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
-        self.root.launcher.lifecycle_finished.connect(lambda: self.left.main.setCurrentIndex(0))
+        events.mdtManager.on_game_changed.connect(self.left._on_game_changed)
+        events.launcher.game_launched.connect(self._on_game_launched)
+        events.launcher.game_started.connect(lambda: self.main.stack.setCurrentIndex(4))
+        events.launcher.game_started.connect(lambda: self.left.main.setCurrentIndex(4))
+        events.launcher.lifecycle_finished.connect(lambda: self.main.stack.setCurrentIndex(0))
+        events.launcher.lifecycle_finished.connect(lambda: self.left.main.setCurrentIndex(0))
         # 启动阶段（校验/Java 流程）与游戏进程输出：写入日志文件 + 主区控制台
-        self.root.launcher.log.connect(self._on_launcher_log)
-        self.root.launcher.game_log.connect(self._on_game_log)
+        events.launcher.log.connect(self._on_launcher_log)
+        events.launcher.game_log.connect(self._on_game_log)
 
     def _on_game_launched(self):
         """每次启动游戏：先清空上一次的控制台日志，再切到「启动中」页。
@@ -154,9 +155,9 @@ class Start(Page):
         """启动阶段消息（参数校验、Java 流程）：写入日志文件 + 主区控制台。"""
         text = dic["text"]
         if dic["type"] == "error":
-            self.root.logger.error("[launcher]" + text)
+            events.logger.error("[launcher]" + text)
         else:
-            self.root.logger.info("[launcher]" + text)
+            events.logger.info("[launcher]" + text)
         self.main.append_log("[L] ", text, "launcher")
 
     def _on_game_log(self, dic):
@@ -164,18 +165,18 @@ class Start(Page):
         text = dic["text"]
         level, role, prefix = _parse_log_line(text, dic["type"])
         if level == "error":
-            self.root.logger.error("[game]" + text, name="Game")
+            events.logger.error("[game]" + text, name="Game")
         elif level == "warning":
-            self.root.logger.warning("[game]" + text, name="Game")
+            events.logger.warning("[game]" + text, name="Game")
         else:
-            self.root.logger.info("[game]" + text, name="Game")
+            events.logger.info("[game]" + text, name="Game")
         self.main.append_log(prefix, text[len(prefix):], role)
 
     def changeGame(self, game=None):
-        if game == self.root.settings["defaultGame"]: return
-        mdts = self.root.mdtManager.getMdts()
-        self.root.settings["defaultGame"] = game if game in mdts else (mdts[0] if mdts else None)
-        self.root.signals.emit("start_gameChanged", game)
+        if game == events.settings["defaultGame"]: return
+        mdts = events.mdtManager.getMdts()
+        events.settings["defaultGame"] = game if game in mdts else (mdts[0] if mdts else None)
+        events.emit("start_gameChanged", game)
         self.left.refresh()
 
     def java_show_progress(self, status, pct=None):
@@ -264,8 +265,8 @@ class Start(Page):
 
             替代旧 changeTimer：不再 1 秒轮询，由 mdtManager 事件驱动触发；
             直接调用 sets 更新 UI（主线程安全，无需 QThTimer 中转）。"""
-            default_game = self.root.mdtManager.ensure_default_game()
-            game_msg = self.root.mdtManager.getMdtMsg(default_game) if default_game else None
+            default_game = events.mdtManager.ensure_default_game()
+            game_msg = events.mdtManager.getMdtMsg(default_game) if default_game else None
             have_game = default_game is not None
             # 左栏底部按钮随「有无游戏」切换：无游戏时改为跳转下载页
             self.main.set_have_game(have_game)
@@ -275,7 +276,7 @@ class Start(Page):
                 if default_game is None:
                     self.game["name"] = self.game["vers"] = self.game["icon_key"] = None
                     # 图标需显式清空，否则会残留上一份游戏的图标
-                    self.sets((True,QPixmap()),(True,self.root.langer.get("wid.pages.start.gameNotfound")),(True,self.root.langer.get("wid.pages.start.gameNotfound2")))
+                    self.sets((True,QPixmap()),(True,events.lang.get("wid.pages.start.gameNotfound")),(True,events.lang.get("wid.pages.start.gameNotfound2")))
                 else:
                     self.game["name"] = default_game
                     self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}" if game_msg else None
@@ -398,7 +399,7 @@ class Start(Page):
 
                 def langing(self):
                     btn = "wid.pages.start.gamebtn" if self.have_game else "wid.pages.start.downloadbtn"
-                    self.action.setText(self.root.langer.get(btn))
+                    self.action.setText(events.lang.get(btn))
 
             class Mod(Pages):
                 def __init__(self, parent=None, root=None):
@@ -421,7 +422,7 @@ class Start(Page):
                     self.cancle.clicked.connect(lambda: _page().show_main("start"))
 
                 def langing(self):
-                    self.cancle.setText(self.root.langer.get("text.return"))
+                    self.cancle.setText(events.lang.get("text.return"))
 
             class World(Pages):
                 def __init__(self, parent=None, root=None):
@@ -444,7 +445,7 @@ class Start(Page):
                     self.cancle.clicked.connect(lambda: _page().show_main("start"))
 
                 def langing(self):
-                    self.cancle.setText(self.root.langer.get("text.return"))
+                    self.cancle.setText(events.lang.get("text.return"))
 
             class Launch(Pages):
                 """左 stacked 的启动/Java 下载状态页：只允许有一个 label 显示状态。"""
@@ -467,7 +468,7 @@ class Start(Page):
                     self.layout.addWidget(self.label)
 
                 def langing(self):
-                    self.label.setText(self.root.langer.get("wid.pages.start.java.idle"))
+                    self.label.setText(events.lang.get("wid.pages.start.java.idle"))
 
                 def setStatus(self, status, pct=None):
                     """唯一状态 label：resume/downloading/extracting/done/error/idle。
@@ -475,7 +476,7 @@ class Start(Page):
                     pct 不为 None 时追加百分比（如 正在下载Java... 45%）。
                     """
                     key = "wid.pages.start.java." + status
-                    text = self.root.langer.get(key)
+                    text = events.lang.get(key)
                     if pct is not None:
                         text = t(text, pct)
                     else:
@@ -506,13 +507,13 @@ class Start(Page):
                 def _on_click(self):
                     """强杀游戏进程；成功则回主界面交给生命周期结束信号，
                     失败（进程已不在）自己回，避免卡在运行页。"""
-                    if self.root.launcher.kill_game():
+                    if events.launcher.kill_game():
                         return
                     self.parent.setCurrentIndex(0)
                     _page().show_main("start")
 
                 def langing(self):
-                    self.stop.setText(self.root.langer.get("wid.pages.start.suspend.stop"))
+                    self.stop.setText(events.lang.get("wid.pages.start.suspend.stop"))
 
     class Main(Mainw):
         LOG_MAX_LINES = 2000   # 控制台保留的最大行数，超出后丢弃最旧的行
@@ -641,9 +642,9 @@ class Start(Page):
                 self.layout.addWidget(self.mod,2,1,1,1)
 
                 self.start.clicked.connect(self.on_start_clicked)
-                self.settings.clicked.connect(lambda: self.root.signals.emit(
+                self.settings.clicked.connect(lambda: events.emit(
                     "stackRequested",
-                    GameManage(self.root.settings["defaultGame"], self, self.root)))
+                    GameManage(events.settings["defaultGame"], self, self.root)))
 
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""
@@ -666,8 +667,8 @@ class Start(Page):
                 launcher.run(game)
 
             def langing(self):
-                self.start.setText(self.root.langer.get("wid.pages.start.startbtn"))
-                self.mod.setText(self.root.langer.get("wid.pages.start.modbtn"))
+                self.start.setText(events.lang.get("wid.pages.start.startbtn"))
+                self.mod.setText(events.lang.get("wid.pages.start.modbtn"))
                 
 
             class Btn(QPushButton):
@@ -706,7 +707,7 @@ class Start(Page):
                 self.rebuild()
                 self.groups["<:|default|:>"].show_items()
                 # 订阅 mdtManager 事件，按类型精确更新对应条目
-                self.root.mdtManager.on_game_changed.connect(self._on_game_changed)
+                events.mdtManager.on_game_changed.connect(self._on_game_changed)
 
             def init_wid(self):
                 self.layout = QVBoxLayout(self)
@@ -726,7 +727,7 @@ class Start(Page):
                     group.release_all()
                     group.deleteLater()
                 self.groups = {}
-                for name, games in self.root.settings["gameList"].items():
+                for name, games in events.settings["gameList"].items():
                     self.groups[name] = self.Group(self, self.root, name, games)
 
             def _on_game_changed(self, data):
@@ -824,7 +825,7 @@ class Start(Page):
                     self.body_l.addWidget(self.line)
 
                 def langing(self):
-                    self.title.setText(self.name if self.name != "<:|default|:>" else self.root.langer.get("text.default"))
+                    self.title.setText(self.name if self.name != "<:|default|:>" else events.lang.get("text.default"))
 
                 def lighting(self,light):
                     if self.light != light:
@@ -937,7 +938,7 @@ class Start(Page):
 
                     def showEvent(self,event):
                         super().showEvent(event)
-                        vers = self.root.mdtManager.getMdtMsg(self.game)
+                        vers = events.mdtManager.getMdtMsg(self.game)
                         if vers:
                             self.acquire()
                             self.title.setText(self.game)

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
+from ...events import events
 from ...QDownloader import QDownloader
 from ...mdtManager import mdtManager
 from ...QThTimer import QThTimer
@@ -37,6 +38,13 @@ from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
 from ...registry import Box, registry
+
+
+# 进行中的游戏下载任务。QDownloader 实例必须被强引用着：一旦没人引用，出作用域
+# 就被回收，下载会静默中断（不报错、也不会有 finished）。
+# 这份引用原先挂在 root 上（root._mdt_downloads —— 一个没有声明处、靠
+# hasattr 现建现用的动态属性），现在收回本模块：它本来就只归下载流程用。
+_ACTIVE_DOWNLOADS = []
 
 
 # ─────────────── 下载列表项的操作按钮（core.download.item.actions）───────────────
@@ -184,8 +192,8 @@ class Game(QWidget):
 
             def langing(self):
                 if self.text_ is not None:
-                    self.text.setText(self.root.langer.get(self.text_))
-                    self.setToolTip(self.root.langer.get(self.text_))
+                    self.text.setText(events.lang.get(self.text_))
+                    self.setToolTip(events.lang.get(self.text_))
 
             def lighting(self, light: bool):
                 if self.icon_ is not None:
@@ -201,7 +209,7 @@ class Game(QWidget):
                         )
                         self.icon.setPixmap(smooth_pixmap)
                     else:
-                        self.root.logger.warning(f"Failed to load pixmap for {self.icon_}")
+                        events.logger.warning(f"Failed to load pixmap for {self.icon_}")
 
             def setText(self, _text):
                 self.text_ = _text
@@ -209,7 +217,7 @@ class Game(QWidget):
 
             def setIcon(self, _icon):
                 self.icon_ = _icon
-                self.lighting(self.root.settings["theme"])
+                self.lighting(events.settings["theme"])
 
     class Main(QWidget):
         def __init__(self, parent=None, root=None):
@@ -327,7 +335,7 @@ class Game(QWidget):
                     btn.setDisabled(disabled)
 
             def add_action_btn(self, text_key, callback):
-                btn = QPushButton(self.root.langer.get(text_key))
+                btn = QPushButton(events.lang.get(text_key))
                 btn.setFixedSize(100, 30)
                 btn.setProperty("wid", "btn")
                 btn.setAttribute(Qt.WA_StyledBackground, False)
@@ -340,7 +348,7 @@ class Game(QWidget):
             def langing(self):
                 for btn in self._action_btns:
                     if hasattr(btn, '_text_key'):
-                        btn.setText(self.root.langer.get(btn._text_key))
+                        btn.setText(events.lang.get(btn._text_key))
 
             def _clear_scroll_stretch(self):
                 i = 0
@@ -438,7 +446,7 @@ class Game(QWidget):
                 return versions
 
             def _fetch_and_merge(self, pages, per_page, cache):
-                api = self.root.githubAPI
+                api = events.githubAPI
                 releases_all = []
                 max_workers = min(len(pages) + 1, 8)
 
@@ -452,7 +460,7 @@ class Game(QWidget):
                     # intro 挂后台，抓完由 introReady 信号回主线程补写缓存，不阻塞本次搜索
                     if self.introUrl:
                         pool.submit(
-                            self.root.githubAPI._session.get, self.introUrl,
+                            events.githubAPI._session.get, self.introUrl,
                             timeout=self.introTimeout,
                         ).add_done_callback(self._on_intro_fetched)
 
@@ -462,9 +470,9 @@ class Game(QWidget):
                             if ok and isinstance(data, list):
                                 releases_all.extend(data)
                             else:
-                                self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
+                                events.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
                         except Exception as e:
-                            self.root.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
+                            events.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
                 finally:
                     pool.shutdown(wait=False, cancel_futures=False)
 
@@ -473,7 +481,7 @@ class Game(QWidget):
                     try:
                         d = self.classify(r)
                     except Exception as e:
-                        self.root.logger.error(f"[{type(self).__name__}.classify] {e}")
+                        events.logger.error(f"[{type(self).__name__}.classify] {e}")
                         continue
                     category = self._normalize_class(d.get('class'))
                     if category is None or d.get('name') is None:
@@ -545,13 +553,13 @@ class Game(QWidget):
                         self.data = result
                         self._on_data_changed()
                     elif isinstance(result, Exception):
-                        self.root.logger.error(f"[{type(self).__name__}.search] {result}")
+                        events.logger.error(f"[{type(self).__name__}.search] {result}")
 
                 self._search(job, on_done)
 
             def searchAll(self):
                 def job(event):
-                    api = self.root.githubAPI
+                    api = events.githubAPI
                     cache = self._read_cache()
                     per_page = 100
                     pages = [1]
@@ -580,7 +588,7 @@ class Game(QWidget):
                         self.data = result
                         self._on_data_changed()
                     elif isinstance(result, Exception):
-                        self.root.logger.error(f"[{type(self).__name__}.searchAll] {result}")
+                        events.logger.error(f"[{type(self).__name__}.searchAll] {result}")
 
                 self._search(job, on_done)
 
@@ -668,7 +676,7 @@ class Game(QWidget):
 
                     self.scroll = self.parent.Scroll(self,self.root)
                     self.contentL.addWidget(self.scroll,0)
-                    self.lighting(self.root.settings["theme"])
+                    self.lighting(events.settings["theme"])
 
                     self.button.clicked.connect(lambda:self.contentW.setVisible(not self.contentW.isVisible()))
                 
@@ -734,7 +742,7 @@ class Game(QWidget):
                     self.empty_label.setAlignment(Qt.AlignCenter)
                     self.empty_label.setProperty("wid", "title")
                     self.empty_label.setStyleSheet("font-size:16px;")
-                    self.empty_label.setText(self.root.langer.get("wid.pages.download.empty"))
+                    self.empty_label.setText(events.lang.get("wid.pages.download.empty"))
                     self.empty_label.hide()
 
                 def setData(self, data: dict, icon_pixmap=None):
@@ -834,7 +842,7 @@ class Game(QWidget):
                             widget.hide()
                             continue
                         widget.set_data(data, getattr(self, 'item_icon_pixmap', None))
-                        widget.lighting(bool(self.root.settings.get("theme")))
+                        widget.lighting(bool(events.settings.get("theme")))
                         widget.check_hover()
                         y = idx * self.item_h
                         widget.setGeometry(0, y, self.scroll.viewport().width(), self.item_h)
@@ -898,7 +906,7 @@ class Game(QWidget):
                             self.langing()
 
                         def langing(self):
-                            self.setToolTip(self.root.langer.get(self._tooltip_key))
+                            self.setToolTip(events.lang.get(self._tooltip_key))
 
                         def lighting(self, light: bool):
                             color = QColor(0, 0, 0) if light else QColor(255, 255, 255)
@@ -912,7 +920,7 @@ class Game(QWidget):
                                 )
                                 self.setIcon(QIcon(smooth_pixmap))
                             else:
-                                self.root.logger.warning(f"Failed to load pixmap for {self._icon_path}")
+                                events.logger.warning(f"Failed to load pixmap for {self._icon_path}")
 
                     def init_wid(self):
                         self.layout = QHBoxLayout(self)
@@ -961,13 +969,13 @@ class Game(QWidget):
                         if url:
                             webbrowser.open(url)
                         else:
-                            self.root.logger.warning("Item has no releaseUrl to open")
+                            events.logger.warning("Item has no releaseUrl to open")
 
                     def set_hover(self, hover):
                         if self._hovering != hover:
                             self._hovering = hover
                             # 悬停时应用高亮背景，移开恢复（内联样式保证 QWidget 子类背景生效）
-                            light = bool(self.root.settings.get("theme"))
+                            light = bool(events.settings.get("theme"))
                             bg = "rgb(229, 228, 228)" if light else "rgb(55, 55, 55)"
                             self.setStyleSheet(
                                 "QWidget#item { background: %s; }" % bg if hover else ""
@@ -1026,7 +1034,7 @@ class Game(QWidget):
                     self.setProperty("wid","color2")
                     self.init_wid()
                     self.langing()
-                    self.lighting(bool(self.root.settings.get("theme")))
+                    self.lighting(bool(events.settings.get("theme")))
                     self._init_name_input()
                     self._start_validation()
                     bus.bind(self)
@@ -1118,8 +1126,8 @@ class Game(QWidget):
                     self.bottom_layout.addWidget(self.btn_ok, 0)
 
                 def langing(self):
-                    self.btn_ok.setText(self.root.langer.get("text.yes"))
-                    self.btn_close.setToolTip(self.root.langer.get("wid.top.close"))
+                    self.btn_ok.setText(events.lang.get("text.yes"))
+                    self.btn_close.setToolTip(events.lang.get("wid.top.close"))
                 
                 def lighting(self, light: bool):
                     # 关闭按钮图标：随主题取色（本页其余控件由全局 qss 控制）
@@ -1132,10 +1140,10 @@ class Game(QWidget):
                     template = getattr(self.parent, "template", None)
                     interface_name = ""
                     if template is not None:
-                        interface_name = self.root.langer.get(getattr(template, "text", "")) or ""
+                        interface_name = events.lang.get(getattr(template, "text", "")) or ""
                     base = interface_name + "-" + (self.data.get("name") or "")
-                    existing = self.root.mdtManager.taken_names()
-                    default = self.root.mdtManager.unique_name(base, existing)
+                    existing = events.mdtManager.taken_names()
+                    default = events.mdtManager.unique_name(base, existing)
                     self.input.setText(default)
                     # 背景提示与默认名称一致：清空后仍能看到原名
                     self.input.setPlaceholderText(default)
@@ -1146,7 +1154,7 @@ class Game(QWidget):
                 def _collect_mdts(self, event):
                     """子线程：收集已占用的游戏名集合（纯文件操作，线程安全）。"""
                     try:
-                        return self.root.mdtManager.taken_names()
+                        return events.mdtManager.taken_names()
                     except Exception as e:
                         return e
 
@@ -1165,7 +1173,7 @@ class Game(QWidget):
 
                 def _close(self):
                     """关闭弹窗：从叠加浮层出叠并销毁（on_close 会停止周期检测）。"""
-                    self.root.signals.emit("overlayClosed", self, True)
+                    events.emit("overlayClosed", self, True)
 
                 def on_close(self):
                     """浮层出叠（或被清空）时同步调用：停止周期检测，防止对已销毁对象回调。"""
@@ -1194,13 +1202,13 @@ class Game(QWidget):
                         state, final, msg = "empty", None, ""
                     else:
                         error = mdtManager.check_name(text)
-                        unique = self.root.mdtManager.unique_name(text, existing)
+                        unique = events.mdtManager.unique_name(text, existing)
                         if error == "dot":
-                            state, final, msg = "dot", None, self.root.langer.get("wid.pages.download.item.name.dot")
+                            state, final, msg = "dot", None, events.lang.get("wid.pages.download.item.name.dot")
                         elif error:
-                            state, final, msg = "illegal", None, self.root.langer.get("wid.pages.download.item.name.illegal")
+                            state, final, msg = "illegal", None, events.lang.get("wid.pages.download.item.name.illegal")
                         elif unique != text:
-                            state, final, msg = "dup", unique, t(self.root.langer.get("wid.pages.download.item.name.willBe"), unique)
+                            state, final, msg = "dup", unique, t(events.lang.get("wid.pages.download.item.name.willBe"), unique)
                         else:
                             state, final, msg = "ok", text, ""
                     self._final_name = final
@@ -1246,13 +1254,13 @@ class Game(QWidget):
                                 break
                     if not url:
                         self.label2.setStyleSheet("font-size: 13px; color: red;")
-                        self.label2.setText(self.root.langer.get("wid.pages.download.item.name.noUrl"))
+                        self.label2.setText(events.lang.get("wid.pages.download.item.name.noUrl"))
                         return
                     target_dir = getPath("BML/.Mindustrys/" + name)
                     try:
                         os.makedirs(target_dir, exist_ok=True)
                     except OSError as e:
-                        self.root.logger.error("[mdt-download] 创建目录失败: %s" % e)
+                        events.logger.error("[mdt-download] 创建目录失败: %s" % e)
                         return
                     dest_path = os.path.join(target_dir, "mdt.jar")
                     _tpl = getattr(self.parent, "template", None)
@@ -1271,22 +1279,20 @@ class Game(QWidget):
                         with open(os.path.join(target_dir, "downloading.json"), "w", encoding="utf-8") as f:
                             json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
                     except OSError as e:
-                        self.root.logger.error("[mdt-download] 写入 downloading.json 失败: %s" % e)
+                        events.logger.error("[mdt-download] 写入 downloading.json 失败: %s" % e)
                         return
                     try:
                         dl = QDownloader(url=url, dest_path=dest_path, num_threads=4, chunk_size_mb=4, title=name)
                     except Exception as e:
-                        self.root.logger.error("[mdt-download] 创建下载任务失败: %s" % e)
+                        events.logger.error("[mdt-download] 创建下载任务失败: %s" % e)
                         return
-                    if not hasattr(self.root, "_mdt_downloads"):
-                        self.root._mdt_downloads = []
-                    self.root._mdt_downloads.append(dl)
+                    _ACTIVE_DOWNLOADS.append(dl)
                     dl.finished.connect(lambda ok, d=dl, n=name: self._on_dl_finished(d, n, ok))
-                    dl.error.connect(lambda err, d=dl: self.root.logger.error("[mdt-download:%s] %s" % (getattr(d, "task_id", "?"), err)))
+                    dl.error.connect(lambda err, d=dl: events.logger.error("[mdt-download:%s] %s" % (getattr(d, "task_id", "?"), err)))
                     dl.start()
-                    self.root.logger.info("[mdt-download] 开始下载 %s: %s" % (name, url))
+                    events.logger.info("[mdt-download] 开始下载 %s: %s" % (name, url))
                     # 关闭弹窗，下载在后台由 QDownloader 自行处理
-                    self.root.signals.emit("overlayClosed", self, True)
+                    events.emit("overlayClosed", self, True)
 
                 def _on_dl_finished(self, dl, name, ok):
                     """下载完成收尾：释放 QDownloader；成功后刷新 BML.json 并删除 downloading.json。"""
@@ -1296,15 +1302,15 @@ class Game(QWidget):
                     except Exception:
                         pass
                     try:
-                        if dl in self.root._mdt_downloads:
-                            self.root._mdt_downloads.remove(dl)
+                        if dl in _ACTIVE_DOWNLOADS:
+                            _ACTIVE_DOWNLOADS.remove(dl)
                     except Exception:
                         pass
                     if not ok:
-                        self.root.logger.error("[mdt-download] %s 下载失败（downloading.json 已保留）" % name)
+                        events.logger.error("[mdt-download] %s 下载失败（downloading.json 已保留）" % name)
                         return
                     try:
-                        self.root.mdtManager._retrieve_mdt_data(name)
+                        events.mdtManager._retrieve_mdt_data(name)
                         dfile = getPath("BML/.Mindustrys/%s/downloading.json" % name)
                         if os.path.isfile(dfile):
                             # 把下载时记录的类图标路径合并进 BML.json
@@ -1324,10 +1330,10 @@ class Game(QWidget):
                             except Exception:
                                 pass
                             os.remove(dfile)
-                        self.root.mdtManager.invalidate_cache()
-                        self.root.logger.info("[mdt-download] %s 下载完成" % name)
+                        events.mdtManager.invalidate_cache()
+                        events.logger.info("[mdt-download] %s 下载完成" % name)
                     except Exception as e:
-                        self.root.logger.error("[mdt-download] %s 收尾失败: %s" % (name, e))
+                        events.logger.error("[mdt-download] %s 收尾失败: %s" % (name, e))
 
             class RepoInfo(QWidget):
                 mdImageReady = Signal(object, object)
@@ -1342,7 +1348,7 @@ class Game(QWidget):
                     self.setAttribute(Qt.WA_StyledBackground, True)
                     self.init_wid()
                     self.langing()
-                    self.lighting(bool(self.root.settings.get("theme")))
+                    self.lighting(bool(events.settings.get("theme")))
                     bus.bind(self)
 
                 def init_wid(self):
@@ -1439,7 +1445,7 @@ class Game(QWidget):
                         return md_to_html(
                             intro_md,
                             base_url=base_url,
-                            session=self.root.githubAPI._session if self.root else None,
+                            session=events.githubAPI._session if self.root else None,
                             cache_dir=getPath("BML/.tmp/mdimg"),
                             on_image=on_image,
                         )
@@ -1523,7 +1529,7 @@ class Game(QWidget):
 
                 def langing(self):
                     time_str = (self.data or {}).get("time") or ""
-                    self.time.setText(t(self.root.langer.get("wid.pages.download.item.repoInfo.publish"), time_str))
+                    self.time.setText(t(events.lang.get("wid.pages.download.item.repoInfo.publish"), time_str))
                     for fi in self.files:
                         fi.langing()
 
@@ -1548,7 +1554,7 @@ class Game(QWidget):
                         self.setAttribute(Qt.WA_StyledBackground, True)
                         self.init_wid()
                         self.langing()
-                        self.lighting(bool(self.root.settings.get("theme")))
+                        self.lighting(bool(events.settings.get("theme")))
                         bus.bind(self)
 
                     def init_wid(self):
@@ -1575,7 +1581,7 @@ class Game(QWidget):
                         self.layout.addWidget(self.btn_download, 0)
 
                     def langing(self):
-                        self.btn_download.setToolTip(self.root.langer.get("wid.pages.download.item.download"))
+                        self.btn_download.setToolTip(events.lang.get("wid.pages.download.item.download"))
 
                     def lighting(self, light):
                         color = QColor(0, 0, 0) if light else QColor(255, 255, 255)
@@ -1713,11 +1719,11 @@ class Game(QWidget):
                     self.betaTipsIcon.setPixmap(change_color(getPath(ACT_TIPS), QColor(255,165,0)).pixmap(QSize(18,18)))
                 except Exception:
                     pass
-                self.betaTipsText.setText(self.root.langer.get("wid.pages.download.mindustryx.betaTips"))
+                self.betaTipsText.setText(events.lang.get("wid.pages.download.mindustryx.betaTips"))
 
             def langing(self):
                 super().langing()
-                self.betaTipsText.setText(self.root.langer.get("wid.pages.download.mindustryx.betaTips"))
+                self.betaTipsText.setText(events.lang.get("wid.pages.download.mindustryx.betaTips"))
 
             def _before_search(self):
                 for w in self.classs.values():
@@ -1738,7 +1744,7 @@ class Game(QWidget):
                         self.data = result
                         self._on_data_changed()
                     elif isinstance(result, Exception):
-                        self.root.logger.error(f"[{type(self).__name__}.search] {result}")
+                        events.logger.error(f"[{type(self).__name__}.search] {result}")
 
                 self._search(job, on_done)
 
@@ -1781,7 +1787,7 @@ class Game(QWidget):
 
                 for i, j in self.data["versions"].items():
                     clss = self.Classs(self, self.root)
-                    display_name = self.root.langer.get(f"wid.pages.download.{i}")
+                    display_name = events.lang.get(f"wid.pages.download.{i}")
                     clss.setData(display_name, j, icon_pixmap)
                     self.classs[i] = clss
                     self.scroll_layout.addWidget(clss,0)
@@ -1823,7 +1829,7 @@ class Game(QWidget):
             def _fetch_and_merge(self, pages, per_page, cache):
                 # Custom fetch: keep beta results in-memory for rendering,
                 # but only persist alpha versions to disk because beta is time-sensitive.
-                api = self.root.githubAPI
+                api = events.githubAPI
                 releases_all = []
                 max_workers = min(len(pages) + 1, 8)
 
@@ -1840,9 +1846,9 @@ class Game(QWidget):
                             if ok and isinstance(data, list):
                                 releases_all.extend(data)
                             else:
-                                self.root.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
+                                events.logger.warning(f"[{type(self).__name__}._fetch_and_merge] release page failed: {data}")
                         except Exception as e:
-                            self.root.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
+                            events.logger.error(f"[{type(self).__name__}._fetch_and_merge] release future exception: {e}")
 
                 # Build full cache (including beta) for rendering
                 full_cache = cache or {"intro": "", "versions": {}}
@@ -1851,7 +1857,7 @@ class Game(QWidget):
                     try:
                         d = self.classify(r)
                     except Exception as e:
-                        self.root.logger.error(f"[{type(self).__name__}.classify] {e}")
+                        events.logger.error(f"[{type(self).__name__}.classify] {e}")
                         continue
                     category = self._normalize_class(d.get('class'))
                     if category is None or d.get('name') is None:

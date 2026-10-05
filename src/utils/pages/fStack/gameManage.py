@@ -3,6 +3,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPixmap
 from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
+from ...events import events
 from ...bus import bus
 from ...javaManager import javaManager
 from ...mdtManager import mdtManager
@@ -116,9 +117,9 @@ class GameManage(Scroll):
         # 本页后续的管理项都以 self.game 为操作对象，改名时必须跟着换。
         # 启动器状态同理：本页实例一跑起来，顶部那排按钮就得禁掉。
         self.refresh()
-        self.root.mdtManager.on_game_changed.connect(self._on_game_changed)
-        self.root.launcher.game_started.connect(self._sync_running)
-        self.root.launcher.lifecycle_finished.connect(self._sync_running)
+        events.mdtManager.on_game_changed.connect(self._on_game_changed)
+        events.launcher.game_started.connect(self._sync_running)
+        events.launcher.lifecycle_finished.connect(self._sync_running)
         # Java 候选表归 javaManager 扫（子线程 + TTL 缓存）：本页开着时跟着看，
         # 出栈就 unwatch（见 on_close），不常驻扫盘
         javaManager.watch()
@@ -130,7 +131,7 @@ class GameManage(Scroll):
 
     def refresh(self):
         """按当前实例刷新顶部；没指定实例或实例已失效（msg 为 None）时顶部留空。"""
-        msg = self.root.mdtManager.getMdtMsg(self.game) if self.game else None
+        msg = events.mdtManager.getMdtMsg(self.game) if self.game else None
         self.top.sets(self.game, msg)
         self.folders.set_enabled(bool(msg))     # 实例都没了，也就没目录可开
         self._sync_running()
@@ -141,7 +142,7 @@ class GameManage(Scroll):
 
     def running(self):
         """本页实例是否在跑。启动准备（going=1）也算：那时实例锁已经落下。"""
-        launcher = self.root.launcher
+        launcher = events.launcher
         return bool(launcher.going) and launcher.data.get("mdtName") == self.game
 
     def _on_game_changed(self, data):
@@ -162,7 +163,7 @@ class GameManage(Scroll):
             # 实例被删（本页删的，或目录在外面没了）：本页已无操作对象，直接出栈。
             # 叠在上面的浮层不属于本页（Qt 上没有父子关系），由删除流程自己出叠。
             if data["game"] == self.game:
-                self.root.signals.emit("stackClosed", self, True)
+                events.emit("stackClosed", self, True)
             return
         else:
             return
@@ -170,8 +171,8 @@ class GameManage(Scroll):
 
     def on_close(self):
         """出栈（或被清空）时断开订阅：页面随即被销毁，事件不能再打回来。"""
-        mdt_signal = self.root.mdtManager.on_game_changed
-        launcher = self.root.launcher
+        mdt_signal = events.mdtManager.on_game_changed
+        launcher = events.launcher
         for signal, slot in ((mdt_signal, self._on_game_changed),
                              (javaManager.changed, self._on_java_changed),
                              (launcher.game_started, self._sync_running),
@@ -204,7 +205,7 @@ class GameManage(Scroll):
             self.buttons = []
             self.init_wid()
             self.langing()      # 总线只在切换时广播，首次文案得自己填
-            self.lighting(bool(self.root.settings["theme"]))
+            self.lighting(bool(events.settings["theme"]))
             bus.bind(self)
 
         def init_wid(self):
@@ -233,7 +234,7 @@ class GameManage(Scroll):
 
         def langing(self):
             for button in self.buttons:
-                button.setText(self.root.langer.get(button.property("lang")))
+                button.setText(events.lang.get(button.property("lang")))
 
         def lighting(self, light):
             """folder.png 是白图，得按主题改色，取色跟着按钮文字走。"""
@@ -362,7 +363,7 @@ class GameManage(Scroll):
 
         def open_page(self, page):
             """把页面实例化后交给叠加浮层：遮罩、居中、叠层都由浮层统一管。"""
-            self.root.signals.emit("overlayRequested", page(self, self.root))
+            events.emit("overlayRequested", page(self, self.root))
 
         def set_running(self, running):
             """实例运行期间三个按钮全禁：目录被锁，改名/删除必定失败。"""
@@ -391,9 +392,9 @@ class GameManage(Scroll):
 
             默认分组在表里是个符号键，显示前过一遍 i18n，所以语言切换也要重刷这里。
             """
-            group = group_of(self.root.settings, self._name)
+            group = group_of(events.settings, self._name)
             if group == mdtManager.DEFAULT_GROUP:
-                group = self.root.langer.get("text.default")
+                group = events.lang.get("text.default")
             self.group.setText(group)
             self.group.setVisible(bool(group))
             self.dot.setVisible(bool(group))
@@ -401,7 +402,7 @@ class GameManage(Scroll):
         def langing(self):
             self._sync_group()
             for btn in self.buttons:
-                btn.setText(self.root.langer.get(btn.property("lang")))
+                btn.setText(events.lang.get(btn.property("lang")))
 
         class Page(QWidget):
             """按钮弹层的公共底板：标题栏（标题 + ×）+ 分割线 + 内容区。
@@ -424,7 +425,7 @@ class GameManage(Scroll):
                 self.setAttribute(Qt.WA_StyledBackground, True)
                 self.init_wid()
                 self.langing()
-                self.lighting(bool(self.root.settings.get("theme")))
+                self.lighting(bool(events.settings.get("theme")))
                 # 接总线必须在控件建好之后：bus.bind 会立刻补一次 lighting，
                 # 那时 btn_close 还不存在，直接炸 AttributeError。
                 bus.bind(self)
@@ -491,8 +492,8 @@ class GameManage(Scroll):
                 self.btn_ok.setStyleSheet(self.BTN_ON if enabled else self.BTN_OFF)
 
             def langing(self):
-                self.title.setText(self.root.langer.get(self.TITLE_KEY))
-                self.btn_close.setToolTip(self.root.langer.get("wid.top.close"))
+                self.title.setText(events.lang.get(self.TITLE_KEY))
+                self.btn_close.setToolTip(events.lang.get("wid.top.close"))
 
             def lighting(self, light):
                 # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
@@ -502,7 +503,7 @@ class GameManage(Scroll):
 
             def _close(self):
                 """出叠并销毁（on_close 由浮层在出叠时统一调）。"""
-                self.root.signals.emit("overlayClosed", self, True)
+                events.emit("overlayClosed", self, True)
 
         class Rename(Page):
             """更改名称弹层：输入框 + 校验提示 + 确定。
@@ -557,7 +558,7 @@ class GameManage(Scroll):
 
             def langing(self):
                 super().langing()
-                self.btn_ok.setText(self.root.langer.get("text.yes"))
+                self.btn_ok.setText(events.lang.get("text.yes"))
                 self._validate()    # 提示与「将改名为」都是译文，得按新语言重算
 
             def _validate(self, *_):
@@ -567,7 +568,7 @@ class GameManage(Scroll):
                 重名不直接拒绝：自动加 (1)(2) 后缀后照样能提交，跟下载页一致。
                 """
                 text = self.input.text().strip()
-                langer = self.root.langer
+                langer = events.lang
                 final = None
                 if not text:
                     state, msg = "empty", ""
@@ -577,8 +578,8 @@ class GameManage(Scroll):
                         state, msg = "dot", langer.get("wid.pages.download.item.name.dot")
                     elif error:
                         state, msg = "illegal", langer.get("wid.pages.download.item.name.illegal")
-                    elif self.root.mdtManager.name_conflict(text, except_name=self.game):
-                        final = self.root.mdtManager.unique_name(text)
+                    elif events.mdtManager.name_conflict(text, except_name=self.game):
+                        final = events.mdtManager.unique_name(text)
                         state = "dup"
                         msg = t(langer.get("wid.pages.download.item.name.willBe"), final)
                     else:
@@ -607,7 +608,7 @@ class GameManage(Scroll):
                 """
                 if not self._final_name:
                     return
-                editor = self.root.mdtManager.edit(self.game)
+                editor = events.mdtManager.edit(self.game)
                 editor.rename(self._final_name)
                 if not editor.ok:
                     # notFound / locked / ioError：实例没了或正被系统锁着，
@@ -615,7 +616,7 @@ class GameManage(Scroll):
                     self._final_name = None
                     self.input.setStyleSheet("border: 1px solid red;")
                     self.tip.setStyleSheet("font-size: 13px; color: red;")
-                    self.tip.setText(self.root.langer.get("wid.pages.gameManage.failed"))
+                    self.tip.setText(events.lang.get("wid.pages.gameManage.failed"))
                     self._set_ok_enabled(False)
                     return
                 self._close()
@@ -679,7 +680,7 @@ class GameManage(Scroll):
             # ---------- 组装 ----------
             def _current_group(self):
                 """当前分组；settings 里没登记（含 game 为空）按默认分组算。"""
-                return group_of(self.root.settings, self.game) or mdtManager.DEFAULT_GROUP
+                return group_of(events.settings, self.game) or mdtManager.DEFAULT_GROUP
 
             def _label(self, name):
                 """条目要显示的文本：默认分组是个符号键，得翻成「默认」。
@@ -694,7 +695,7 @@ class GameManage(Scroll):
 
             def _build(self):
                 """按 gameList 的键铺一组互斥项，勾上当前分组。"""
-                for name in self.root.settings["gameList"]:
+                for name in events.settings["gameList"]:
                     item = Bool(self.scroll, self.root, self._label(name))
                     item.setStyleSheet("background: transparent;")
                     self.choices.addButton(item.btn)
@@ -711,8 +712,8 @@ class GameManage(Scroll):
 
             def langing(self):
                 super().langing()
-                self.tip.setText(self.root.langer.get(self.TIP_KEY))
-                self.btn_ok.setText(self.root.langer.get("text.yes"))
+                self.tip.setText(events.lang.get(self.TIP_KEY))
+                self.btn_ok.setText(events.lang.get("text.yes"))
 
             def _on_ok(self):
                 """提交：分组只写在 settings 里，搬表的活交给 Editor.group。
@@ -720,11 +721,11 @@ class GameManage(Scroll):
                 失败（实例没了 / 磁盘错）就不关窗，把失败摆在提示行上，
                 免得用户以为换成功了、退出来发现还在原组。
                 """
-                editor = self.root.mdtManager.edit(self.game)
+                editor = events.mdtManager.edit(self.game)
                 editor.group(self._choice)
                 if not editor.ok:
                     self.tip.setStyleSheet("font-size: 14px; color: red;")
-                    self.tip.setText(self.root.langer.get("wid.pages.gameManage.failed"))
+                    self.tip.setText(events.lang.get("wid.pages.gameManage.failed"))
                     self._set_ok_enabled(False)
                     return
                 self._close()
@@ -766,8 +767,8 @@ class GameManage(Scroll):
 
             def langing(self):
                 super().langing()
-                self.warn.setText(self.root.langer.get(self.TIP_KEY))
-                self.btn_ok.setText(self.root.langer.get(self.CONFIRM_KEY))
+                self.warn.setText(events.lang.get(self.TIP_KEY))
+                self.btn_ok.setText(events.lang.get(self.CONFIRM_KEY))
 
             def _on_ok(self):
                 """确认删除：连目录一起删，登记与 defaultGame 由 mdtManager 收拾。
@@ -775,12 +776,12 @@ class GameManage(Scroll):
                 成功后本页出叠；GameManage 收到 deleteGame 会自己出栈——
                 实例都没了，那一页已经没有可管理的对象。
                 """
-                editor = self.root.mdtManager.edit(self.game)
+                editor = events.mdtManager.edit(self.game)
                 editor.delete()
                 if not editor.ok:
                     # notFound / locked / ioError：把警示换成失败，按钮随即禁掉
                     self.warn.setStyleSheet("font-size: 14px; color: red;")
-                    self.warn.setText(self.root.langer.get("wid.pages.gameManage.failed"))
+                    self.warn.setText(events.lang.get("wid.pages.gameManage.failed"))
                     self.btn_ok.setEnabled(False)
                     return
                 self._close()
@@ -824,7 +825,7 @@ class GameManage(Scroll):
             """
             if not self.game:
                 return None
-            return self.root.mdtManager.getMdtRaw(self.game).get("javaPath")
+            return events.mdtManager.getMdtRaw(self.game).get("javaPath")
 
         def fill(self, javas=None):
             """按全局 Java 候选重填一遍，并把实例当前的选择对上去。
@@ -841,25 +842,25 @@ class GameManage(Scroll):
                 combo.setEnabled(False)
             else:
                 if javas is None:
-                    javas = self.root.settings["javaPaths"]
+                    javas = events.settings["javaPaths"]
                     # 遍历副本：边遍历边 remove 会漏掉紧挨着的元素
                     javas = [java for java in list(javas) if javaManager.isJava(java[0])]
                 else:
                     javas = list(javas)
-                self.root.settings["javaPaths"] = javas
+                events.settings["javaPaths"] = javas
                 current = self._current()
                 self._none = not javas
                 combo.setEnabled(True)
                 # 头两项固定：跟随全局、自动匹配
-                combo.addItem("", self.root.mdtManager.FOLLOW)
+                combo.addItem("", events.mdtManager.FOLLOW)
                 combo.addItem("", self.AUTO)
                 for java in javas:
                     combo.addItem("v%s" % java[1], java[0])
                     combo.setItemData(combo.count() - 1, java[0], Qt.ToolTipRole)
                 if current is None:
                     index = combo.findData(self.AUTO)
-                elif current == self.root.mdtManager.FOLLOW:
-                    index = combo.findData(self.root.mdtManager.FOLLOW)
+                elif current == events.mdtManager.FOLLOW:
+                    index = combo.findData(events.mdtManager.FOLLOW)
                 else:
                     index = combo.findData(current)
                     if index < 0:
@@ -882,16 +883,16 @@ class GameManage(Scroll):
         def _texts(self):
             """刷那两条固定项的文案：版本号与路径不用翻译，固定项得跟着语言走。"""
             combo = self.combo
-            index = combo.findData(self.root.mdtManager.FOLLOW)
+            index = combo.findData(events.mdtManager.FOLLOW)
             if index >= 0:
                 # 没装 Java 时这条改挂「无可用 Java」，两种情况都复用设置页的词条；
                 # 「跟随全局」是本页独有的，设置页没有对应文案
                 key = ("wid.pages.setting.launcher.java.select.none" if self._none
                        else "wid.pages.gameManage.java.follow")
-                combo.setItemText(index, self.root.langer.get(key))
+                combo.setItemText(index, events.lang.get(key))
             index = combo.findData(self.AUTO)
             if index >= 0:
-                combo.setItemText(index, self.root.langer.get("wid.pages.setting.launcher.java.select.auto"))
+                combo.setItemText(index, events.lang.get("wid.pages.setting.launcher.java.select.auto"))
 
         def _apply(self, index):
             """把选中的 Java 写进实例：校验与失败码全在 mdtManager.edit() 里。"""
@@ -899,11 +900,11 @@ class GameManage(Scroll):
             current = self._current()
             if data is None or data == (self.AUTO if current is None else current):
                 return
-            editor = self.root.mdtManager.edit(self.game)
+            editor = events.mdtManager.edit(self.game)
             if data == self.AUTO:
                 # 自动匹配：字段写 null，getMdtData 认这个值自行挑版本，不跟全局设置
                 editor.set("javaPath", None)
-            elif data == self.root.mdtManager.FOLLOW:
+            elif data == events.mdtManager.FOLLOW:
                 editor.java(None)
             else:
                 editor.java(data)

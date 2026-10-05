@@ -52,6 +52,7 @@ try:
     from src.utils.utils import _is_mdt_download, change_color, t
     from src.utils.options.scrolls import Scroll
     from src.utils.bus import bus
+    from src.utils.events import events
     from src.utils.resources import (ACT_DL_LIST, ACT_TIPS, BRAND_GITHUB, ICON_APP_DARK,
                                      ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,
                                      TBT_MINIMIZE, app_icon)
@@ -87,7 +88,14 @@ try:
                 "BML/.Mindustrys"
             ]:
                 os.makedirs(getPath(i), exist_ok=True)
-            self.signals = self.Signals(self,self)
+            # 事件总线：模块级单例，宿主与插件共用（见 src/utils/events.py）。
+            # 原先它是 Main 里的一个嵌套类、挂在 self.signals 上，插件想发事件
+            # 就得先拿到 Main —— 那等于把这一堆隐式属性一起递出去。
+            self.signals = events
+            # 宿主工具挂到全局单例上：组件与插件从 events.logger / .settings /
+            # .lang / .shell 取，不必攥着 Main。property 转发，宿主换掉
+            # self.settings 时这里跟着走。
+            events.bind(self)
             self.winreg = self.Winreg(self, self)
             self.logger = self.Logger(self, self)
             self.logger.info("\n------------Book MDT Launcher------------"
@@ -590,6 +598,16 @@ try:
                 _sig.connect("overlayClosed", self.floatingOverlay.pop_page)
                 _sig.connect("stackRequested", self.floatingStack.add_page)
                 _sig.connect("stackClosed", self.floatingStack.pop_page)
+
+                # 遮罩层盖住整个窗口，鼠标事件到不了标题栏，它按事件请求拖动窗口
+                _sig.register("dragRequested", Signal(str, object))
+                _sig.connect("dragRequested", self._on_drag_requested)
+
+            def _on_drag_requested(self, phase, event):
+                """遮罩层请求拖动无边框窗口：转给窗口自己那套 drag_begin/move/end。"""
+                handler = getattr(self, "drag_" + str(phase), None)
+                if handler is not None:
+                    handler(event)
 
             def eventFilter(self, obj, event):
                 if obj is self and event.type() == QEvent.Resize:
@@ -2791,101 +2809,6 @@ try:
                 except Exception as e:
                     self.root.logger.error(f"Failed to list language files: {e}")
                 return info
-
-        class Signals(QObject):
-            """
-            动态信号管理器 —— 所有信号都是真正的 PySide6 Signal。
-
-            用法:
-                signals = Signals()
-                signals.register("dataReady", Signal(str, int))
-                signals.connect("dataReady", lambda s, i: print(s, i))
-                signals.emit("dataReady", "hello", 42)
-                signals.disconnect("dataReady", callback)
-                signals.cancel("dataReady")  # 完全移除
-            """
-
-            def __init__(self, parent=None, root=None):
-                super().__init__()
-                self.parent = parent
-                self.root = root
-                # name → _SignalHolder 实例
-                self._holders = {}
-
-            @staticmethod
-            def _make_holder_cls(sig):
-                """根据 Signal 签名动态创建一个 QObject 子类，携带一个 signal 属性。"""
-                return type('_SigHolder', (QObject,), {'signal': sig})
-
-            def register(self, name, sig=None):
-                """
-                注册一个信号。
-                sig: Signal 实例，如 Signal(), Signal(str), Signal(int, bool)
-                返回该 Signal，可直接 connect。
-                若同名已存在则返回已有信号。
-                """
-                if sig is None:
-                    sig = Signal()
-                if name in self._holders:
-                    return self._holders[name].signal
-                HolderCls = self._make_holder_cls(sig)
-                holder = HolderCls(self)
-                self._holders[name] = holder
-                return holder.signal
-
-            def connect(self, name, callback):
-                """连接到已注册信号。若未注册则自动以无参信号注册。"""
-                if name not in self._holders:
-                    self.register(name)
-                self._holders[name].signal.connect(callback)
-
-            def emit(self, name, *args):
-                """触发指定信号。"""
-                if name in self._holders:
-                    self._holders[name].signal.emit(*args)
-
-            def disconnect(self, name=None, callback=None):
-                """
-                断开连接。
-                - disconnect(name, callback): 断开指定回调
-                - disconnect(name): 断开该信号所有连接
-                - disconnect(): 断开所有信号所有连接
-                """
-                if name is None:
-                    for h in self._holders.values():
-                        try:
-                            h.signal.disconnect()
-                        except TypeError:
-                            pass
-                    return
-                if name not in self._holders:
-                    return
-                sig = self._holders[name].signal
-                if callback is not None:
-                    try:
-                        sig.disconnect(callback)
-                    except TypeError:
-                        pass
-                else:
-                    try:
-                        sig.disconnect()
-                    except TypeError:
-                        pass
-
-            def cancel(self, name):
-                """完全移除指定信号及其所有连接。"""
-                if name in self._holders:
-                    self._holders[name].signal.disconnect()
-                    self._holders[name].deleteLater()
-                    del self._holders[name]
-
-            def clear(self, name):
-                """清除指定信号的所有回调（不删除信号本身）。"""
-                if name in self._holders:
-                    try:
-                        self._holders[name].signal.disconnect()
-                    except TypeError:
-                        pass
 
         class Winreg():
             def __init__(self, parent=None, root=None):

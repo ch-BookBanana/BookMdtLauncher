@@ -21,6 +21,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout
 )
+from ..events import events
 from ..options.scrolls import Scroll
 from ..utils import change_color
 from ..resources import (BTN_DOWNLOAD, NAV_MENU)
@@ -93,7 +94,7 @@ class Download(Page):
 
             def langing(self):
                 if self.text_ is not None:
-                    self.text.setText(self.root.langer.get(self.text_))
+                    self.text.setText(events.lang.get(self.text_))
 
             def lighting(self, light: bool):
                 if self.icon_ is not None:
@@ -109,7 +110,7 @@ class Download(Page):
                         )
                         self.icon.setPixmap(smooth_pixmap)
                     else:
-                        self.root.logger.warning(f"Failed to load pixmap for {self.icon_}")
+                        events.logger.warning(f"Failed to load pixmap for {self.icon_}")
 
             def setText(self, _text):
                 self.text_ = _text
@@ -117,7 +118,7 @@ class Download(Page):
 
             def setIcon(self, _icon):
                 self.icon_ = _icon
-                self.lighting(self.root.settings["theme"])
+                self.lighting(events.settings["theme"])
 
     class Main(Mainw):
         def __init__(self, parent=None, root=None):
