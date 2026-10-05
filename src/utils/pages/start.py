@@ -113,9 +113,9 @@ def _parse_log_line(text, fallback="info"):
 
 
 class Start(Page):
-    def __init__(self, parent=None, root=None, text=None, logo=None):
+    def __init__(self, parent=None, root=None, text=None, logo=None, btn=None):
         root.signals.register("start_gameChanged", Signal(object))
-        super().__init__(parent, root, text, logo)
+        super().__init__(parent, root, text, logo, btn)
         # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtManager 事件（替代 1 秒轮询）
         self.left.refresh()
         self.root.mdtManager.on_game_changed.connect(self.left._on_game_changed)

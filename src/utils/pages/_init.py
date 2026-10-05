@@ -64,7 +64,7 @@ class Rightw(QWidget):
 
 
 class Page():
-    def __init__(self, parent=None, root=None, text=None, logo=None):
+    def __init__(self, parent=None, root=None, text=None, logo=None, btn=None):
         super().__init__()
         self.parent = parent
         self.root = root
@@ -73,9 +73,12 @@ class Page():
         self.init_wid()
         self.id = len(self.parent.pages)
         self.parent.pages.append(self)
-        self.btn = self.root.window.left.pagebtns.add_btn(self.text,self.logo)
+        # 导航按钮由装配方（core.pages 的构建循环）建好后注入，点击也在那边接。
+        # 这里原先是 self.root.window.left.pagebtns.add_btn(...) —— 一条从页面
+        # 反向摸到主窗口、再摸进左栏按钮组的链，页面因此知道主窗口长什么样。
+        # 现在页面只管自己这一份三栏内容，按钮从哪来、点了切到哪去都不归它管。
+        self.btn = btn
         self.parent.btns.append(self)
-        self.btn.clicked.connect(self.changePage)
 
     def changePage(self):
         self.parent.left.setCurrentWidget(self.left)

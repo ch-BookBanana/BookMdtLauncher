@@ -559,7 +559,9 @@ try:
                 self.layout.addWidget(self.stren, 0)
 
                 self.root.logger.debug("init QW.windowL.main")
-                self.main = self.Main(self, self.root)
+                # 左栏导航按钮组在这里注入：页容器要往导航栏加按钮，但不该顺着
+                # parent/root 往上摸 —— 显式传下去，「谁给谁」就写在这一行里。
+                self.main = self.Main(self, self.root, nav=self.left.pagebtns)
                 self.layout.addWidget(self.main, 1)
 
                 self.left.raise_()
@@ -1662,10 +1664,11 @@ try:
 
 
             class Main(QWidget):
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None, root=None, nav=None):
                     super().__init__()
                     self.parent = parent
                     self.root = root
+                    self.nav = nav          # 左栏导航按钮组，由 Window 注入
                     self.init_ui()
                     self.init_wid()
 
@@ -1688,7 +1691,7 @@ try:
                     self.layout.addWidget(self.tline)
 
                     self.root.logger.debug("init QW.windowL.mainL.main")
-                    self.main = self.Main(self, self.root)
+                    self.main = self.Main(self, self.root, nav=self.nav)
                     self.layout.addWidget(self.main, 1)
 
                 class Top(QWidget):
@@ -2389,10 +2392,11 @@ try:
                         pass
 
                 class Main(QWidget):
-                    def __init__(self, parent=None, root=None):
+                    def __init__(self, parent=None, root=None, nav=None):
                         super().__init__()
                         self.parent = parent
                         self.root = root
+                        self.nav = nav          # 左栏导航按钮组，由 Window 注入
                         self.pages = []
                         self.btns = []
                         self.init_wid()
@@ -2449,15 +2453,18 @@ try:
                                      cls=Setting, order=40,
                                      title="wid.pages.setting", icon=BTN_SETTING)
 
+                        # 装配方负责「建按钮 → 建页面 → 接线 → 回填」整套：
+                        # 页面不再自己摸主窗口要按钮，也不知道按钮点了切到哪去。
+                        pagebtns = self.nav
+
                         self.default_page = None
                         for e in registry.entries("core.pages"):
-                            page = e.cls(self, self.root, e.title, getPath(e.icon))
+                            btn = pagebtns.add_btn(e.title, getPath(e.icon))
+                            page = e.cls(self, self.root, e.title, getPath(e.icon), btn=btn)
+                            btn.clicked.connect(page.changePage)
                             setattr(self, e.name, page)
-                            # 把页面与它配套的导航按钮回填进条目（占位）：
-                            # 此刻按钮仍是页面自己在 Page.__init__ 里建的，装配方只是
-                            # 把它记下来，让「页面 ↔ 按钮」在注册表里有唯一出处。
-                            # 等下面几步再把「谁建按钮」「谁接点击」逐步挪到这里来。
-                            registry.bind("core.pages", e.key, main=page, btn=page.btn)
+                            # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到
+                            registry.bind("core.pages", e.key, main=page, btn=btn)
                             if e.get("default"):
                                 self.default_page = page
 

@@ -36,8 +36,8 @@ from ._init import *
 
 
 class Setting(Page):
-    def __init__(self, parent=None, root=None, text=None, logo=None):
-        super().__init__(parent, root, text, logo)
+    def __init__(self, parent=None, root=None, text=None, logo=None, btn=None):
+        super().__init__(parent, root, text, logo, btn)
 
     class Left(Leftw):
         def __init__(self, parent=None, root=None):
