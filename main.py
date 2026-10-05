@@ -84,13 +84,17 @@ try:
             self._scroll_bar_filter = _ScrollBarFilter()
             self.app.installEventFilter(self._scroll_bar_filter)
 
-            for i in [
-                "BML",
-                "BML/logs",
-                "BML/badSettings",
-                "BML/.Mindustrys"
-            ]:
-                os.makedirs(getPath(i), exist_ok=True)
+            # 只建 BML 这个根。它下面的目录各有归属方，各自建自己的：
+            #   BML/logs        → Logger.__init__（它要用的时候自己 makedirs）
+            #   BML/badSettings → _backup_bad_settings（真出损坏才需要）
+            #   BML/.Mindustrys → mdtManager.ensure_dirs()
+            #   BML/plugins     → pluginLoader.ensure_dirs()
+            # 原先这里把它们连路径一起抄了一遍 —— 而「插件装在哪」是
+            # pluginLoader.PLUGIN_DIR 的事。抄错的代价是静默的：目录没建出来，
+            # discover 只是返回空表，插件全不加载、没有报错也没有日志。
+            os.makedirs(getPath("BML"), exist_ok=True)
+            mdtManager.ensure_dirs()
+            pluginLoader.ensure_dirs()
             # 事件总线：模块级单例，宿主与插件共用（见 src/utils/events.py）。
             # 原先它是 Main 里的一个嵌套类、挂在 self.signals 上，插件想发事件
             # 就得先拿到 Main —— 那等于把这一堆隐式属性一起递出去。

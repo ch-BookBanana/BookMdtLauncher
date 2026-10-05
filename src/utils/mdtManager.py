@@ -65,6 +65,12 @@ def _parse_simple_config_typed(content: str) -> dict:
 
 class mdtManager(QObject):
     base_dir = getPath("BML/.Mindustrys")
+
+    @classmethod
+    def ensure_dirs(cls):
+        """建好实例目录。路径只此一处 —— 原先 main.py 又抄了一遍字面量去建它，
+        改一处忘一处的话，实例扫描会当成「一个都没有」。"""
+        os.makedirs(cls.base_dir, exist_ok=True)
     DEFAULT_ICON = ICON_MDT
     # 实例名长度上限（字符）。名字既是目录名也是界面上到处显示的标题，
     # NTFS 允许的 255 对 UI 毫无意义，太长会把列表、标题栏、下载卡片撑坏。

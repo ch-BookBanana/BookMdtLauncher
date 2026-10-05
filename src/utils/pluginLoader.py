@@ -54,7 +54,8 @@ from dataclasses import dataclass, field
 from .path_utils import getPath
 
 __all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all",
-           "unload", "loaded", "plugin_langs", "PLUGIN_DIR", "MANIFEST"]
+           "unload", "loaded", "ensure_dirs",
+           "plugin_langs", "PLUGIN_DIR", "MANIFEST"]
 
 PLUGIN_DIR = "BML/plugins"
 PLUGIN_CACHE = "BML/.tmp/plugins"     # zip 插件的解压落点（跟其他临时文件一个待遇）
@@ -301,6 +302,26 @@ def plugin_langs(lang):
 # ─────────────────────────── 发现 / 加载 ───────────────────────────
 
 _STATE = {"loaded": []}
+
+
+def ensure_dirs(base=None):
+    """建好插件目录。
+
+    由宿主在启动时调一次，路径只有 PLUGIN_DIR 这一个出处 —— 原先目录名在
+    这里、建目录的代码却在 main.py 里又写了一遍字面量，改一处忘一处就是
+    「插件全没了却一声不吭」（discover 发现目录不存在只返回空表）。
+    """
+    os.makedirs(base or getPath(PLUGIN_DIR), exist_ok=True)
+
+
+def ensure_dirs(base=None):
+    """建好插件目录。
+
+    由宿主在启动时调一次，路径只有 PLUGIN_DIR 这一个出处 —— 原先目录名在
+    这里、建目录的代码却在 main.py 里又写了一遍字面量，改一处忘一处就是
+    「插件全没了却一声不吭」（discover 发现目录不存在只返回空表）。
+    """
+    os.makedirs(base or getPath(PLUGIN_DIR), exist_ok=True)
 
 
 def discover(base=None, cache=None):
