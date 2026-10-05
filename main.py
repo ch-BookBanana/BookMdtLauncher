@@ -40,6 +40,29 @@ from datetime import datetime
 import ctypes
 import ctypes.wintypes
 
+
+def _safe_fmt_exc(exc=None, limit=None):
+    """把异常格式化成字符串 —— 连格式化都炸时退回最朴素的写法。
+
+    why：traceback 要回读源码（linecache），而取源码本身还得 import。万一崩的
+    正是 import 机制（插件那个替换 builtins.__import__ 的闸门撞上别人家的钩子
+    出过这种事），format_exc() 会二次崩溃：下面那个「启动失败」弹窗还没弹，
+    进程就先没了，用户只看到一串裸栈。报错的路子自己不能先倒。
+    """
+    try:
+        return traceback.format_exc(limit=limit)
+    except BaseException:
+        pass
+    if exc is None:
+        exc = sys.exc_info()[1]
+    if exc is None:
+        return "（异常信息也取不到了）"
+    try:
+        return "".join(traceback.format_exception_only(type(exc), exc))
+    except BaseException:
+        return "%s: %s" % (type(exc).__name__, exc)
+
+
 try:
     from src.utils.langer import Langer
     from src.utils.logger import Logger
@@ -1572,7 +1595,7 @@ try:
             os._exit(code)
 
 except Exception as e:
-    err_msg = traceback.format_exc()
+    err_msg = _safe_fmt_exc(e)
 
     print(err_msg)
 

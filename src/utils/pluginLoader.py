@@ -77,6 +77,7 @@ setup 跑到一半抛异常就整块丢掉 —— 不会在正表里留下半截
 """
 
 import builtins
+import importlib
 import importlib.util
 import json
 import os
@@ -104,6 +105,27 @@ FORBIDDEN_ROOTS = ("src", "main")
 
 class PluginLoadError(Exception):
     """清单不合法 / 入口缺失 / 版本不匹配 —— 属于「这个插件不该被加载」。"""
+
+
+def _fmt_exc(limit=6):
+    """把当前异常格式化成字符串 —— 连格式化都炸时退回最朴素的写法。
+
+    why：traceback 要回读源码（linecache），而取源码本身还要 import。崩的若是
+    import 机制（比如 builtins.__import__ 被搞成了不能调的东西），格式化就会
+    二次崩溃，于是「一个插件加载失败」升级成「宿主启动失败」，连启动失败弹窗
+    都弹不出来（它也要 format_exc）。
+    """
+    orig = sys.exc_info()[1]
+    try:
+        return traceback.format_exc(limit=limit)
+    except BaseException:
+        pass
+    if orig is None:
+        return "（异常信息也取不到了）"
+    try:
+        return "".join(traceback.format_exception_only(type(orig), orig))
+    except BaseException:
+        return "%s: %s" % (type(orig).__name__, orig)
 
 
 # ─────────────────────────────── 清单 ───────────────────────────────
@@ -267,6 +289,12 @@ def _api_ok(want, have):
 
 # ─────────────────────────── import 闸门 ───────────────────────────
 
+# importlib.__import__ 就是内建 import 的实现本身，不经过任何第三方钩子
+# （PySide6 会用 __feature_import__ / __lazy_import__ 顶掉 builtins.__import__）。
+# 只在闸门拿不到可用转交对象时兜底用，正常路径用不上。
+_STD_IMPORT = importlib.__import__
+
+
 class _SrcImportGuard:
     """加载插件期间禁止 import src.* / main。
 
@@ -276,32 +304,54 @@ class _SrcImportGuard:
 
     只拦绝对 import：插件自己包内的相对 import（level > 0）是它自己的事。
     第三方库（requests 之类）不受影响。
+
+    **装上去的那个闭包必须永远「能调用」** —— 这是踩过的坑：换掉的是全局
+    builtins.__import__，别人也会伸手（PySide6 的 post_init 就在换同一个全局，
+    而它是 C 函数，出问题时栈里连一帧都留不下）。第一版把「转交给谁」写成读
+    self._real、退出时置 None，于是只要有人攥着这个闭包、或在退出之后又把它装
+    回去，下一次 import 就是 `TypeError: 'NoneType' object is not callable`,
+    而那是**宿主启动阶段**——启动器整个没了，连「启动失败」弹窗都弹不出来
+    （弹窗要 format_exc，format_exc 要 import）。
+
+    所以：转交对象在装上那一刻就绑死进闭包（默认参数，之后不再变），闸门
+    「还开不开」另放一个可变 cell。退出之后这个闭包只是**不再拦**，绝不再崩。
     """
 
     def __init__(self):
-        self._real = None
+        self._prev = None       # 进来时那一个：退出时还原给它
+        self._mine = None       # 我们自己装上去的闭包，用来判断「还挂着吗」
+        self._state = None
 
     def __enter__(self):
         # 启动期单线程，不需要锁；真要多线程加载插件时这里得补一把
-        self._real = builtins.__import__
-        guard = self
+        prev = builtins.__import__
+        if not callable(prev):
+            prev = _STD_IMPORT
+        state = {"active": True}
+        self._prev, self._state = prev, state
 
-        def _guarded(name, globals=None, locals=None, fromlist=(), level=0):
-            if level == 0 and name.split(".")[0] in FORBIDDEN_ROOTS:
+        def _guarded(name, globals=None, locals=None, fromlist=(), level=0,
+                     _prev=prev, _state=state):
+            if _state["active"] and level == 0 and name.split(".")[0] in FORBIDDEN_ROOTS:
                 raise ImportError(
                     f"插件不得 import {name!r}：内部模块不承诺兼容，"
                     f"而且顺着 main 能摸到宿主对象。"
                     f"插件请只用 `from BMLCore import Plugin, events, registry`。"
                 )
-            return guard._real(name, globals, locals, fromlist, level)
+            return _prev(name, globals, locals, fromlist, level)
 
+        self._mine = _guarded
         builtins.__import__ = _guarded
         return self
 
     def __exit__(self, *exc):
-        if self._real is not None:
-            builtins.__import__ = self._real
-            self._real = None
+        # 先关闸：即使下面不还原，这个闭包也只是穿透，不再拦也不炸
+        if self._state is not None:
+            self._state["active"] = False
+        # 只在自己的闭包还挂着时还原。中途被别人顶掉过就随它去 —— 跟别人抢
+        # 同一个全局正是这次崩溃的由来（我们退出时把它装的钩子又踩了回去）。
+        if self._mine is not None and builtins.__import__ is self._mine:
+            builtins.__import__ = self._prev
         return False
 
 
@@ -481,7 +531,7 @@ def load_one(info):
         # 抓不到它，会一路穿到宿主那个「启动失败」弹窗 —— 而这里的规矩是
         # 一个插件坏掉不许拖垮别的（更不能拖垮启动）。
         # KeyboardInterrupt 故意不接：那是用户在按 Ctrl+C，得让它出去。
-        info.error = traceback.format_exc(limit=6)
+        info.error = _fmt_exc(limit=6)
         sys.modules.pop(mod_name, None)
         registry.abort()
         _cleanup_failed(info, inst, widgets_before)
@@ -580,7 +630,7 @@ def _cleanup_failed(info, inst=None, widgets_before=None):
     try:
         events.drop_namespace(info.id)
     except Exception:
-        events.logger.error(f"回滚插件事件失败：{info.id}\n{traceback.format_exc(limit=4)}",
+        events.logger.error(f"回滚插件事件失败：{info.id}\n{_fmt_exc(limit=4)}",
                             name="Plugin")
     if inst is not None:
         try:
@@ -656,7 +706,7 @@ def _write_disabled(ids):
     try:
         settings[DISABLED_KEY] = list(ids)
     except Exception:
-        events.logger.error("写停用名单失败：\n" + traceback.format_exc(limit=4),
+        events.logger.error("写停用名单失败：\n" + _fmt_exc(limit=4),
                             name="Plugin")
         return False
     try:
@@ -860,13 +910,13 @@ def unload(info):
         registry.remove_namespace(info.id)
         events.drop_namespace(info.id)
     except Exception:
-        events.logger.error(f"插件卸载时摘登记失败：{info.id}\n{traceback.format_exc(limit=4)}",
+        events.logger.error(f"插件卸载时摘登记失败：{info.id}\n{_fmt_exc(limit=4)}",
                             name="Plugin")
     try:
         info.instance.teardown()
     except (Exception, SystemExit):
         # 同 load_one：SystemExit 也得接住，卸载一个插件不该把启动器带走
-        events.logger.error(f"插件 teardown 抛异常：{info.id}\n{traceback.format_exc(limit=4)}",
+        events.logger.error(f"插件 teardown 抛异常：{info.id}\n{_fmt_exc(limit=4)}",
                             name="Plugin")
     # 析构跑完再删它加载时造出来的控件（那时没法回溯，所以加载成功时就记下了）。
     # 由扩展点构建出来的那些（页面等）不在这里 —— 那是装配方按注册表建的，
