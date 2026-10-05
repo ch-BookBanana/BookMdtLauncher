@@ -36,6 +36,7 @@ from ...bus import bus
 from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
+from ...registry import registry
 
 
 class Game(QWidget):
@@ -176,11 +177,27 @@ class Game(QWidget):
             self.pages_ = []
             self.btns_ = []
 
-            # 下载源表：顺序即顶部页签顺序。每个源的仓库 / README / 图标 / 缓存文件名
-            # 都写在各自 Template 子类的类属性上，这里只声明「有哪些源、按什么顺序排」。
-            # 加一个下载源 = 写一个 Template 子类 + 在这里加一行。
-            for cls in (self.Origin, self.MindustryX, self.MindustryARC):
-                self.add_page(cls, cls.title_key, cls.iconPath, color=False)
+            # 下载源走注册中心：这里只声明「有哪些源、什么顺序、要不要改色」，
+            # 仓库 / README / 图标 / 缓存文件名由各 Template 子类的类属性提供。
+            # 加一个下载源 = 写一个 Template 子类 + 加一条 registry.add。
+            registry.declare(
+                "core.download.sources", registrant="core.download",
+                fields=("cls", "order", "color"),
+                required=("cls",),
+                doc="下载页顶部页签的游戏来源")
+
+            registry.add("core.download.sources", "core.origin",
+                         cls=self.Origin, order=10, color=False)
+            registry.add("core.download.sources", "core.mindustryx",
+                         cls=self.MindustryX, order=20, color=False)
+            registry.add("core.download.sources", "core.mindustryarc",
+                         cls=self.MindustryARC, order=30, color=False)
+
+            for e in registry.entries("core.download.sources"):
+                # 展示信息（语言键 / 图标）由源自己的类属性提供，注册表只管
+                # 「有哪些源、什么顺序、要不要改色」，不重复存一份。
+                cls = e.cls
+                self.add_page(cls, cls.title_key, cls.iconPath, color=e.get("color", True))
 
         def add_page(self, page_cls, text=None, icon=None, color=True):
             btn = self.parent.top.add_btn(text, icon, color=color)

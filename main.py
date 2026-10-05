@@ -2396,7 +2396,11 @@ try:
                         self.pages = []
                         self.btns = []
                         self.init_wid()
-                        self.pages[0].click()
+                        # 默认页由 core.pages 里 default=True 的那条决定；
+                        # 没有标记（或注册表为空）时退回第一个。
+                        default = self.default_page or (self.pages[0] if self.pages else None)
+                        if default is not None:
+                            default.click()
 
                     def init_wid(self):
                         self.layout = QHBoxLayout(self)
@@ -2411,7 +2415,8 @@ try:
                         self.right = self.Right_(self,self.root)
                         self.layout.addWidget(self.right,0)
 
-                        # 内置页面表：顺序即左栏导航顺序，加一个页面只需要在这里加一行。
+                        # 页面走注册中心：这里只声明「有哪些页面、什么顺序、谁是默认」，
+                        # 构建统一在下面的循环里 —— 加一个页面只需加一条 registry.add。
                         # 注意属性名（start/download/game/setting）不是内部私有的：
                         #   src/utils/on_start/java.py:97,102 → window.main.main.start.left.main
                         #                                     → window.main.main.start.main.stack
@@ -2422,14 +2427,33 @@ try:
                         from src.utils.pages.download import Download
                         from src.utils.pages.game import Game
                         from src.utils.pages.setting import Setting
+                        from src.utils.registry import registry
 
-                        for attr, cls, key, icon in (
-                            ("start",    Start,    "wid.pages.start",    BTN_START),
-                            ("download", Download, "wid.pages.download", BTN_DOWNLOAD),
-                            ("game",     Game,     "wid.pages.game",     BTN_GAME),
-                            ("setting",  Setting,  "wid.pages.setting",  BTN_SETTING),
-                        ):
-                            setattr(self, attr, cls(self, self.root, key, getPath(icon)))
+                        registry.declare(
+                            "core.pages", registrant="core",
+                            fields=("cls", "title", "icon", "order", "default"),
+                            required=("cls", "title"),
+                            doc="主窗口左栏导航页（登记顺序即导航顺序）")
+
+                        registry.add("core.pages", "core.start",
+                                     cls=Start, order=10, default=True,
+                                     title="wid.pages.start", icon=BTN_START)
+                        registry.add("core.pages", "core.download",
+                                     cls=Download, order=20,
+                                     title="wid.pages.download", icon=BTN_DOWNLOAD)
+                        registry.add("core.pages", "core.game",
+                                     cls=Game, order=30,
+                                     title="wid.pages.game", icon=BTN_GAME)
+                        registry.add("core.pages", "core.setting",
+                                     cls=Setting, order=40,
+                                     title="wid.pages.setting", icon=BTN_SETTING)
+
+                        self.default_page = None
+                        for e in registry.entries("core.pages"):
+                            page = e.cls(self, self.root, e.title, getPath(e.icon))
+                            setattr(self, e.name, page)
+                            if e.get("default"):
+                                self.default_page = page
 
                     class Left_(QStackedWidget):
                         def __init__(self, parent=None, root=None):
