@@ -43,6 +43,7 @@ import ctypes.wintypes
 try:
     from src.utils.path_utils import getPath
     from src.utils.pages._init import open_overlay
+    from src.utils.settings import Settings
     from src.utils.mdtManager import mdtManager
     from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
     from src.utils.QThTimer import QThTimer
@@ -86,7 +87,7 @@ try:
 
             # 只建 BML 这个根。它下面的目录各有归属方，各自建自己的：
             #   BML/logs        → Logger.__init__（它要用的时候自己 makedirs）
-            #   BML/badSettings → _backup_bad_settings（真出损坏才需要）
+            #   BML/badSettings → Settings 的损坏备份（真出损坏才需要，见 utils/settings.py）
             #   BML/.Mindustrys → mdtManager.ensure_dirs()
             #   BML/plugins     → pluginLoader.ensure_dirs()
             # 原先这里把它们连路径一起抄了一遍 —— 而「插件装在哪」是
@@ -104,45 +105,33 @@ try:
             # self.settings 时这里跟着走。
             events.bind(self)
             self.winreg = self.Winreg(self, self)
-            self.logger = self.Logger(self, self)
+            self.logger = self.Logger(self)
             self.logger.info("\n------------Book MDT Launcher------------"
                             f"\n-time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
                             f"\n-version: {init['version']}"
                             f"\n-BuildVersion: {init['BuildCode']}"
                             f"\n-logLevel: {logging.getLevelName(self.logger.level)}"
                             "\n-----------------------------------------")
-            self.defsettings = {
-                "language": None,
-                "theme": 0,
-                "maxLogNum": 50,
-                "closeByTray": True,
-                "defaultGame": None,
-                "javaPath": None,
-                "github": {
-                    "token_enc":None,
-                    "token_key":None,
-                    "useful": None,
-                    "user":{
-                        "name":None,
-                        "headurl":None
-                    },
-                    "rate": {
-                        "core":   {"remaining": None, "reset": []},
-                        "search": {"remaining": None, "reset": []}
-                    }
-                },
-                "javaPaths": [],
-                "gameList": {"<:|default|:>": []},
-                # 插件设置：一格一个插件（com.example.hello: {...}）。
-                # 空 dict 是「开放映射」——键由插件自己定，宿主没法定 schema，
-                # 见 _merge_settings 里对空 dict 默认值的处理。
-                "plugins": {}
-            }
-            self.settings = copy.deepcopy(self.defsettings)
+            # ── L0 基层：设置 ──
+            # schema（键与默认值）在 src/utils/settings.py 的 DEFAULT_SCHEMA 里，
+            # 原来它是这里的一段字面量。那个类不依赖宿主：日志与翻译都是注入的，
+            # 所以它能单独测（scripts/test_settings.py）。
+            self.settings = Settings(logger=self.logger)
+            # 日志要读 maxLogNum，但它建得比设置早 —— 这边建完回填给它
+            self.logger.set_settings(self.settings)
+            # 设置改动的存盘要落在**主线程**：设置会被工作线程写（rate 同步、
+            # 下载收尾…），而 QTimer 不能在别的线程里 start。信号跨线程是排队
+            # 投递的，所以写入方 emit，主线程收到再起防抖计时器。
+            self._settings_dirty = self._SettingsSaveTrigger()
+            self._settings_dirty.fired.connect(self._schedule_settings_save)
             app.aboutToQuit.connect(self.saveSettings)
             self.loadSettings()
 
             self.langer = self.Langer(self, self)
+            # 翻译也是注入的（基层不 import 上层）
+            self.settings.set_tr(self.langer.get)
+            # 从这里起，改设置自动排一次防抖存盘 —— 各处不必再记着调 saveSettings
+            self.settings.watch(self._on_settings_changed)
             javaManager.settings = self.settings
             javaDownload.set_tr_func(self.langer.get)
             mdt_set_tr_func(self.langer.get)
@@ -288,173 +277,50 @@ try:
         # settings.json 的读写统一走这里：
         #   写 → 临时文件 + os.replace 原子替换（不会留下写了一半的文件）
         #   读 → 失败时原件备份到 BML/badSettings/，再回退默认值
-        _SETTINGS_PATH = "BML/settings.json"
-        _BAD_DIR = "BML/badSettings"   # 损坏 settings 的备份目录
-        _BAD_KEEP = 5                  # 损坏备份最多保留份数
+        # ── 设置：实现在 src/utils/settings.py（L0 基层），这里只留入口 ──
+        # 宿主对设置只剩两件事：什么时候读、什么时候写。校验/合并/原子替换/
+        # 损坏备份/清理临时文件都在那个类里。
 
-        @staticmethod
-        def _atomic_write_json(path, data):
-            """原子写入 JSON：写同目录唯一临时文件并刷盘，再 os.replace 覆盖目标。
+        @property
+        def defsettings(self):
+            """默认值表（= schema）。出处是 src/utils/settings.py 的 DEFAULT_SCHEMA。"""
+            return self.settings.schema
 
-            任意时刻磁盘上的目标文件要么是旧内容、要么是新内容；
-            临时名带 pid 与纳秒时间戳，多线程同时保存也不会互相踩踏。
+        class _SettingsSaveTrigger(QObject):
+            """把「设置有改动」从任意线程送到 GUI 线程。
+
+            写入方可能在工作线程（rate 同步、下载收尾），而 QTimer 不能在那儿
+            start（QObject::startTimer: Timers cannot be started from another
+            thread）。信号跨线程是排队投递的，所以只借它转一道手。
             """
-            tmp = f"{path}.{os.getpid()}-{time.time_ns()}.tmp"
-            try:
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(data, f, separators=(',', ':'), ensure_ascii=False)
-                    f.flush()
-                    os.fsync(f.fileno())
-                Main._replace_with_retry(tmp, path)
-            except BaseException:
-                try:
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
-                except OSError:
-                    pass
-                raise
 
-        @staticmethod
-        def _replace_with_retry(src, dst, attempts=4):
-            """os.replace 在 Windows 上可能被杀毒/索引临时占用，短重试以躲开瞬时锁。"""
-            for i in range(attempts):
-                try:
-                    os.replace(src, dst)
-                    return
-                except PermissionError:
-                    if i == attempts - 1:
-                        raise
-                    time.sleep(0.05)
+            fired = Signal()
 
-        @staticmethod
-        def _read_settings_file(path):
-            """读取 settings.json 并返回 dict；内容为空或不是对象时抛异常。"""
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                raise ValueError("root is not a JSON object")
-            return data
+        def _on_settings_changed(self, path, old, new):
+            """设置一改就告诉主线程一声（可能在任意线程被调用）。
 
-        @classmethod
-        def _merge_settings(cls, default, file_settings, path=""):
-            """把文件里的设置合并进默认设置（就地），返回被拒绝的键说明列表。
-
-            只接受默认值里已有的键（多余键丢弃，用于淘汰已删除的设置项）；
-            类型不符的键保留默认值并记录；dict 递归合并，其余叶子直接覆盖。
-            默认值为 None 的键推不出类型（如 language/defaultGame），一律放行。
-            默认值是**空 dict** 的键按开放映射处理：宿主不认识里面的键
-            （插件设置就是这样，键由插件自己定），逐项收下、值仍要求是 dict。
+            原先「谁改谁记得调 saveSettings」散在十几处，漏一个就是悄悄丢配置；
+            现在挂在这条通知上。
             """
-            issues = []
-            if not default:
-                # 开放映射：整片收下，只查值是不是对象
-                for key, value in file_settings.items():
-                    if isinstance(value, dict):
-                        default[key] = value
-                    else:
-                        issues.append(f"{path}{key}: object -> {type(value).__name__}")
-                return issues
-            for key, value in file_settings.items():
-                if key not in default:
-                    continue
-                cur = default[key]
-                if isinstance(cur, dict):
-                    if isinstance(value, dict):
-                        issues += cls._merge_settings(cur, value, f"{path}{key}.")
-                    else:
-                        issues.append(f"{path}{key}: object -> {type(value).__name__}")
-                elif cls._accepts_value(cur, value):
-                    default[key] = value
-                else:
-                    issues.append(f"{path}{key}: {type(cur).__name__} -> {type(value).__name__}")
-            return issues
+            self._settings_dirty.fired.emit()
 
-        @staticmethod
-        def _accepts_value(default_value, value):
-            """判断文件里的值能否覆盖默认值（None 默认值放行；bool 与 int 严格区分）。"""
-            if default_value is None:
-                return True
-            if isinstance(default_value, bool) or isinstance(value, bool):
-                return isinstance(default_value, bool) and isinstance(value, bool)
-            if isinstance(default_value, (int, float)):
-                return isinstance(value, (int, float))
-            return isinstance(value, type(default_value))
-
-        def _clean_settings_tmp(self):
-            """清理上次写盘中断残留的临时文件（settings.json.<pid>-<ns>.tmp）。"""
-            try:
-                head = os.path.basename(self._SETTINGS_PATH) + "."
-                folder = getPath("BML")
-                for name in os.listdir(folder):
-                    if name.startswith(head) and name.endswith(".tmp"):
-                        os.remove(os.path.join(folder, name))
-            except Exception:
-                pass
-
-        def _backup_bad_settings(self, path, reason):
-            """把有问题的 settings 备份到 BML/badSettings/settings.<时间戳>.json，返回备份路径。"""
-            try:
-                if not os.path.isfile(path):
-                    return None
-                folder = getPath(self._BAD_DIR)
-                os.makedirs(folder, exist_ok=True)
-                name = "settings.%s.json" % datetime.now().strftime("%Y%m%d-%H%M%S")
-                dest = os.path.join(folder, name)
-                shutil.copy2(path, dest)
-                self.logger.warning("bad settings backed up: %s/%s --%s" % (self._BAD_DIR, name, reason))
-                self._prune_bad_settings()
-                return dest
-            except Exception as e:
-                try:
-                    self.logger.error("Failed to back up settings\n--Exception: " + str(e))
-                except Exception:
-                    pass
-                return None
-
-        def _prune_bad_settings(self):
-            """只保留最近 _BAD_KEEP 份损坏备份，避免目录堆积（文件名按时间戳排序即时间序）。"""
-            try:
-                folder = getPath(self._BAD_DIR)
-                names = sorted(n for n in os.listdir(folder)
-                               if n.startswith("settings.") and n.endswith(".json"))
-                for name in names[:-self._BAD_KEEP]:
-                    os.remove(os.path.join(folder, name))
-            except Exception:
-                pass
+        def _schedule_settings_save(self):
+            """（主线程）排一次防抖存盘：500ms 合并高频写，比如拖滑块。"""
+            timer = getattr(self, "_settings_save_timer", None)
+            if timer is None:
+                # Main 不是 QObject，给不了父对象，所以自己攥着这个引用
+                timer = self._settings_save_timer = QTimer()
+                timer.setSingleShot(True)
+                timer.timeout.connect(self.saveSettings)
+            timer.start(500)
 
         def loadSettings(self):
-            """加载 settings.json：合并进默认值；解析失败或存在非法值时备份原文件。"""
-            self._clean_settings_tmp()
-            path = getPath(self._SETTINGS_PATH)
-            if not os.path.exists(path):
-                self.logger.warning("settings file not found, using default settings")
-                return
-            try:
-                self.logger.info("loading settings...")
-                file_settings = self._read_settings_file(path)
-            except Exception as e:
-                self.logger.error("ERR:Fail to load settings, using default setting"
-                                  "\n--Exception: " + str(e), exc_info=True)
-                self.settings = copy.deepcopy(self.defsettings)
-                self._backup_bad_settings(path, (str(e).splitlines() or ["unreadable"])[0])
-                return
-            issues = self._merge_settings(self.settings, file_settings)
-            if issues:
-                self.logger.warning("settings has invalid values, fallback to default: " + "; ".join(issues))
-                self._backup_bad_settings(path, "invalid values")
+            """读 settings.json：合并进 schema；读不了就备份原文件再回默认值。"""
+            self.settings.load()
 
         def saveSettings(self):
-            try:
-                Main._atomic_write_json(getPath(self._SETTINGS_PATH), self.settings)
-                try:
-                    self.logger.info(self.langer.get("core.log.info.saveSettings"))
-                except Exception:
-                    self.logger.info("Settings saved")
-            except Exception as e:
-                try:
-                    self.logger.error(self.langer.get("core.log.error.saveSettings") + "\n--Exception: " + str(e), exc_info=True)
-                except Exception:
-                    self.logger.error("Failed to save settings\n--Exception: " + str(e), exc_info=True)
+            """写 settings.json（原子替换，写不进去只记日志）。"""
+            self.settings.save()
 
         def _on_plugins_changed(self):
             """插件集合变了：把它盖过的三样收回来。
@@ -1613,6 +1479,13 @@ try:
                     self.root.logger.info(t(self.root.langer.get("core.log.info.trayTheme"), "light" if theme == "light" else "dark"))
 
         class Logger():
+            """日志（基层）。
+
+            它只依赖注入进来的两样：settings（读 maxLogNum）与 tr（翻译）。
+            拿不到就退化成默认值/英文原文 —— 基层不往上依赖，
+            否则「设置还没建好就没法打日志」这种事会一直缠着启动流程。
+            """
+
             # 命令行 `--log=<级别>`（只认 `=`，级别取 LEVELS 的键，默认 info）
             LOG_ARG = "--log="
             LEVELS = {
@@ -1623,9 +1496,10 @@ try:
                 "critical": logging.CRITICAL,
             }
 
-            def __init__(self, parent=None, root=None):
+            def __init__(self, parent=None, settings=None, tr=None):
                 self.parent = parent
-                self.root = root
+                self._settings = settings
+                self._tr = tr
                 # 缓存已创建的 logger 实例，避免重复创建
                 self._loggers = {}
                 # 日志级别来自命令行（--log=debug），默认 INFO
@@ -1695,6 +1569,25 @@ try:
 
                 self._loggers[self.base_logger_name] = main_logger
 
+            def set_settings(self, settings):
+                """设置建得比日志晚（日志要读 maxLogNum），建完回填给它。"""
+                self._settings = settings
+                return self
+
+            def set_tr(self, tr):
+                """翻译也是注入的：宿主挂了 Langer 之后回填。"""
+                self._tr = tr
+                return self
+
+            def _t(self, key, fallback):
+                if self._tr is None:
+                    return fallback
+                try:
+                    got = self._tr(key)
+                    return got if got and got != key else fallback
+                except Exception:
+                    return fallback
+
             def _get_logger(self, name=None):
                 """
                 获取指定名称的 logger。
@@ -1717,7 +1610,7 @@ try:
                 return self._loggers[target_name]
 
             def _cleanup_old_logs(self):
-                max_num = self.root.settings["maxLogNum"]
+                max_num = self._settings["maxLogNum"] if self._settings is not None else 50
                 if not os.path.exists(self.log_dir):
                     return
                 files = [f for f in os.listdir(self.log_dir) if f.endswith('.log') and f != 'latest.log']
@@ -1727,7 +1620,9 @@ try:
                     try:
                         os.remove(os.path.join(self.log_dir, oldest))
                         # 清理日志时使用主 logger 记录
-                        self._loggers[self.base_logger_name].info(t(self.root.langer.get("core.log.info.cleanOldLogs"), oldest))
+                        self._loggers[self.base_logger_name].info(
+                            t(self._t("core.log.info.cleanOldLogs",
+                                      "cleaned old log: $1"), oldest))
                     except Exception as e:
                         pass
 
