@@ -39,6 +39,61 @@ from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
 from ...registry import Box, registry
 
 
+# ─────────────── 下载列表项的操作按钮（core.download.item.actions）───────────────
+# init 由这一层自己提供：按钮自己知道该弹什么，Item 只负责把它们摆到右边、
+# 并统一管显隐（悬停时才显示）。
+
+
+def _item_action_download(b):
+    """下载：点开下载弹窗（叠加浮层）。"""
+    item = b.parent
+    btn = item.RBtn(getPath(b.icon), b.title, item, item.root)
+    btn.clicked.connect(lambda: item.root.signals.emit(
+        "overlayRequested", item.template.Download(item, item.root, item.data)))
+    return btn
+
+
+def _item_action_repo(b):
+    """仓库信息：压进浮层栈。"""
+    item = b.parent
+    btn = item.RBtn(getPath(b.icon), b.title, item, item.root)
+    btn.clicked.connect(lambda: item.root.signals.emit(
+        "stackRequested", item.template.RepoInfo(item, item.root, item.data, item.pixmap)))
+    return btn
+
+
+def _item_action_link(b):
+    """外部链接：交给系统浏览器。"""
+    item = b.parent
+    btn = item.RBtn(getPath(b.icon), b.title, item, item.root)
+    btn.clicked.connect(item.open_release)
+    return btn
+
+
+def _declare_item_actions():
+    """注册列表项的操作按钮。
+
+    幂等：Item 是虚拟列表的池化行，构造会反复发生，而注册只该做一次
+    （registry.add 不允许重复 key，重复调用会直接报错）。
+    """
+    point = "core.download.item.actions"
+    if registry.declared(point):
+        return
+    registry.declare(point, registrant="core.download",
+                     fields=("init", "title", "icon", "order", "attr"),
+                     required=("init", "title", "icon"),
+                     doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
+    registry.add(point, "core.download.item.download",
+                 init=_item_action_download, attr="btn_download", order=10,
+                 title="wid.pages.download.item.download", icon=BTN_DOWNLOAD)
+    registry.add(point, "core.download.item.repoInfo",
+                 init=_item_action_repo, attr="btn_repoInfo", order=20,
+                 title="wid.pages.download.item.repoInfo", icon=NAV_MENU)
+    registry.add(point, "core.download.item.link",
+                 init=_item_action_link, attr="btn_link", order=30,
+                 title="wid.pages.download.item.link", icon=NAV_LINK)
+
+
 class Game(QWidget):
     def __init__(self, parent=None, root=None, text=None, icon=None):
         super().__init__()
@@ -184,6 +239,7 @@ class Game(QWidget):
                 "core.download.sources", registrant="core.download",
                 fields=("init", "title", "icon", "order", "color"),
                 required=("init", "title", "icon"),
+                built=("main", "btn"),
                 doc="下载页顶部页签的游戏来源")
 
             def _src_init(cls):
@@ -200,7 +256,8 @@ class Game(QWidget):
                          title=self.MindustryARC.title_key, icon=self.MindustryARC.iconPath)
 
             for e in registry.entries("core.download.sources"):
-                self.add_page(e, color=e.get("color", True))
+                page = self.add_page(e, color=e.get("color", True))
+                registry.bind("core.download.sources", e.key, main=page, btn=page.btn)
 
         def add_page(self, entry, color=True):
             """按条目建一个下载源：备好页签按钮 → 交给条目的 init 去造。"""
@@ -889,22 +946,15 @@ class Game(QWidget):
 
                         self.layout.addStretch(1)
 
-                        # right-side action buttons
-                        self.btn_download = self.RBtn(getPath(BTN_DOWNLOAD), "wid.pages.download.item.download", self, self.root)
-                        self.layout.addWidget(self.btn_download, 0)
-                        self.btn_download.clicked.connect(lambda: self.root.signals.emit(
-                            "overlayRequested", self.template.Download(self,self.root,self.data)))
-
-                        self.btn_repoInfo = self.RBtn(getPath(NAV_MENU), "wid.pages.download.item.repoInfo", self, self.root)
-                        self.layout.addWidget(self.btn_repoInfo, 0)
-                        self.btn_repoInfo.clicked.connect(lambda: self.root.signals.emit(
-                            "stackRequested", self.template.RepoInfo(self,self.root,self.data,self.pixmap)))
-                        
-                        self.btn_link = self.RBtn(getPath(NAV_LINK), "wid.pages.download.item.link", self, self.root)
-                        self.layout.addWidget(self.btn_link, 0)
-                        self.btn_link.clicked.connect(self.open_release)
-
-                        self._action_btns = [self.btn_download, self.btn_repoInfo, self.btn_link]
+                        # 右侧操作按钮走注册中心：加一个按钮 = 写一个 init + 一条 registry.add。
+                        # 回调在 init 里接（按钮自己知道该弹什么），这里只管摆位置与统一控显隐。
+                        _declare_item_actions()
+                        self._action_btns = []
+                        for e in registry.entries("core.download.item.actions"):
+                            btn = e.init(Box(parent=self, root=self.root, entry=e))
+                            setattr(self, e.attr, btn)
+                            self.layout.addWidget(btn, 0)
+                            self._action_btns.append(btn)
 
                     def open_release(self):
                         url = self.data.get("releaseUrl") or ""
