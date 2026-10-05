@@ -67,7 +67,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 「什么都知道」的上帝对象。
 """
 
-__all__ = ["RegistryError", "Entry", "Box", "Registry", "registry",
+__all__ = ["RegistryError", "Entry", "Box", "Registry", "registry", "page",
            "simple", "DEFAULT_ORDER"]
 
 # 条目没写 order 时排在这里：够小，自定义项默认落在内置项之后
@@ -471,3 +471,35 @@ class Registry:
 
 # 全局单例：与 src/utils/bus.py 的 bus 同一风格
 registry = Registry()
+
+
+def page(key, *, point="core.pages", **meta):
+    """把一个 Page 子类登记进扩展点（装饰器）。
+
+        @page("core.start")
+        class Start(Page):
+            name    = "core.wid.pages.start"
+            icon    = BTN_START
+            order   = 10
+            default = True
+
+    元信息从**类属性**读，装饰器只补 key —— 「我是谁」和实现待在一起，
+    而不是散在另一处的 add(...) 里。构造只传 btn：参数全在类上，
+    装配方不必知道这个类怎么造；插件写一个页面也就是一个类的事。
+
+    point 可以指向同类扩展点（core.setting.pages / core.gameManager.pages…），
+    它们要的字段一样（init / title / icon / order / …），只是声明在不同地方。
+    default 只有声明了它的扩展点才带上（core.pages 有，别处没有）。
+    """
+    def deco(cls):
+        fields = registry.meta(point).get("__fields__", ())
+        kw = dict(meta)          # 额外字段原样带上，也可以覆盖下面几项
+        kw.setdefault("init", lambda b: cls(btn=getattr(b, "btn", None)))
+        kw.setdefault("title", cls.name)
+        kw.setdefault("icon", cls.icon)
+        kw.setdefault("order", getattr(cls, "order", 100))
+        if "default" in fields:
+            kw.setdefault("default", getattr(cls, "default", False))
+        registry.add(point, key, **kw)
+        return cls
+    return deco

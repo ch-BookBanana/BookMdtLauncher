@@ -30,7 +30,7 @@ from ..options.scrolls import Scroll
 from ..utils import change_color, t
 from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING,
                           BTN_START)
-from ..registry import Box, registry
+from ..registry import page, Box, registry
 
 from ._init import *
 from .fStack.gameManager import GameManager
@@ -126,10 +126,16 @@ def _parse_log_line(text, fallback="info"):
     return fallback, ("error" if fallback == "error" else "info"), ""
 
 
+@page("core.start")
 class Start(Page):
-    def __init__(self, parent=None, root=None, text=None, logo=None, btn=None):
-        root.signals.register("start_gameChanged", Signal(object))
-        super().__init__(parent, root, text, logo, btn)
+    name = "core.wid.pages.start"
+    icon = BTN_START
+    order = 10
+    default = True
+
+    def __init__(self, btn=None):
+        events.register("start_gameChanged", Signal(object))
+        super().__init__(btn)
         # 左侧信息改为事件驱动：启动刷新一次 + 订阅 mdtManager 事件（替代 1 秒轮询）
         self.left.refresh()
         events.mdtManager.on_game_changed.connect(self.left._on_game_changed)
@@ -208,7 +214,7 @@ class Start(Page):
 
     class Left(Leftw):
         def __init__(self, parent=None, root=None):
-            super().__init__(parent, root)
+            super().__init__(parent)
             self.resize_(250)
             self.init_wid()
             self.game = {
@@ -357,7 +363,7 @@ class Start(Page):
 
             class Start(Pages):
                 def __init__(self, parent=None, root=None):
-                    super().__init__(parent,root)
+                    super().__init__(parent)
                     self.have_game = True
                     self.init_wid()
                     self.langing()
@@ -399,7 +405,7 @@ class Start(Page):
 
             class Mod(Pages):
                 def __init__(self, parent=None, root=None):
-                    super().__init__(parent,root)
+                    super().__init__(parent)
                     self.init_wid()
                     self.langing()
                     bus.bind(self)
@@ -422,7 +428,7 @@ class Start(Page):
 
             class World(Pages):
                 def __init__(self, parent=None, root=None):
-                    super().__init__(parent,root)
+                    super().__init__(parent)
                     self.init_wid()
                     self.langing()
                     bus.bind(self)
@@ -446,7 +452,7 @@ class Start(Page):
             class Launch(Pages):
                 """左 stacked 的启动/Java 下载状态页：只允许有一个 label 显示状态。"""
                 def __init__(self, parent=None, root=None):
-                    super().__init__(parent,root)
+                    super().__init__(parent)
                     self.init_wid()
                     self.langing()
                     bus.bind(self)
@@ -483,7 +489,7 @@ class Start(Page):
             class Suspend(Pages):
                 """左侧栏「游戏运行中」页：唯一按钮是强制关闭（强杀游戏进程）。"""
                 def __init__(self, parent=None, root=None):
-                    super().__init__(parent,root)
+                    super().__init__(parent)
                     self.init_wid()
                     self.langing()
                     bus.bind(self)
@@ -515,10 +521,10 @@ class Start(Page):
         LOG_MAX_LINES = 2000   # 控制台保留的最大行数，超出后丢弃最旧的行
 
         def __init__(self,parent=None,root=None):
-            super().__init__(parent,root)
+            super().__init__(parent)
             # 已输出的日志（前缀, 正文, 配色角色）：主题切换时按新配色整篇重绘
             self.log_lines = []
-            self.light = bool(root.settings["theme"])
+            self.light = bool(events.settings["theme"])
             self.colors = _log_colors(self.light)
             self.tags = _log_tag_colors(self.light)
             self.have_game = True     # 是否有可用实例：无实例时按钮层整层隐藏
@@ -605,7 +611,7 @@ class Start(Page):
 
         class Start(_Main):
             def __init__(self,parent=None,root=None):
-                super().__init__(parent,root)
+                super().__init__(parent)
                 self.init_wid()
                 self.langing()
                 self.setAttribute(Qt.WA_StyledBackground,False)
@@ -645,12 +651,12 @@ class Start(Page):
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""
                 root = self.root
-                if root.java_flow is not None:
+                if events.java_flow is not None:
                     return  # 已有 Java 下载流程在运行
-                launcher = root.launcher
+                launcher = events.launcher
                 if launcher.going:
                     return  # 已有一个实例在跑/在启动，让 launcher 自己报 gameRunning
-                game = root.settings["defaultGame"]
+                game = events.settings["defaultGame"]
                 # 提前拦：解析口径与启动流程完全一致（同一个 _resolve_java），
                 # 缺 Java 就不放行进启动流程——否则界面会先闪一下「启动中」、
                 # 日志里还会多出一段准备记录，再退回「未检测到Java」。
@@ -689,14 +695,14 @@ class Start(Page):
 
         class Mod(_Main):
             def __init__(self,parent=None,root=None):
-                super().__init__(parent,root)
+                super().__init__(parent)
                 self.setAttribute(Qt.WA_StyledBackground,True)
 
         class World(_Main):
             """游戏分组列表：订阅 mdtManager 事件增量更新，不做整页重建。"""
 
             def __init__(self,parent=None,root=None):
-                super().__init__(parent,root)
+                super().__init__(parent)
                 self.setAttribute(Qt.WA_StyledBackground,True)
                 self.groups = {}
                 self.init_wid()
@@ -961,7 +967,7 @@ class Start(Page):
         class Console(_Main):
             """主区日志控制台：Launch（启动准备中）与 Log（进程运行中）两页各一个视图。"""
             def __init__(self,parent=None,root=None):
-                super().__init__(parent,root)
+                super().__init__(parent)
                 self.setAttribute(Qt.WA_StyledBackground,True)
                 self.parent.consoles.append(self)
                 self.init_wid()
@@ -1093,10 +1099,3 @@ class Start(Page):
                 self.shadow.setGeometry(0,0,200,self.height())
                 super().resizeEvent(event)
 
-
-# 往 core.pages 登记自己：主窗口按这条构建本页实例。
-# 语言键 / 图标 / 顺序都是本页自己的信息，就留在这里 —— main.py 不必认识这个类。
-registry.add("core.pages", "core.start",
-             init=lambda b: Start(b.parent, b.root, b.title, b.icon, btn=b.btn),
-             order=10, default=True,
-             title="core.wid.pages.start", icon=BTN_START)

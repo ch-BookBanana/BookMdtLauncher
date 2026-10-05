@@ -25,14 +25,19 @@ from ..events import events
 from ..options.scrolls import Scroll
 from ..utils import change_color
 from ..resources import (BTN_DOWNLOAD, NAV_MENU)
-from ..registry import Box, registry
+from ..registry import page, Box, registry
 
 from ._init import *
 from .downloads.game import Game
 
+@page("core.download")
 class Download(Page):
-    def __init__(self, parent=None, root=None, text=None, logo=None, btn=None):
-        super().__init__(parent, root, text, logo, btn)
+    name = "core.wid.pages.download"
+    icon = BTN_DOWNLOAD
+    order = 20
+
+    def __init__(self, btn=None):
+        super().__init__(btn)
 
     class Left(Leftw):
         def __init__(self, parent=None, root=None):
@@ -171,9 +176,3 @@ class Download(Page):
             return page_
 
 
-
-# 往 core.pages 登记自己（见 pages/start.py 的说明）
-registry.add("core.pages", "core.download",
-             init=lambda b: Download(b.parent, b.root, b.title, b.icon, btn=b.btn),
-             order=20,
-             title="core.wid.pages.download", icon=BTN_DOWNLOAD)

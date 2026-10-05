@@ -76,21 +76,35 @@ class Rightw(QWidget):
 
 
 class Page():
-    def __init__(self, parent=None, root=None, text=None, logo=None, btn=None):
+    """页面基类。
+
+    子类只做两件事：
+      1. 用类属性声明自己是谁（name 语言键 / icon 图标 / order 顺序 / default 默认页）；
+      2. 实现 init_wid() 建自己的三栏内容。
+    注册交给 @page("core.xxx") 装饰器（见 pages/start.py 末尾），
+    装配方按注册表构建，不认识任何一个页面类。
+
+    构造只需要一个 btn（导航按钮，装配方建好注入）；页容器从注册表取
+    （见 _shell），不再顺着 parent 链猜。
+    """
+
+    # ── 元信息：子类覆盖 ──
+    name = ""            # 语言键 —— 左栏按钮上的文案
+    icon = ""            # 图标：内置用 resources 常量，插件用 "${plugin}/…"
+    order = 100          # 左栏顺序
+    default = False      # 是否是启动默认页（只有 core.pages 认这个）
+
+    def __init__(self, btn=None):
         super().__init__()
-        self.parent = parent
-        self.root = root
-        self.text = text
-        self.logo = logo
-        self.init_wid()
-        self.id = len(self.parent.pages)
-        self.parent.pages.append(self)
         # 导航按钮由装配方（core.pages 的构建循环）建好后注入，点击也在那边接。
         # 这里原先是 self.root.window.left.pagebtns.add_btn(...) —— 一条从页面
         # 反向摸到主窗口、再摸进左栏按钮组的链，页面因此知道主窗口长什么样。
-        # 现在页面只管自己这一份三栏内容，按钮从哪来、点了切到哪去都不归它管。
         self.btn = btn
-        self.parent.btns.append(self)
+        shell = _shell()
+        self.id = len(shell.pages)
+        shell.pages.append(self)
+        shell.btns.append(self)
+        self.init_wid()
 
     def changePage(self):
         shell = _shell()
@@ -105,10 +119,10 @@ class Page():
 
     def init_wid(self):
         cls_left = self.Left if hasattr(self, 'Left') else Leftw
-        self.left = cls_left(self, self.root)
+        self.left = cls_left(self)
 
         cls_main = self.Main if hasattr(self, 'Main') else Mainw
-        self.main = cls_main(self, self.root)
+        self.main = cls_main(self)
 
         cls_right = self.Right if hasattr(self, 'Right') else Rightw
-        self.right = cls_right(self, self.root)
+        self.right = cls_right(self)
