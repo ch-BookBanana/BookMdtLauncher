@@ -170,7 +170,8 @@ try:
             self.signals.register("stackClosed", Signal(object, bool))
             # Java 任务状态：下载列表的轮询 → 启动页的进度文字（只改字不切页）
             self.signals.register("java_status", Signal(str, object))
-            # 插件重载是**命令**（有动作、不需要回值）：走事件，谁都能请求
+            # 插件重载是**命令**（有动作、不需要回值）：走事件，谁都能请求。
+            # 不往托盘塞入口 —— 托盘是窗口自己的零件，它该管的是窗口。
             self.signals.register("reload_plugins", Signal())
             self.signals.on("reload_plugins", lambda *_: self.reload_plugins())
             # 插件集合变了（卸载 / 加载失败回滚）：宿主据此把它盖过的东西收回来。
@@ -1470,11 +1471,6 @@ try:
                 self._plugin_actions = []
                 self._plugin_sep = self.menu.addSeparator()
 
-                # 重新加载插件：装了/改了插件之后不必重启启动器
-                self.menu_reload = QAction("", self)
-                self.menu_reload.triggered.connect(self._reload_plugins)
-                self.menu.addAction(self.menu_reload)
-
                 self.menu_close = QAction("", self)
                 self.menu_close.triggered.connect(QApplication.quit)
                 self.menu.addAction(self.menu_close)
@@ -1482,13 +1478,6 @@ try:
                 self.reload_plugin_items()
                 self.langing()
                 self.setContextMenu(self.menu)
-
-            def _reload_plugins(self):
-                """（托盘项）重载插件层。
-
-                延到事件循环里做：菜单得先收起来，重载本身要动界面。
-                """
-                QTimer.singleShot(0, self.root.reload_plugins)
 
             def reload_plugin_items(self):
                 """按 core.tray.menu 重建扩展项。
@@ -1509,7 +1498,6 @@ try:
 
             def langing(self):
                 self.menu_close.setText(self.root.langer.get("core.tray.menu.close"))
-                self.menu_reload.setText(self.root.langer.get("core.tray.menu.reloadPlugins"))
                 for act, e in getattr(self, "_plugin_actions", ()):
                     act.setText(self.root.langer.get(e.title))
 

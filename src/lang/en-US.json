@@ -158,7 +158,6 @@
     "core.wid.pages.setting.launcher.java.add": "Add Java",
     "core.wid.pages.setting.launcher.java.add.ok": "Java $1 recognized",
 
-    "core.tray.menu.reloadPlugins": "Reload plugins",
     "core.tray.menu.close": "Close",
 
     "core.github.token":       "GitHub\n\n--Core API--\nRemaining:$1\nReset:$2\n--Search API--\nRemaining:$3\nReset:$4",

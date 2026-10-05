@@ -158,7 +158,6 @@
     "core.wid.pages.setting.launcher.java.add": "新增Java",
     "core.wid.pages.setting.launcher.java.add.ok": "已識別 Java $1",
 
-    "core.tray.menu.reloadPlugins": "重新載入外掛",
     "core.tray.menu.close": "關閉",
 
     "core.github.token":       "GitHub\n\n--核心API--\n剩餘次數:$1\n重置時間:$2\n--搜尋API--\n剩餘次數:$3\n重置時間:$4",

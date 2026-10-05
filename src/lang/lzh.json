@@ -158,7 +158,6 @@
     "core.wid.pages.setting.launcher.java.add": "添爪哇",
     "core.wid.pages.setting.launcher.java.add.ok": "已識爪哇 $1",
 
-    "core.tray.menu.reloadPlugins": "重載插件",
     "core.tray.menu.close": "闔",
 
     "core.github.token":       "GitHub\n\n--常道API--\n餘次:$1\n復時:$2\n--搜檢API--\n餘次:$3\n復時:$4",
