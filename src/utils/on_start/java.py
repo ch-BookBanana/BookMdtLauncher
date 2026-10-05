@@ -26,6 +26,7 @@ from PySide6.QtCore import QTimer
 
 from ..javaDownload import JavaDownloadFlow, get_status
 from ..javaManager import javaManager
+from ..registry import registry
 from ..utils import t
 
 
@@ -96,7 +97,6 @@ def _start_page(root):
     连「索引 3 是 Launch 页」都写死在调用方 —— 动一次 Start 的布局，Java 流程
     就静默断掉。现在只按 key 从注册表取页面，页内怎么切由 Start 暴露的具名方法决定。
     """
-    from ..registry import registry
     return registry.entry("core.pages", "core.start").main
 
 

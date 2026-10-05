@@ -310,6 +310,17 @@ class Registry:
         return Entry(point, key, block["__registrant__"], block[key],
                      block.get("__built_fields__", ()))
 
+    def provide(self, point, key, obj, **meta):
+        """登记一个**已经存在**的对象，登记完立刻可查。
+
+        宿主体（三栏页容器）这类「本来就只有一个实例、而且先于使用者就建好」的
+        东西用它。与 add() 的分工：add 登记「怎么造」（构建期才调 init），
+        provide 登记「就是这个」（对象已经在手上）。
+        需要该扩展点先 declare(built=("obj",)) 声明好产物槽位。
+        """
+        self.add(point, key, init=lambda b: obj, **meta)
+        return self.bind(point, key, obj=obj)
+
     def bind(self, point, key, **built):
         """回填构建产物（页面实例 main、导航按钮 btn…），返回带产物的 Entry。
 

@@ -18,6 +18,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from PySide6.QtWidgets import QWidget
 
 from ..bus import bus
+from ..registry import registry
+
+
+def _shell():
+    """宿主体（三栏页容器）：left / main / right。
+
+    页面此前靠 self.parent.parent.left 这类链去摸它 —— 那是「我的 parent 的
+    parent 恰好有三栏容器」的假设：窗口内部一改层级就静默失效，而且报错位置
+    离真正原因很远（三层同名 Main 里换一层，取到的就是另一个东西）。
+    改从注册器按 key 取：页面认的是具名条目，不是窗口结构。
+    """
+    return registry.entry("core.shell", "core.shell.workspace").obj
 
 
 class Leftw(QWidget):
@@ -27,10 +39,10 @@ class Leftw(QWidget):
         self.root = root
         self.width_ = 0
         self.resize_(0)
-        self.parent.parent.left.addWidget(self)
+        _shell().left.addWidget(self)
 
     def resizeEvent(self, event):
-        self.parent.parent.left.setFixedWidth(self.width_)
+        _shell().left.setFixedWidth(self.width_)
         super().resizeEvent(event)
 
     def resize_(self,width):
@@ -43,7 +55,7 @@ class Mainw(QWidget):
         super().__init__()
         self.parent = parent
         self.root = root
-        self.parent.parent.main.addWidget(self)
+        _shell().main.addWidget(self)
 
 class Rightw(QWidget):
     def __init__(self, parent=None, root=None):
@@ -52,10 +64,10 @@ class Rightw(QWidget):
         self.root = root
         self.width_ = 0
         self.resize_(0)
-        self.parent.parent.right.addWidget(self)
+        _shell().right.addWidget(self)
 
     def resizeEvent(self, event):
-        self.parent.parent.right.setFixedWidth(self.width_)
+        _shell().right.setFixedWidth(self.width_)
         super().resizeEvent(event)
 
     def resize_(self,width):
@@ -81,11 +93,12 @@ class Page():
         self.parent.btns.append(self)
 
     def changePage(self):
-        self.parent.left.setCurrentWidget(self.left)
-        self.parent.main.setCurrentWidget(self.main)
-        self.parent.right.setCurrentWidget(self.right)
-        self.parent.left.setFixedWidth(self.left.width_)
-        self.parent.right.setFixedWidth(self.right.width_)
+        shell = _shell()
+        shell.left.setCurrentWidget(self.left)
+        shell.main.setCurrentWidget(self.main)
+        shell.right.setCurrentWidget(self.right)
+        shell.left.setFixedWidth(self.left.width_)
+        shell.right.setFixedWidth(self.right.width_)
 
     def click(self):
         self.btn.click()

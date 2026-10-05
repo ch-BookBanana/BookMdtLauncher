@@ -34,6 +34,17 @@ from ._init import *
 from .fStack.gameManage import GameManage
 
 
+def _page():
+    """本页（Start）实例：页内子部件要驱动整页行为时按 key 取。
+
+    这里原先是 self.parent.parent.parent.main.stack……
+    以及 self.parent.parent.parent.parent.changeGame(…) —— 三层、四层的 parent 链：
+    数错一层就摸到别的控件，窗口内部一改层级就静默失效。按 key 取实例，
+    认的是具名条目而不是层级。
+    """
+    return registry.entry("core.pages", "core.start").main
+
+
 # 游戏（Arc/Mindustry）日志行前缀，如 "[I] xxx" / "[E] xxx"
 _LOG_TAG = re.compile(r"^\[([A-Za-z])\]\s*")
 
@@ -182,6 +193,16 @@ class Start(Page):
         """Java 流程结束 / 取消：切回启动页。"""
         self.left.main.setCurrentWidget(self.left.main.start)
         self.main.stack.setCurrentWidget(self.main.start)
+
+    def show_main(self, name):
+        """主区切到具名子页（start / mod / world / launch / log）。
+
+        左栏那几个按钮原先是各写各的
+        self.parent.parent.parent.main.stack.setCurrentIndex(N) —— 索引一改顺序
+        就切错页、层级改一次就断，而且同一段在三个类里各抄了一遍。
+        收成这一个入口后，切页既不认索引也不认层级。
+        """
+        self.main.stack.setCurrentWidget(getattr(self.main, name))
 
     class Left(Leftw):
         def __init__(self, parent=None, root=None):
@@ -360,11 +381,12 @@ class Start(Page):
                     # 有游戏：进入游戏选择列表；无游戏：前往下载页的「游戏本体」分类
                     if self.have_game:
                         self.parent.setCurrentIndex(2)
-                        self.parent.parent.parent.main.stack.setCurrentIndex(2)
+                        _page().show_main("world")
                     else:
                         # 不再顺着 window.main.main 横摸兄弟页：按 key 从注册表取。
                         # main 是构建期回填的产物（core.pages 声明了槽位）。
-                        registry.entry("core.pages", "core.download").main.click()
+                        download = registry.entry("core.pages", "core.download").main
+                        download.click()
                         download.main.game.btn.click()
 
                 def set_have_game(self, have: bool):
@@ -395,7 +417,7 @@ class Start(Page):
                     self.layout.addWidget(self.cancle)
 
                     self.cancle.clicked.connect(lambda: self.parent.setCurrentIndex(0))
-                    self.cancle.clicked.connect(lambda: self.parent.parent.parent.main.stack.setCurrentIndex(0))
+                    self.cancle.clicked.connect(lambda: _page().show_main("start"))
 
                 def langing(self):
                     self.cancle.setText(self.root.langer.get("text.return"))
@@ -418,7 +440,7 @@ class Start(Page):
                     self.layout.addWidget(self.cancle)
 
                     self.cancle.clicked.connect(lambda: self.parent.setCurrentIndex(0))
-                    self.cancle.clicked.connect(lambda: self.parent.parent.parent.main.stack.setCurrentIndex(0))
+                    self.cancle.clicked.connect(lambda: _page().show_main("start"))
 
                 def langing(self):
                     self.cancle.setText(self.root.langer.get("text.return"))
@@ -486,7 +508,7 @@ class Start(Page):
                     if self.root.launcher.kill_game():
                         return
                     self.parent.setCurrentIndex(0)
-                    self.parent.parent.parent.main.stack.setCurrentIndex(0)
+                    _page().show_main("start")
 
                 def langing(self):
                     self.stop.setText(self.root.langer.get("wid.pages.start.suspend.stop"))
@@ -879,7 +901,7 @@ class Start(Page):
                         self.setFixedHeight(40)
                         self.setProperty("wid","lbtn")
                         self.init_wid()
-                        self.clicked.connect(lambda:self.parent.parent.parent.parent.changeGame(self.game))
+                        self.clicked.connect(lambda: _page().changeGame(self.game))
 
                     def init_wid(self):
                         self.layout = QHBoxLayout(self)

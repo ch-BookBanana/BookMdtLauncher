@@ -2447,6 +2447,17 @@ try:
                         from src.utils.pages.setting import Setting
                         from src.utils.registry import Box, registry
 
+                        # 宿主体交给注册器：页面据此取三栏容器，不必再顺着
+                        # parent.parent 猜「我的祖父有三栏」。这也是插件页能独立
+                        # 构造的前提 —— 它只认注册表里的具名条目，不认窗口结构。
+                        registry.declare("core.shell", registrant="core",
+                                         fields=("init", "order"),
+                                         required=("init",),
+                                         built=("obj",),
+                                         doc="宿主体（三栏页容器）：left / main / right")
+                        registry.provide("core.shell", "core.shell.workspace", self,
+                                         order=1)
+
                         registry.declare(
                             "core.pages", registrant="core",
                             fields=("init", "title", "icon", "order", "default"),

@@ -262,6 +262,11 @@ class GameManage(Scroll):
             self.langing()      # 初次文案：总线只在切语言时回调，不会补这一次
             bus.bind(self)
 
+        @property
+        def game(self):
+            """本页管理的实例名（从 GameManage 现取，改名后自动跟着换）。"""
+            return self.parent.game
+
         def init_ui(self):
             self.setAttribute(Qt.WA_StyledBackground, True)
 
@@ -473,8 +478,12 @@ class GameManage(Scroll):
 
             @property
             def game(self):
-                """目标实例名：从页面现取，改名后自动跟着换，浮层不用自己同步。"""
-                return self.parent.parent.game
+                """目标实例名：从 Top 现取，改名后自动跟着换，浮层不用自己同步。
+
+                原先写的是 self.parent.parent.game —— 一次跨两层，靠「Top 的 parent
+                恰好是 GameManage」这条隐含前提撑着。现在每层只依赖自己的直接 parent。
+                """
+                return self.parent.game
 
             def _set_ok_enabled(self, enabled):
                 """确定按钮的可用态与配色一起切（禁用时压成半透明）。"""
