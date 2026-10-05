@@ -2433,6 +2433,7 @@ try:
                             "core.pages", registrant="core",
                             fields=("cls", "title", "icon", "order", "default"),
                             required=("cls", "title"),
+                            built=("main", "btn"),
                             doc="主窗口左栏导航页（登记顺序即导航顺序）")
 
                         registry.add("core.pages", "core.start",
@@ -2452,6 +2453,11 @@ try:
                         for e in registry.entries("core.pages"):
                             page = e.cls(self, self.root, e.title, getPath(e.icon))
                             setattr(self, e.name, page)
+                            # 把页面与它配套的导航按钮回填进条目（占位）：
+                            # 此刻按钮仍是页面自己在 Page.__init__ 里建的，装配方只是
+                            # 把它记下来，让「页面 ↔ 按钮」在注册表里有唯一出处。
+                            # 等下面几步再把「谁建按钮」「谁接点击」逐步挪到这里来。
+                            registry.bind("core.pages", e.key, main=page, btn=page.btn)
                             if e.get("default"):
                                 self.default_page = page
 

@@ -41,13 +41,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
             "__required__":   ("cls", "title"),
             "__doc__":        "主窗口左栏导航页",
 
-            "core.start":    {"cls": Start, "title": ..., "order": 10},
+            "core.start": {
+                "cls": Start, "title": ..., "order": 10,     # ← add()  登记
+                "__built__": {"main": <Start 实例>,           # ← bind() 回填
+                              "btn":  <左栏导航按钮>},
+            },
             "com.example.hello.main": {"cls": HelloPage, "order": 100},
         },
     }
 
 * 保留键一律 `__xxx__`；条目 key 一律 `<namespace>.<name>` 且不得以 `__` 开头，
   两组键因此永不打架（add() 会挡住越界的 key）。
+* 条目内的 `__built__` 专放**构建产物**：add 进来的是「谁登记谁提供」的声明，
+  bind 填进去的是「谁构建谁回填」的实例。两者分开，`__fields__` 校验才不会
+  把 main/btn 当成未知字段。产物用 e.main / e.btn 直读（查找顺序：登记字段 → 产物）。
 * 条目的 namespace 既是「谁登记的」，也是卸载/回滚时的摘除依据；
   **不要用 key.split(".")[0] 求它** —— `core.download.sources` 的条目
   `core.origin` 属于 `core`，而插件的 `com.example.hello.main` 属于
@@ -66,7 +73,13 @@ __all__ = ["RegistryError", "Entry", "Registry", "registry", "DEFAULT_ORDER"]
 DEFAULT_ORDER = 100
 
 # 扩展点块里的保留键（扩展点自身的元信息，不是条目）
-_RESERVED = ("__registrant__", "__kind__", "__fields__", "__required__", "__doc__")
+_RESERVED = ("__registrant__", "__kind__", "__fields__", "__required__",
+             "__built_fields__", "__doc__")
+
+# 条目里的保留键：构建产物回填处。
+# 必须与登记字段分区 —— 否则 bind() 填进来的 main/btn 会被 __fields__ 判成
+# 「未知字段」，validate() 也分不清「登记时写错了」和「构建时填进来的」。
+_BUILT = "__built__"
 
 
 class RegistryError(Exception):
@@ -87,19 +100,24 @@ def _is_entry_key(key):
 
 
 class Entry:
-    """一个登记项：key 拆出来的身份 + 该扩展点 schema 下的字段。
+    """一个登记项：key 拆出来的身份 + 登记字段 + 构建产物。
 
-    字段既可以用 e.cls 直读（拼错会给出「有哪些字段」的提示），
-    也可以用 e.get("cls", 默认值)。
+    字段既可以用 e.cls 直读，也可以用 e.get("cls", 默认值)；
+    查找顺序是「登记字段 → 构建产物」，所以页面装配好之后
+    e.main / e.btn 也能直接读（那两个是 bind() 的产物，不是登记字段）。
     """
 
-    __slots__ = ("key", "namespace", "name", "fields", "_point", "_registrant")
+    __slots__ = ("key", "namespace", "name", "fields", "built", "built_fields",
+                 "_point", "_registrant")
 
-    def __init__(self, point, key, registrant, fields):
+    def __init__(self, point, key, registrant, raw_fields, built_fields=()):
         self._point = point
         self._registrant = registrant
         self.key = key
-        self.fields = fields
+        # 登记字段与构建产物在这里分开：fields 只留 add() 时登记的，built 只留 bind() 填的
+        self.fields = {k: v for k, v in raw_fields.items() if k != _BUILT}
+        self.built = dict(raw_fields.get(_BUILT) or {})
+        self.built_fields = tuple(built_fields)
         ns, _, name = key.rpartition(".")
         self.namespace = ns or registrant
         self.name = name or key
@@ -110,19 +128,38 @@ class Entry:
             fields = object.__getattribute__(self, "fields")
         except AttributeError:
             raise AttributeError(item) from None
-        try:
+        if item in fields:
             return fields[item]
-        except KeyError:
+        built = object.__getattribute__(self, "built")
+        if item in built:
+            return built[item]
+        slots = object.__getattribute__(self, "built_fields")
+        if item in slots:
             raise AttributeError(
-                f"{self._point} 的条目 {self.key!r} 没有字段 {item!r}"
-                f"（可用：{', '.join(sorted(fields)) or '无'}）"
-            ) from None
+                f"{self._point} 的条目 {self.key!r} 声明了产物槽位 {item!r}，"
+                f"但还没有 bind() 回填"
+            )
+        avail = (sorted(fields)
+                 + [f"{k}(产物)" for k in sorted(built)]
+                 + [f"{k}(槽位)" for k in sorted(slots) if k not in built])
+        raise AttributeError(
+            f"{self._point} 的条目 {self.key!r} 没有字段 {item!r}"
+            f"（可用：{', '.join(avail) or '无'}）"
+        )
 
     def get(self, item, default=None):
-        return self.fields.get(item, default)
+        """先查登记字段，再查构建产物。"""
+        if item in self.fields:
+            return self.fields[item]
+        return self.built.get(item, default)
+
+    def is_built(self):
+        """构建产物是否已回填（比如页面装配完成、main/btn 就位）。"""
+        return bool(self.built)
 
     def __repr__(self):
-        return f"<Entry {self.key} fields={sorted(self.fields)}>"
+        mark = f" +built{sorted(self.built)}" if self.built else ""
+        return f"<Entry {self.key} fields={sorted(self.fields)}{mark}>"
 
 
 class Registry:
@@ -136,11 +173,13 @@ class Registry:
     # ─────────────────────────── 声明扩展点 ───────────────────────────
 
     def declare(self, point, *, registrant=None, fields=(), required=(),
-                kind="class", doc=""):
+                built=(), kind="class", doc=""):
         """声明一个扩展点，并钉死它能接受哪些字段。
 
         fields    允许出现的字段名（不在表里的字段，add() 会当场报错）
         required  其中必须提供的字段
+        built     构建产物的**槽位名**（如页面条的 main/btn）。声明了槽位，
+                  bind() 填别的名字就会报错，读的时候也知道「这个条目本该有产物」。
         registrant 谁声明了这个扩展点；缺省取 point 的前缀（"core.pages" → "core"）
 
         重复声明且 schema 一致时视为幂等（模块可能被多次 import），
@@ -151,15 +190,23 @@ class Registry:
 
         fields = tuple(fields)
         required = tuple(required)
+        built = tuple(built)
         stray = [f for f in required if f not in fields]
         if stray:
             raise RegistryError(f"{point}: __required__ 里的 {stray} 不在 __fields__ 中")
+        overlap = [f for f in built if f in fields]
+        if overlap:
+            raise RegistryError(
+                f"{point}: {overlap} 同时出现在 __fields__ 和产物槽位里；"
+                f"登记字段与构建产物必须分开"
+            )
 
         block = {
             "__registrant__": registrant or _namespace_of(point) or point,
             "__kind__": kind,
             "__fields__": fields,
             "__required__": required,
+            "__built_fields__": built,
             "__doc__": doc,
         }
 
@@ -215,7 +262,49 @@ class Registry:
             raise RegistryError(f"{point}.{key}: 缺必填字段 {missing}")
 
         block[key] = dict(fields)
-        return Entry(point, key, block["__registrant__"], block[key])
+        return Entry(point, key, block["__registrant__"], block[key],
+                     block.get("__built_fields__", ()))
+
+    def bind(self, point, key, **built):
+        """回填构建产物（页面实例 main、导航按钮 btn…），返回带产物的 Entry。
+
+        单独一个方法而不是并进 add()：add 是「谁登记谁提供」，bind 是「谁构建谁回填」，
+        责任人不同、时机也不同 —— 插件可以在启动早期就登记完，而界面要等宿主建好
+        才开始构建。产物走 __built__，不参与 __fields__ 校验。
+        """
+        block = self._block(point)
+        raw = block.get(key)
+        if not isinstance(raw, dict) or key in self.RESERVED:
+            raise RegistryError(f"{point} 里没有条目 {key!r}，无法回填构建产物")
+        slots = block.get("__built_fields__") or ()
+        unknown = sorted(set(built) - set(slots))
+        if unknown:
+            raise RegistryError(
+                f"{point}.{key}: 未声明的产物 {unknown}；"
+                f"该扩展点声明的产物槽位是 {list(slots) or '（无）'}"
+            )
+        raw.setdefault(_BUILT, {}).update(built)
+        return Entry(point, key, block["__registrant__"], raw, slots)
+
+    def unbind(self, point, key, *names):
+        """摘掉构建产物（界面重建 / 卸载前）。不带 names 则清空该条目的全部产物。"""
+        block = self._block(point)
+        raw = block.get(key)
+        if not isinstance(raw, dict) or key in self.RESERVED:
+            raise RegistryError(f"{point} 里没有条目 {key!r}，无法摘除构建产物")
+        slot = raw.get(_BUILT)
+        if not slot:
+            return 0
+        if not names:
+            n = len(slot)
+            raw[_BUILT] = {}
+            return n
+        n = 0
+        for name in names:
+            if name in slot:
+                del slot[name]
+                n += 1
+        return n
 
     # ─────────────────────────── 查询 ───────────────────────────
 
@@ -233,7 +322,8 @@ class Registry:
         for key, fields in block.items():
             if key in self.RESERVED:
                 continue
-            e = Entry(point, key, block["__registrant__"], dict(fields))
+            e = Entry(point, key, block["__registrant__"], dict(fields),
+                      block.get("__built_fields__", ()))
             if where and any(e.fields.get(k) != v for k, v in where.items()):
                 continue
             out.append(e)
@@ -248,7 +338,8 @@ class Registry:
         if not isinstance(fields, dict) or key in self.RESERVED:
             have = sorted(k for k in block if k not in self.RESERVED)
             raise RegistryError(f"{point} 里没有条目 {key!r}；现有：{have or '（空）'}")
-        return Entry(point, key, block["__registrant__"], dict(fields))
+        return Entry(point, key, block["__registrant__"], dict(fields),
+                     block.get("__built_fields__", ()))
 
     # ─────────────────────────── 校验 / 维护 ───────────────────────────
 
@@ -270,7 +361,7 @@ class Registry:
                 if not isinstance(fields, dict):
                     problems.append(f"{point}.{key}: 条目内容不是 dict")
                     continue
-                unknown = sorted(set(fields) - allowed)
+                unknown = sorted(set(fields) - allowed - {_BUILT})
                 if unknown:
                     problems.append(f"{point}.{key}: 未知字段 {unknown}")
                 missing = sorted(required - set(fields))
