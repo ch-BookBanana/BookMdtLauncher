@@ -106,12 +106,14 @@ from . import start                # noqa: E402,F401
 from . import download             # noqa: E402,F401
 from . import game                 # noqa: E402,F401
 from . import setting              # noqa: E402,F401
+from . import githubSetting        # noqa: E402,F401
 from .downloads import game as _download_sources   # noqa: E402,F401
 from .fStack import gameManager    # noqa: E402,F401
 
 start.register()                   # core.start.bottom（底部按钮页）
 download.register()                # core.download.tabs（左栏页签）
 setting.register()                 # core.setting.pages + core.setting.items
+githubSetting.register()           # core.overlays：GitHub 设置页
 _download_sources.register()       # core.download.sources（三个下载源）
 gameManager.register()             # core.overlays + 管理浮层的功能页与区块
 

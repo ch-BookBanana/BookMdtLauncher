@@ -147,6 +147,10 @@ class Start(Page):
         # 启动阶段（校验/Java 流程）与游戏进程输出：写入日志文件 + 主区控制台
         events.launcher.log.connect(self._on_launcher_log)
         events.launcher.game_log.connect(self._on_game_log)
+        # 下载列表的轮询会报 Java 任务的实时状态，用它纠偏进度文字
+        # （原先它直接穿到 left.main.launch 上点 setStatus，而那个入口
+        #  main.py 里根本不存在 —— AttributeError 被 except 吞了，功能一直哑着）
+        events.on("java_status", self.java_status)
 
     def _on_game_launched(self):
         """每次启动游戏：先清空上一次的控制台日志，再切到「启动中」页。
@@ -195,6 +199,15 @@ class Start(Page):
         """
         self.left.main.setCurrentWidget(self.left.main.launch)
         self.main.stack.setCurrentWidget(self.main.launch)
+        self.left.main.launch.setStatus(status, pct)
+
+    def java_status(self, status, pct=None):
+        """只更新 Java 状态文字，**不切页**。
+
+        与 java_show_progress 的区别就在这：那个是 Java 流程自己在走，
+        切页天经地义；这个是下载列表的周期轮询来纠偏的，用户可能正在
+        别处看东西，把页面拽回 Java 页会很烦。
+        """
         self.left.main.launch.setStatus(status, pct)
 
     def java_finish(self):
@@ -1082,8 +1095,7 @@ def _open_game_manager(parent, game):
     管哪个实例由**这里**说清楚（走 Box 上下文），浮层自己不去摸全局默认值 ——
     否则「谁的设置」就成了浮层的隐藏前提，别的入口想给指定实例开管理没法表达。
     """
-    ov = registry.entry("core.overlays", "core.gameManager")
-    return ov.init(Box(parent=parent, entry=ov, game=game))
+    return open_overlay("core.gameManager", parent, game=game)
 
 def register():
     """底部按钮页的登记。由 pages/builtin.py 调用一次。

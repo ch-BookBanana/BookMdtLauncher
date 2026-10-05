@@ -364,3 +364,40 @@ class GithubAPI(QObject):
         except Exception:
             return False, None
     
+
+# ─────────────────── token 存盘 / 读回 ───────────────────
+# token 落盘前要过两层：先用随机密钥加密（GithubAPI._encrypt，见上），
+# 得到的密文与密钥再抹一层固定 XOR，最后 base64 进 settings。
+# 原先这一对方法长在 Main 上（_encrypt_settings_token / _obf_store…），
+# 于是「谁要用就得攥着宿主」—— 用到它的是 GitHub 设置页与启动流程，
+# 都不是宿主该管的事，收到这里跟加密本身待在一起。
+
+_OBF_BYTE = 0x5A
+
+
+def _obf(s):
+    """固定 XOR → base64：settings 存储前混淆。"""
+    return base64.b64encode(bytes(b ^ _OBF_BYTE for b in s.encode())).decode()
+
+
+def _deobf(s):
+    """逆向：base64 解码 → XOR 还原。"""
+    return bytes(byte ^ _OBF_BYTE for byte in base64.b64decode(s)).decode()
+
+
+def store_token(settings, raw):
+    """把明文 token 加密后写进 settings["github"]（token_enc / token_key）。"""
+    enc, key = GithubAPI._encrypt(raw)
+    settings["github"]["token_enc"] = _obf(enc)
+    settings["github"]["token_key"] = _obf(key)
+
+
+def read_token(settings):
+    """从 settings["github"] 读回明文 token；没存过或存坏了返回 None。"""
+    gh = settings.get("github") or {}
+    if not gh.get("token_enc") or not gh.get("token_key"):
+        return None
+    try:
+        return GithubAPI._decrypt(_deobf(gh["token_enc"]), _deobf(gh["token_key"]))
+    except Exception:
+        return None

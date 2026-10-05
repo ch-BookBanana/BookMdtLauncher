@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from PySide6.QtWidgets import QWidget
 
 from ..bus import bus
-from ..registry import registry
+from ..registry import Box, registry
 
 
 def _shell():
@@ -30,6 +30,18 @@ def _shell():
     改从注册器按 key 取：页面认的是具名条目，不是窗口结构。
     """
     return registry.entry("core.shell", "core.shell.workspace").obj
+
+
+def open_overlay(key, parent=None, **ctx):
+    """按条目 key 开一个浮层页面并**返回它** —— 挂上去由请求方发信号。
+
+    浮层条目登记在 core.overlays 里，开的人只需要 key，不必 import 那个类：
+    标题栏的 GitHub 设置、下载列表，启动页的游戏管理都走这里。
+    只有开浮层这一刻才知道的东西（比如游戏管理管哪个实例）走关键字传，
+    见 registry.Box 的「本次上下文」。
+    """
+    entry = registry.entry("core.overlays", key)
+    return entry.init(Box(parent=parent, entry=entry, **ctx))
 
 
 class Leftw(QWidget):
