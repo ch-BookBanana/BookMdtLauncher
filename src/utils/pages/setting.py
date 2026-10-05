@@ -31,6 +31,7 @@ from ..options.texts import Title
 from ..path_utils import getPath
 from ..utils import change_color, t
 from ..resources import (ACT_UNITS, FILE_FOLDER, TBT_CLOSE)
+from ..registry import registry
 
 from ._init import *
 
@@ -154,10 +155,17 @@ class Setting(Page):
             self.pages_ = []
             self.btns_ = []
 
+            # 设置子页走注册中心：加一个子页 = 写一个 Page 子类 + 一条 registry.add
+            registry.declare("core.setting.pages", registrant="core.setting",
+                             fields=("cls", "title", "icon", "order"),
+                             required=("cls", "title", "icon"),
+                             doc="设置页左栏的子页")
+            registry.add("core.setting.pages", "core.setting.launcher",
+                         cls=self.Launcher, order=10,
+                         title="wid.pages.setting.launcher", icon=ACT_UNITS)
 
-            self.launcher = self.add_page("wid.pages.setting.launcher",ACT_UNITS,self.Launcher)
-
-            
+            for e in registry.entries("core.setting.pages"):
+                self.add_page(e.title, getPath(e.icon), e.cls)
 
         def add_page(self,text=None,icon=None,page=None):
             if page is None: page = self.Page
@@ -212,13 +220,42 @@ class Setting(Page):
                 self.init_wid()
 
             def init_wid(self):
-                self._title1 = self.add(Title(self,self.root,"wid.pages.setting.launcher.preferences"),30)
+                # 标准条目（分组标题 / Bool / Combo）走注册中心：加一项 = 一条 registry.add。
+                # attr 是绑到 self 上的名字 —— 下面的行为代码仍按老名字引用控件；
+                # 这一批只把「有哪些项、什么顺序、归哪组」数据化，行为绑定留在原地。
+                registry.declare("core.setting.items", registrant="core.setting",
+                                 fields=("cls", "group", "order", "title", "spacing", "attr"),
+                                 required=("cls", "group", "title", "attr"),
+                                 doc="设置子页里的标准条目（Title 分组标题 / Bool / Combo …）")
 
-                self._t1_theme = self.add(Bool(self,self.root,"wid.pages.setting.launcher.preferences.theme"))
+                registry.add("core.setting.items", "core.setting.preferences",
+                             cls=Title, group="launcher", order=10, spacing=30, attr="_title1",
+                             title="wid.pages.setting.launcher.preferences")
+                registry.add("core.setting.items", "core.setting.theme",
+                             cls=Bool, group="launcher", order=20, attr="_t1_theme",
+                             title="wid.pages.setting.launcher.preferences.theme")
+                registry.add("core.setting.items", "core.setting.lang",
+                             cls=Combo, group="launcher", order=30, attr="_t1_lang",
+                             title="wid.pages.setting.launcher.preferences.lang")
+                registry.add("core.setting.items", "core.setting.general",
+                             cls=Title, group="launcher", order=40, spacing=30, attr="_title2",
+                             title="wid.pages.setting.launcher.general")
+                registry.add("core.setting.items", "core.setting.java",
+                             cls=Title, group="launcher", order=50, spacing=30, attr="_title3",
+                             title="wid.pages.setting.launcher.java")
+                registry.add("core.setting.items", "core.setting.java.select",
+                             cls=Combo, group="launcher", order=60, attr="_t3_select",
+                             title="wid.pages.setting.launcher.java.select")
+
+                for e in registry.entries("core.setting.items", where={"group": "launcher"}):
+                    wid = e.cls(self, self.root, e.title)
+                    self.add(wid, e.get("spacing", 0))
+                    setattr(self, e.attr, wid)
+
+                # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
                 self._t1_theme.btn.setChecked(self.root.settings["theme"])
                 self._t1_theme.push.connect(self.root.setTheme)
 
-                self._t1_lang = self.add(Combo(self,self.root,"wid.pages.setting.launcher.preferences.lang"))
                 def _t1_lang_showEvent(self,combo):
                     items = self.root.langer.get_langs_info()
                     combo.clear()
@@ -230,13 +267,8 @@ class Setting(Page):
                 self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
                 self._t1_lang.combo.activated.connect(lambda: self.root.langer.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == self.root.settings["language"] else None)
 
-
-                self._title2 = self.add(Title(self,self.root,"wid.pages.setting.launcher.general"),30)
-
-
-                self._title3 = self.add(Title(self,self.root,"wid.pages.setting.launcher.java"),30)
-                self._t3_select = self.add(Combo(self,self.root,"wid.pages.setting.launcher.java.select"))
                 # 添加 Java：挂在选择框下面（尺寸跟游戏管理那排按钮一致）
+                # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写
                 self._t3_add_row = self.add(QWidget(),20)
                 self._t3_add_row_layout = QHBoxLayout(self._t3_add_row)
                 self._t3_add_row_layout.setContentsMargins(0,0,0,0)

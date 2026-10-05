@@ -11,6 +11,7 @@ from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import change_color, openFolder, t
 from ...resources import (FILE_FOLDER, TBT_CLOSE)
+from ...registry import registry
 
 
 def group_of(settings, game):
@@ -86,8 +87,21 @@ class GameManage(Scroll):
         self.line.setProperty("wid", "line")
         self.scroll_layout.addWidget(self.line, 0)
 
-        self.folders = self.add(self.Folders(self, self.root), 10)
-        self.java = self.add(self.Java(self, self.root), 20)
+        # 区块走注册中心：加一个区块 = 写一个 QWidget 子类 + 一条 registry.add。
+        # 本页是懒加载的（点开浮层才建），所以这些登记发生在构建期而非启动期 ——
+        # 注册中心「先登记后构建」的两段式本来就允许这样，各界面按自己的时机构建。
+        registry.declare("core.gameManage.sections", registrant="core.gameManage",
+                         fields=("cls", "attr", "order", "spacing"),
+                         required=("cls", "attr"),
+                         doc="游戏管理页的区块（文件夹 / Java …）")
+
+        registry.add("core.gameManage.sections", "core.gameManage.folders",
+                     cls=self.Folders, attr="folders", order=10, spacing=10)
+        registry.add("core.gameManage.sections", "core.gameManage.java",
+                     cls=self.Java, attr="java", order=20, spacing=20)
+
+        for e in registry.entries("core.gameManage.sections"):
+            setattr(self, e.attr, self.add(e.cls(self, self.root), e.get("spacing", 0)))
 
         self.todoText = QLabel("UNFINISHED")
         self.todoText.setProperty("wid", "title")

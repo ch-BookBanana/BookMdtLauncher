@@ -40,15 +40,10 @@ def startup_resume_java(root):
     if status not in ("downloading", "extracting"):
         return
     root.logger.info(t(root.langer.get("log.info.javaResumeTakeover"), status), name="Java")
-    # 同时切 left.bottom 与 right.main 到 Launch 页（唯一状态 label）
+    # 切到 Java 进度页并显示当前阶段（页内索引与控件层级归 Start 自己管）
     try:
-        bottom = root._java_bottom()
-        bottom.setCurrentIndex(3)
-        root._java_stack().setCurrentIndex(3)
-        if status == "downloading":
-            bottom.launch.setStatus("resume")      # 正在下载未完成的Java...
-        else:
-            bottom.launch.setStatus("extracting")  # 正在解压/部署Java...
+        _start_page(root).java_show_progress(
+            "resume" if status == "downloading" else "extracting")
     except Exception:
         pass
     # 等待一秒后，切换"正在下载Java"并拉起 QDownloader 续传
@@ -92,24 +87,24 @@ def begin_java_flow(root, resume=False):
 # 通过 attach(root) 绑定为 Main 实例方法，保持 main.py 内 self._java_* 调用点不变。
 
 
-def _java_bottom(root):
-    """Start 页左栏 Bottom（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Suspend。"""
-    return root.window.main.main.start.left.main
+def _start_page(root):
+    """取 Start 页面实例（core.pages 的构建产物）。
 
-
-def _java_stack(root):
-    """Start 页主区 stack（QStackedWidget）：0=Start 1=Mod 2=World 3=Launch 4=Log。"""
-    return root.window.main.main.start.main.stack
+    这里原先是两条穿过窗口结构的链：
+        root.window.main.main.start.left.main    （左栏 Bottom）
+        root.window.main.main.start.main.stack   （主区 stack）
+    连「索引 3 是 Launch 页」都写死在调用方 —— 动一次 Start 的布局，Java 流程
+    就静默断掉。现在只按 key 从注册表取页面，页内怎么切由 Start 暴露的具名方法决定。
+    """
+    from ..registry import registry
+    return registry.entry("core.pages", "core.start").main
 
 
 def _on_java_status(root, status):
     """Java 下载/解压状态变化：left.bottom 与 right.main 都切到 Launch 页并更新 label。"""
     try:
         root.logger.info(t(root.langer.get("log.info.javaStatusChange"), status), name="Java")
-        bottom = _java_bottom(root)
-        bottom.setCurrentIndex(3)
-        _java_stack(root).setCurrentIndex(3)
-        bottom.launch.setStatus(status)
+        _start_page(root).java_show_progress(status)
     except Exception as e:
         root.logger.error("[java_ui_status] %s ERR: %r" % (status, e), name="Java")
 
@@ -118,10 +113,7 @@ def _on_java_progress(root, done, total):
     """下载字节进度 → label 显示百分比（如 正在下载Java... 45%）。"""
     try:
         pct = int(done * 100 / total) if total else 0
-        bottom = _java_bottom(root)
-        bottom.setCurrentIndex(3)
-        _java_stack(root).setCurrentIndex(3)
-        bottom.launch.setStatus("downloading", pct)
+        _start_page(root).java_show_progress("downloading", pct)
     except Exception as e:
         root.logger.error("[java_ui_progress] %s/%s ERR: %r" % (done, total, e), name="Java")
 
@@ -130,10 +122,7 @@ def _on_java_extract_progress(root, done, total):
     """解压进度 → label 显示百分比（如 正在解压Java... 45%）。"""
     try:
         pct = int(done * 100 / total) if total else 0
-        bottom = _java_bottom(root)
-        bottom.setCurrentIndex(3)
-        _java_stack(root).setCurrentIndex(3)
-        bottom.launch.setStatus("extracting", pct)
+        _start_page(root).java_show_progress("extracting", pct)
     except Exception as e:
         root.logger.error("[java_ui_extract] %s/%s ERR: %r" % (done, total, e), name="Java")
 
@@ -143,13 +132,7 @@ def _on_java_paused_changed(root, paused, pct):
     try:
         _state = root.langer.get("log.info.javaPausedState" if paused else "log.info.javaResumedState")
         root.logger.info(t(root.langer.get("log.info.javaPausedChange"), _state, pct), name="Java")
-        bottom = _java_bottom(root)
-        bottom.setCurrentIndex(3)
-        _java_stack(root).setCurrentIndex(3)
-        if paused:
-            bottom.launch.setStatus("paused", pct)
-        else:
-            bottom.launch.setStatus("downloading", pct)
+        _start_page(root).java_show_progress("paused" if paused else "downloading", pct)
     except Exception as e:
         root.logger.error("[java_ui_paused] %s %s ERR: %r" % (paused, pct, e), name="Java")
 
@@ -210,10 +193,7 @@ def _on_java_download_done(root, ok):
 def _java_show_status(root, status):
     """left.bottom 与 right.main 都切到 Launch 页并更新唯一状态 label。"""
     try:
-        bottom = _java_bottom(root)
-        bottom.setCurrentIndex(3)
-        _java_stack(root).setCurrentIndex(3)
-        bottom.launch.setStatus(status)
+        _start_page(root).java_show_progress(status)
     except Exception as e:
         root.logger.error("[java_ui_show] %s ERR: %r" % (status, e), name="Java")
 
@@ -221,8 +201,7 @@ def _java_show_status(root, status):
 def _java_go_home(root):
     """返回主界面（左 stacked 与主区均回到 Start 页）。"""
     try:
-        _java_bottom(root).setCurrentIndex(0)
-        _java_stack(root).setCurrentIndex(0)
+        _start_page(root).java_finish()
     except Exception:
         pass
 
@@ -263,7 +242,7 @@ def attach(root):
     此处保持原有调用点不变。
     """
     for fn in (
-        _java_bottom, _java_stack,
+        _start_page,
         _on_java_status, _on_java_progress, _on_java_extract_progress,
         _on_java_paused_changed, _on_java_flow_cancelled, _on_java_cancelled,
         _on_java_finished, _on_java_download_done,

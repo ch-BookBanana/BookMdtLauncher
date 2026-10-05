@@ -28,6 +28,7 @@ from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
 from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING)
+from ..registry import registry
 
 from ._init import *
 from .fStack.gameManage import GameManage
@@ -165,6 +166,23 @@ class Start(Page):
         self.root.signals.emit("start_gameChanged", game)
         self.left.refresh()
 
+    def java_show_progress(self, status, pct=None):
+        """切到 Java 进度页并更新状态文字（左栏 Launch + 主区 Launch）。
+
+        on_start/java.py 原先穿 window.main.main 摸进来，自己 setCurrentIndex(3)
+        再点 left.main.launch —— 索引和控件层级全散在调用方，Start 一改版就静默断掉。
+        收成这个具名入口后，Start 内部怎么调整都不再影响 Java 流程。
+        用 setCurrentWidget 而不是索引：顺序变了也不会切错页。
+        """
+        self.left.main.setCurrentWidget(self.left.main.launch)
+        self.main.stack.setCurrentWidget(self.main.launch)
+        self.left.main.launch.setStatus(status, pct)
+
+    def java_finish(self):
+        """Java 流程结束 / 取消：切回启动页。"""
+        self.left.main.setCurrentWidget(self.left.main.start)
+        self.main.stack.setCurrentWidget(self.main.start)
+
     class Left(Leftw):
         def __init__(self, parent=None, root=None):
             super().__init__(parent, root)
@@ -273,11 +291,26 @@ class Start(Page):
                 self.init_wid()
                 
             def init_wid(self):
-                self.start = self.Start(self,self.root)
-                self.mod = self.Mod(self,self.root)
-                self.world = self.World(self,self.root)
-                self.launch = self.Launch(self,self.root)
-                self.suspend = self.Suspend(self,self.root)
+                # 底部按钮页走注册中心：每个 Pages 子类自己 addWidget 进栈，
+                # 这里只声明「有哪些、什么顺序、绑到哪个属性名」。
+                registry.declare("core.start.bottom", registrant="core.start",
+                                 fields=("cls", "attr", "order"),
+                                 required=("cls", "attr"),
+                                 doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
+
+                registry.add("core.start.bottom", "core.start.bottom.start",
+                             cls=self.Start, attr="start", order=10)
+                registry.add("core.start.bottom", "core.start.bottom.mod",
+                             cls=self.Mod, attr="mod", order=20)
+                registry.add("core.start.bottom", "core.start.bottom.world",
+                             cls=self.World, attr="world", order=30)
+                registry.add("core.start.bottom", "core.start.bottom.launch",
+                             cls=self.Launch, attr="launch", order=40)
+                registry.add("core.start.bottom", "core.start.bottom.suspend",
+                             cls=self.Suspend, attr="suspend", order=50)
+
+                for e in registry.entries("core.start.bottom"):
+                    setattr(self, e.attr, e.cls(self, self.root))
 
             def set_have_game(self, have: bool):
                 """切换左侧底部按钮：有游戏显示「选择游戏」，无游戏显示「下载界面」。"""
@@ -323,8 +356,9 @@ class Start(Page):
                         self.parent.setCurrentIndex(2)
                         self.parent.parent.parent.main.stack.setCurrentIndex(2)
                     else:
-                        download = self.root.window.main.main.download
-                        download.click()
+                        # 不再顺着 window.main.main 横摸兄弟页：按 key 从注册表取。
+                        # main 是构建期回填的产物（core.pages 声明了槽位）。
+                        registry.entry("core.pages", "core.download").main.click()
                         download.main.game.btn.click()
 
                 def set_have_game(self, have: bool):
