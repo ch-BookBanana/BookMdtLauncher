@@ -27,7 +27,8 @@ from src.utils.path_utils import getPath
 from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
-from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING)
+from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING,
+                          BTN_START)
 from ..registry import Box, registry
 
 from ._init import *
@@ -1094,3 +1095,11 @@ class Start(Page):
                     n.setPixmap(pix)
                 self.shadow.setGeometry(0,0,200,self.height())
                 super().resizeEvent(event)
+
+
+# 往 core.pages 登记自己：主窗口按这条构建本页实例。
+# 语言键 / 图标 / 顺序都是本页自己的信息，就留在这里 —— main.py 不必认识这个类。
+registry.add("core.pages", "core.start",
+             init=lambda b: Start(b.parent, b.root, b.title, b.icon, btn=b.btn),
+             order=10, default=True,
+             title="wid.pages.start", icon=BTN_START)

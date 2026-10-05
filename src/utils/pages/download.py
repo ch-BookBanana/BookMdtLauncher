@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 from ..options.scrolls import Scroll
 from ..utils import change_color
-from ..resources import (NAV_MENU)
+from ..resources import (BTN_DOWNLOAD, NAV_MENU)
 from ..registry import Box, registry
 
 from ._init import *
@@ -174,3 +174,10 @@ class Download(Page):
                 btn.click()
             return page_
 
+
+
+# 往 core.pages 登记自己（见 pages/start.py 的说明）
+registry.add("core.pages", "core.download",
+             init=lambda b: Download(b.parent, b.root, b.title, b.icon, btn=b.btn),
+             order=20,
+             title="wid.pages.download", icon=BTN_DOWNLOAD)

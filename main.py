@@ -52,8 +52,7 @@ try:
     from src.utils.utils import _is_mdt_download, change_color, t
     from src.utils.options.scrolls import Scroll
     from src.utils.bus import bus
-    from src.utils.resources import (ACT_DL_LIST, ACT_TIPS, BRAND_GITHUB, BTN_DOWNLOAD,
-                                     BTN_GAME, BTN_SETTING, BTN_START, ICON_APP_DARK,
+    from src.utils.resources import (ACT_DL_LIST, ACT_TIPS, BRAND_GITHUB, ICON_APP_DARK,
                                      ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,
                                      TBT_MINIMIZE, app_icon)
     from src.utils.on_start import startup
@@ -61,10 +60,10 @@ try:
     from src.utils.registry import Box, registry
     from src.utils.pages.fOverlay._init import FloatingOverlay
     from src.utils.pages.fStack._init import FloatingStack
-    from src.utils.pages.start import Start
-    from src.utils.pages.download import Download
-    from src.utils.pages.game import Game
-    from src.utils.pages.setting import Setting
+    # import 内置页面包即完成登记：各页面模块在自己末尾往 core.pages 登记条目
+    # （契约声明与那些 import 都收在 pages/builtin.py 里）。main.py 因此不必
+    # 认识任何一个页面类 —— 加页面只改那个包，不动这里。
+    from src.utils.pages import builtin as _builtin_pages    # noqa: F401
 
 
 
@@ -2437,13 +2436,6 @@ try:
                         self.right = self.Right_(self,self.root)
                         self.layout.addWidget(self.right,0)
 
-                        # 页面走注册中心：这里只声明「有哪些页面、什么顺序、谁是默认」，
-                        # 构建统一在下面的循环里 —— 加一个页面只需加一条 registry.add。
-                        # 属性名（start/download/game/setting）不是内部私有的：
-                        # on_start/java.py 按 key 取到 Start 后调它的具名入口
-                        # （java_show_progress / java_finish），registry.bind 回填的产物
-                        # 也用这些名字，改名要连带一起改。
-
                         # 宿主体交给注册器：页面据此取三栏容器，不必再顺着
                         # parent.parent 猜「我的祖父有三栏」。这也是插件页能独立
                         # 构造的前提 —— 它只认注册表里的具名条目，不认窗口结构。
@@ -2455,31 +2447,13 @@ try:
                         registry.provide("core.shell", "core.shell.workspace", self,
                                          order=1)
 
-                        registry.declare(
-                            "core.pages", registrant="core",
-                            fields=("init", "title", "icon", "order", "default"),
-                            required=("init", "title"),
-                            built=("main", "btn"),
-                            doc="主窗口左栏导航页（登记顺序即导航顺序）")
-
-                        # init 由注册方提供：装配方只管「备好按钮 → 调 init → 接线 → 回填」，
-                        # 不再需要知道每个页面类的构造签名（那是页面自己才知道的事）。
-                        def _page_init(cls):
-                            return lambda b: cls(b.parent, b.root, b.title, b.icon, btn=b.btn)
-
-                        registry.add("core.pages", "core.start",
-                                     init=_page_init(Start), order=10, default=True,
-                                     title="wid.pages.start", icon=BTN_START)
-                        registry.add("core.pages", "core.download",
-                                     init=_page_init(Download), order=20,
-                                     title="wid.pages.download", icon=BTN_DOWNLOAD)
-                        registry.add("core.pages", "core.game",
-                                     init=_page_init(Game), order=30,
-                                     title="wid.pages.game", icon=BTN_GAME)
-                        registry.add("core.pages", "core.setting",
-                                     init=_page_init(Setting), order=40,
-                                     title="wid.pages.setting", icon=BTN_SETTING)
-
+                        # 页面本身不在这里登记：各页面模块在自己末尾往 core.pages
+                        # 加条目（契约声明在 pages/builtin.py），装配方只负责构建 ——
+                        # 「有哪些页面」不归 main.py 管，加页面也不动这里。
+                        # 属性名（start/download/game/setting）仍不是内部私有的：
+                        # on_start/java.py 按 key 取到 Start 后调它的具名入口
+                        # （java_show_progress / java_finish），registry.bind 回填的
+                        # 产物也用这些名字，改名要连带一起改。
                         self.default_page = None
                         for e in registry.entries("core.pages"):
                             btn = self.nav.add_btn(e.title, e.icon)

@@ -30,7 +30,7 @@ from ..options.texts import Title
 
 from ..path_utils import getPath
 from ..utils import change_color, t
-from ..resources import (ACT_UNITS, FILE_FOLDER, TBT_CLOSE)
+from ..resources import (ACT_UNITS, BTN_SETTING, FILE_FOLDER, TBT_CLOSE)
 from ..registry import Box, registry, simple
 
 from ._init import *
@@ -504,3 +504,10 @@ class Setting(Page):
                     if t3SelecIndex1 >= 0:self._t3_select.combo.setItemText(t3SelecIndex1,self.root.langer.get("wid.pages.setting.launcher.java.select.none"))
                     if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,self.root.langer.get("wid.pages.setting.launcher.java.select.auto"))
                 except : pass
+
+
+# 往 core.pages 登记自己（见 pages/start.py 的说明）
+registry.add("core.pages", "core.setting",
+             init=lambda b: Setting(b.parent, b.root, b.title, b.icon, btn=b.btn),
+             order=40,
+             title="wid.pages.setting", icon=BTN_SETTING)

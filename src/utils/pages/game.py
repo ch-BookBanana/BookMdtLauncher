@@ -18,6 +18,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout
 
+from ..registry import registry
+from ..resources import BTN_GAME
+
 from ._init import *
 from .fStack.gameManage import GameManage
 
@@ -42,3 +45,10 @@ class Game(Page):
             self.todoText.setStyleSheet("font-size: 20px;")
             self.layout.addWidget(self.todoText,1)
 
+
+
+# 往 core.pages 登记自己（见 pages/start.py 的说明）
+registry.add("core.pages", "core.game",
+             init=lambda b: Game(b.parent, b.root, b.title, b.icon, btn=b.btn),
+             order=30,
+             title="wid.pages.game", icon=BTN_GAME)
