@@ -238,23 +238,7 @@ class Game(QWidget):
             self.pages_ = []
             self.btns_ = []
 
-            # 下载源走注册中心：init 由源自己提供（装配方不猜构造签名），
-            # 仓库 / README / 缓存文件名仍由各 Template 子类的类属性提供，
-            # 只有界面要用的语言键与图标登记一份。
-
-            def _src_init(cls):
-                return lambda b: cls(b.parent, b.title, b.icon)
-
-            registry.add("core.download.sources", "core.origin",
-                         init=_src_init(self.Origin), order=10, color=False,
-                         title=self.Origin.title_key, icon=self.Origin.iconPath)
-            registry.add("core.download.sources", "core.mindustryx",
-                         init=_src_init(self.MindustryX), order=20, color=False,
-                         title=self.MindustryX.title_key, icon=self.MindustryX.iconPath)
-            registry.add("core.download.sources", "core.mindustryarc",
-                         init=_src_init(self.MindustryARC), order=30, color=False,
-                         title=self.MindustryARC.title_key, icon=self.MindustryARC.iconPath)
-
+            # 下载源从注册表取：登记在模块加载时做一次（见文件末尾）。
             for e in registry.entries("core.download.sources"):
                 page = self.add_page(e, color=e.get("color", True))
                 registry.bind("core.download.sources", e.key, main=page, btn=page.btn)
@@ -1943,3 +1927,22 @@ class Game(QWidget):
                     "gameLinear": game_link,
                     "assets": assets,
                 }
+
+# ── 下载源的登记（模块加载时一次）──
+# init 由源自己提供（装配方不猜构造签名）：宿主实例从 Box.parent 来，类从闭包来。
+# 仓库 / README / 缓存文件名仍由各 Template 子类的类属性提供，
+# 这里只把界面要用的语言键与图标登记一份。
+
+def _src_init(cls):
+    return lambda b: cls(b.parent, b.title, b.icon)
+
+
+registry.add("core.download.sources", "core.origin",
+             init=_src_init(Game.Main.Origin), order=10, color=False,
+             title=Game.Main.Origin.title_key, icon=Game.Main.Origin.iconPath)
+registry.add("core.download.sources", "core.mindustryx",
+             init=_src_init(Game.Main.MindustryX), order=20, color=False,
+             title=Game.Main.MindustryX.title_key, icon=Game.Main.MindustryX.iconPath)
+registry.add("core.download.sources", "core.mindustryarc",
+             init=_src_init(Game.Main.MindustryARC), order=30, color=False,
+             title=Game.Main.MindustryARC.title_key, icon=Game.Main.MindustryARC.iconPath)

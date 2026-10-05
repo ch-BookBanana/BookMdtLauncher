@@ -96,13 +96,7 @@ class Setting(Page):
             self.pages_ = []
             self.btns_ = []
 
-            # 设置子页走注册中心：加一个子页 = 写一个 Page 子类 + 一条 registry.add。
-            # init 由子页自己提供，装配方不猜它的构造签名。
-            registry.add("core.setting.pages", "core.setting.launcher",
-                         init=lambda b: self.Launcher(b.parent, b.title, b.icon),
-                         order=10,
-                         title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
-
+            # 设置子页从注册表取：登记在模块加载时做一次（见文件末尾）。
             for e in registry.entries("core.setting.pages"):
                 self.add_page(e)
 
@@ -158,32 +152,7 @@ class Setting(Page):
                 self.init_wid()
 
             def init_wid(self):
-                # 标准条目（分组标题 / Bool / Combo）走注册中心：加一项 = 一条 registry.add。
-                # attr 是绑到 self 上的名字 —— 下面的行为代码仍按老名字引用控件；
-                # 这一批只把「有哪些项、什么顺序、归哪组」数据化，行为绑定留在原地。
-
-                registry.add("core.setting.items", "core.setting.preferences",
-                             init=simple(Title), group="launcher", order=10, spacing=30,
-                             attr="_title1",
-                             title="core.wid.pages.setting.launcher.preferences")
-                registry.add("core.setting.items", "core.setting.theme",
-                             init=simple(Bool), group="launcher", order=20, attr="_t1_theme",
-                             title="core.wid.pages.setting.launcher.preferences.theme")
-                registry.add("core.setting.items", "core.setting.lang",
-                             init=simple(Combo), group="launcher", order=30, attr="_t1_lang",
-                             title="core.wid.pages.setting.launcher.preferences.lang")
-                registry.add("core.setting.items", "core.setting.general",
-                             init=simple(Title), group="launcher", order=40, spacing=30,
-                             attr="_title2",
-                             title="core.wid.pages.setting.launcher.general")
-                registry.add("core.setting.items", "core.setting.java",
-                             init=simple(Title), group="launcher", order=50, spacing=30,
-                             attr="_title3",
-                             title="core.wid.pages.setting.launcher.java")
-                registry.add("core.setting.items", "core.setting.java.select",
-                             init=simple(Combo), group="launcher", order=60, attr="_t3_select",
-                             title="core.wid.pages.setting.launcher.java.select")
-
+                # 标准条目从注册表取：登记在模块加载时做一次（见文件末尾）。
                 for e in registry.entries("core.setting.items", where={"group": "launcher"}):
                     wid = e.init(Box(parent=self, entry=e))
                     self.add(wid, e.get("spacing", 0))
@@ -449,3 +418,36 @@ class Setting(Page):
                     if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,events.lang.get("core.wid.pages.setting.launcher.java.select.auto"))
                 except : pass
 
+
+# ── 设置子页与条目的登记（模块加载时一次）──
+# 原先这两段写在 init_wid 里：第二次构建设置页就会撞「已存在条目」。
+# init 从 Box.parent 取宿主（子页是 Main 实例，条目是 Launcher 实例）。
+
+registry.add("core.setting.pages", "core.setting.launcher",
+             init=lambda b: b.parent.Launcher(b.parent, b.title, b.icon),
+             order=10,
+             title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
+
+# 标准条目（分组标题 / Bool / Combo）：attr 是绑回 Launcher 的老名字，
+# 下面的行为绑定代码仍按这些名字引用控件。group='plugins' 的归到末尾。
+registry.add("core.setting.items", "core.setting.preferences",
+             init=simple(Title), group="launcher", order=10, spacing=30,
+             attr="_title1",
+             title="core.wid.pages.setting.launcher.preferences")
+registry.add("core.setting.items", "core.setting.theme",
+             init=simple(Bool), group="launcher", order=20, attr="_t1_theme",
+             title="core.wid.pages.setting.launcher.preferences.theme")
+registry.add("core.setting.items", "core.setting.lang",
+             init=simple(Combo), group="launcher", order=30, attr="_t1_lang",
+             title="core.wid.pages.setting.launcher.preferences.lang")
+registry.add("core.setting.items", "core.setting.general",
+             init=simple(Title), group="launcher", order=40, spacing=30,
+             attr="_title2",
+             title="core.wid.pages.setting.launcher.general")
+registry.add("core.setting.items", "core.setting.java",
+             init=simple(Title), group="launcher", order=50, spacing=30,
+             attr="_title3",
+             title="core.wid.pages.setting.launcher.java")
+registry.add("core.setting.items", "core.setting.java.select",
+             init=simple(Combo), group="launcher", order=60, attr="_t3_select",
+             title="core.wid.pages.setting.launcher.java.select")

@@ -85,14 +85,7 @@ class Download(Page):
             self.pages_ = []
             self.btns_ = []
 
-            # 左栏页签走注册中心：加一个页签 = 写一个 Page 子类 + 一条 registry.add。
-            # init 由页签自己提供，这里不猜它的构造签名。
-
-            registry.add("core.download.tabs", "core.download.game",
-                         init=lambda b: Game(b.parent, b.title, b.icon),
-                         order=10,
-                         title="core.wid.pages.download.game", icon=NAV_MENU)
-
+            # 页签从注册表取：登记在模块加载时做一次（见文件末尾）。
             for e in registry.entries("core.download.tabs"):
                 page = self.add_page(e)
                 setattr(self, e.name, page)          # self.game
@@ -112,3 +105,11 @@ class Download(Page):
             return page_
 
 
+
+# ── 左栏页签的登记（模块加载时一次）──
+# init 从 Box.parent（承载它的下载页 Main 实例）取宿主；title/icon 走条目字段。
+
+registry.add("core.download.tabs", "core.download.game",
+             init=lambda b: Game(b.parent, b.title, b.icon),
+             order=10,
+             title="core.wid.pages.download.game", icon=NAV_MENU)

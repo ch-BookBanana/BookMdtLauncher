@@ -319,25 +319,8 @@ class Start(Page):
                 self.init_wid()
                 
             def init_wid(self):
-                # 底部按钮页走注册中心：每个 Pages 子类自己 addWidget 进栈，
-                # 这里只声明「有哪些、什么顺序、绑到哪个属性名」，init 由各自提供。
-
-                registry.add("core.start.bottom", "core.start.bottom.start",
-                             init=lambda b: self.Start(b.parent),
-                             attr="start", order=10)
-                registry.add("core.start.bottom", "core.start.bottom.mod",
-                             init=lambda b: self.Mod(b.parent),
-                             attr="mod", order=20)
-                registry.add("core.start.bottom", "core.start.bottom.world",
-                             init=lambda b: self.World(b.parent),
-                             attr="world", order=30)
-                registry.add("core.start.bottom", "core.start.bottom.launch",
-                             init=lambda b: self.Launch(b.parent),
-                             attr="launch", order=40)
-                registry.add("core.start.bottom", "core.start.bottom.suspend",
-                             init=lambda b: self.Suspend(b.parent),
-                             attr="suspend", order=50)
-
+                # 从注册表取：登记在模块加载时做一次（见文件末尾）——
+                # 写在这里的话，第二次构建就会撞「已存在条目」。
                 for e in registry.entries("core.start.bottom"):
                     setattr(self, e.attr,
                             e.init(Box(parent=self, entry=e)))
@@ -1098,3 +1081,23 @@ def _open_game_manager(parent):
     """
     ov = registry.entry("core.overlays", "core.gameManager")
     return ov.init(Box(parent=parent, entry=ov))
+
+# ── 底部按钮页的登记（模块加载时一次）──
+# init 从 Box.parent（承载它们的 Bottom 实例）上取嵌套类，所以不必捕获 self，
+# 也就没有「谁先构建」的问题。attr 是绑回 Bottom 上的属性名。
+
+registry.add("core.start.bottom", "core.start.bottom.start",
+             init=lambda b: b.parent.Start(b.parent),
+             attr="start", order=10)
+registry.add("core.start.bottom", "core.start.bottom.mod",
+             init=lambda b: b.parent.Mod(b.parent),
+             attr="mod", order=20)
+registry.add("core.start.bottom", "core.start.bottom.world",
+             init=lambda b: b.parent.World(b.parent),
+             attr="world", order=30)
+registry.add("core.start.bottom", "core.start.bottom.launch",
+             init=lambda b: b.parent.Launch(b.parent),
+             attr="launch", order=40)
+registry.add("core.start.bottom", "core.start.bottom.suspend",
+             init=lambda b: b.parent.Suspend(b.parent),
+             attr="suspend", order=50)
