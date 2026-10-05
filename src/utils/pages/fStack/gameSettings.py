@@ -912,3 +912,10 @@ class GameSettings(Scroll):
         def langing(self):
             super().langing()   # 左侧标题
             self._texts()
+
+# 往 core.gameManager.pages 登记自己：GameManager 左栏的「设置」那一页。
+# 本页管的是某个实例，实例名从 GameManager 现取（b.parent.game）——
+# 因此在 GameManager 里改名后，这里跟着换，不用自己同步。
+registry.add("core.gameManager.pages", "core.gameManager.settings",
+             init=lambda b: GameSettings(b.parent.game, b.parent, b.root),
+             order=10, title="wid.pages.gameManager.settings")

@@ -77,6 +77,13 @@ registry.declare("core.download.item.actions", registrant="core.download",
                  required=("init", "title", "icon"),
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
+# 游戏管理浮层左栏的功能页（设置 / Mods / …）。项由各子页自己登记。
+registry.declare("core.gameManager.pages", registrant="core.gameManager",
+                 fields=("init", "title", "order"),
+                 required=("init", "title"),
+                 built=("main", "btn"),
+                 doc="游戏管理浮层左栏的功能页（设置 / Mods / …）")
+
 registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
                  fields=("init", "attr", "order", "spacing"),
                  required=("init", "attr"),
@@ -90,3 +97,5 @@ from . import start      # noqa: E402,F401
 from . import download   # noqa: E402,F401
 from . import game       # noqa: E402,F401
 from . import setting    # noqa: E402,F401
+from .fStack import gameSettings   # noqa: E402,F401  它的末尾往 core.gameManager.pages 登记
+from .fStack import gameManager    # noqa: E402,F401

@@ -145,6 +145,7 @@
     "wid.pages.setting.plugins": "Plugins",
     "wid.pages.setting.launcher.preferences": "Appearance",
     "wid.pages.setting.launcher.preferences.theme": "Light Theme",
+    "wid.pages.gameManager.settings": "Settings",
     "wid.pages.setting.launcher.preferences.lang": "Select Language",
 
     "wid.pages.setting.launcher.general": "General",
