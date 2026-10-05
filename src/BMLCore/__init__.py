@@ -37,13 +37,18 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
 只放「插件真的会用到」的东西
 ----------------------------
 门面越薄越守得住：塞进来的每个名字都是一份长期承诺。所以宁可少放、以后再补，
-也不要先图方便把内部结构一股脑转出来。现在有四样：
+也不要先图方便把内部结构一股脑转出来。现在有这几样：
 
-    Plugin     插件基类（元信息 + 生命周期 + 几个便捷动作）
-    Widgets    现成控件（Bool / Combo / Title…，和内置界面同一套）
-    events     事件总线（on / emit，插件间的通知与命令都走它）
-    registry   扩展点登记（一般用 Plugin.add 就够了，需要直连时再用）
-    simple     把「签名是 (parent, root, title) 的控件类」变成 init 工厂
+    API_VERSION  宿主 API 版本（插件按它声明自己兼容的范围）
+    Plugin       插件基类（元信息 + 生命周期 + 便捷动作 + 自己的设置）
+    Widgets      现成控件（Bool / Combo / Title…，和内置界面同一套）
+    events       事件总线（on / emit，插件间的通知与命令都走它）
+    registry     扩展点登记（一般用 Plugin.add 就够了，需要直连时再用）
+    simple       把「签名是 (parent, root, title) 的控件类」变成 init 工厂
+    getPath      取自己的资源（${plugin}/…），换 id、换安装位置都不用改代码
+
+插件设置不用单独记一个名字：它挂在插件实例上 —— self.settings["key"]，
+存进宿主 settings.json 的 "plugins" 里自己那一格（见 utils/pluginSettings.py）。
 
 边界提醒（写插件前务必分清）
 ----------------------------

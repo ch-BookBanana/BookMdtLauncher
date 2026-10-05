@@ -107,6 +107,9 @@ class Plugin:
 
     # ── 只读工具（取用宿主已挂载的全局工具）──
 
+    # 本插件设置的默认值：子类覆盖。读不到的键回落到这里，不必到处兜 None。
+    settings_defaults = {}
+
     @property
     def logger(self):
         """日志（自己加 '[插件id]' 前缀，便于在宿主日志里过滤）。"""
@@ -114,8 +117,28 @@ class Plugin:
 
     @property
     def settings(self):
-        """设置读取：settings["plugins"][id][...] 还没铺，先别依赖写。"""
-        return events.settings
+        """本插件自己的设置格子（settings["plugins"][id]）。
+
+            class Hello(Plugin):
+                id = "com.example.hello"
+                settings_defaults = {"volume": 50}
+
+                def setup(self):
+                    self.settings["volume"]                 # 50（没存过就是默认值）
+                    self.settings["volume"] = 30            # 写值顺手存盘
+                    self.settings.get("nope", "x")          # "x"
+
+        给的是视图不是宿主 settings 本体：够不着别的键（不然插件把键名写错
+        一个字就能改掉 language/theme），插件卸载时也按 id 摘得干净。
+        存的位置见 utils/pluginSettings.py。
+        """
+        # 不用 __init__ 里初始化：插件子类不一定会调 super().__init__()
+        view = getattr(self, "_settings_view", None)
+        if view is None:
+            from ..utils.pluginSettings import PluginSettings
+            view = PluginSettings(self.id, self.settings_defaults)
+            self._settings_view = view
+        return view
 
     @property
     def lang(self):

@@ -15,6 +15,10 @@ class Hello(Plugin):
     version = "1.0.0"
     api = "1.x"
 
+    # 本插件设置的默认值：读不到的键回落到这里，不必到处兜 None。
+    # 真正存的位置是宿主 settings.json 的 "plugins" 里自己那一格。
+    settings_defaults = {"greet": True}
+
     def setup(self):
         """登记阶段：往扩展点里加东西。这里不要碰 Qt —— 界面还没建。"""
 
@@ -28,8 +32,13 @@ class Hello(Plugin):
         # 运行期才要用的资源必须在这里先取好。
         self._icon = getPath("${plugin}/assets/icon.png")
 
+        # 自己的设置：够不着宿主的键（写 "language" 也只是写在插件自己那格里），
+        # 写值顺手存盘。视图是 MutableMapping，get/items/del 都能用。
+        if self.settings.get("greet"):
+            self.settings["seen"] = self.settings.get("seen", 0) + 1
+
         self.on("com.example.hello.ping", self._on_ping)
-        self.log("已登记 1 个设置项")
+        self.log(f"已登记 1 个设置项（第 {self.settings['seen']} 次启动）")
 
     def teardown(self):
         """卸载阶段：注册项与事件由加载器按 id 摘掉，这里只做它管不到的清理。"""

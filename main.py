@@ -126,7 +126,11 @@ try:
                     }
                 },
                 "javaPaths": [],
-                "gameList": {"<:|default|:>": []}
+                "gameList": {"<:|default|:>": []},
+                # 插件设置：一格一个插件（com.example.hello: {...}）。
+                # 空 dict 是「开放映射」——键由插件自己定，宿主没法定 schema，
+                # 见 _merge_settings 里对空 dict 默认值的处理。
+                "plugins": {}
             }
             self.settings = copy.deepcopy(self.defsettings)
             app.aboutToQuit.connect(self.saveSettings)
@@ -349,8 +353,18 @@ try:
             只接受默认值里已有的键（多余键丢弃，用于淘汰已删除的设置项）；
             类型不符的键保留默认值并记录；dict 递归合并，其余叶子直接覆盖。
             默认值为 None 的键推不出类型（如 language/defaultGame），一律放行。
+            默认值是**空 dict** 的键按开放映射处理：宿主不认识里面的键
+            （插件设置就是这样，键由插件自己定），逐项收下、值仍要求是 dict。
             """
             issues = []
+            if not default:
+                # 开放映射：整片收下，只查值是不是对象
+                for key, value in file_settings.items():
+                    if isinstance(value, dict):
+                        default[key] = value
+                    else:
+                        issues.append(f"{path}{key}: object -> {type(value).__name__}")
+                return issues
             for key, value in file_settings.items():
                 if key not in default:
                     continue
