@@ -24,6 +24,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 加一个内置页面 = 写页面模块（带 register()）+ 在末尾加两行（import + 调）。
 导航顺序由各条目的 order 决定，调用顺序不影响它。
 
+目录按「这一页活在哪一层」分
+----------------------------
+    *.py            主窗口左栏的导航页（core.pages）
+    fOverlay/       叠加层：盖在窗口上、带遮罩居中的卡片／面板
+    fStack/         浮层栈：整页导航，一页压一页
+    downloads/      下载页内部：各下载源的页签
+
+文件夹不是摆设：浮层页面登记 core.overlays 时用 layer 字段声明自己在哪一层
+（'overlay' / 'stack'），open_overlay 照它发请求。放在哪一层看得见、也不必让
+每个调用方记住该发哪个信号。
+
 为什么契约集中在这里声明
 ------------------------
 声明是**静态契约**，必须在任何登记发生之前就位。原先各扩展点的 declare
@@ -82,9 +93,13 @@ registry.declare("core.download.item.actions", registrant="core.download",
 # 浮层页面：盖在窗口上的整页界面，由 FloatingStack 承载。
 # 与 core.pages 的区别是它不进左栏、而是弹出来；条目形态一样。
 registry.declare("core.overlays", registrant="core",
-                 fields=("init", "title", "order"),
+                 fields=("init", "title", "order", "layer"),
                  required=("init", "title"),
-                 doc="浮层页面（盖在窗口上的整页界面）")
+                 doc="浮层页面（盖在窗口上的整页界面）。"
+                     "layer 决定它在哪一层被打开，也就是发哪个请求："
+                     "'overlay'（缺省）= 叠加层，带遮罩、内容居中，见 pages/fOverlay/；"
+                     "'stack' = 浮层栈，整页导航、一页压一页，见 pages/fStack/。"
+                     "发错请求的表现是「点了没反应」，所以别让调用方自己记着。")
 
 registry.declare("core.gameManager.pages", registrant="core.gameManager",
                  fields=("init", "title", "icon", "order"),
@@ -106,14 +121,16 @@ from . import start                # noqa: E402,F401
 from . import download             # noqa: E402,F401
 from . import game                 # noqa: E402,F401
 from . import setting              # noqa: E402,F401
-from . import githubSetting        # noqa: E402,F401
+from .fOverlay import githubSetting    # noqa: E402,F401
+from .fStack import dlList             # noqa: E402,F401
 from .downloads import game as _download_sources   # noqa: E402,F401
 from .fStack import gameManager    # noqa: E402,F401
 
 start.register()                   # core.start.bottom（底部按钮页）
 download.register()                # core.download.tabs（左栏页签）
 setting.register()                 # core.setting.pages + core.setting.items
-githubSetting.register()           # core.overlays：GitHub 设置页
+githubSetting.register()           # core.overlays：GitHub 设置页（叠加层）
+dlList.register()                  # core.overlays：下载列表（浮层栈）
 _download_sources.register()       # core.download.sources（三个下载源）
 gameManager.register()             # core.overlays + 管理浮层的功能页与区块
 

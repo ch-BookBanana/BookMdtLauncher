@@ -29,15 +29,15 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
-from ..api import githubAPI
-from ..bus import bus
-from ..events import events
-from ..options.scrolls import Scroll
-from ..path_utils import getPath
-from ..QThTimer import QThTimer
-from ..registry import Box, registry
-from ..resources import ACT_TIPS, TBT_CLOSE
-from ..utils import change_color
+from ...api import githubAPI
+from ...bus import bus
+from ...events import events
+from ...options.scrolls import Scroll
+from ...path_utils import getPath
+from ...QThTimer import QThTimer
+from ...registry import Box, registry
+from ...resources import ACT_TIPS, TBT_CLOSE
+from ...utils import change_color
 
 
 def sync_rate_from_api():
@@ -735,4 +735,4 @@ def register():
     """
     registry.add("core.overlays", "core.githubSetting",
                  init=lambda b: GithubSetting(b.parent),
-                 order=20, title="GitHub")
+                 order=20, title="GitHub", layer="overlay")

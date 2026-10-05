@@ -1007,7 +1007,7 @@ def register():
     # 管哪个实例走 Box 上下文：开浮层的人才知道（start.py 传当前显示那个）
     registry.add("core.overlays", "core.gameManager",
                  init=lambda b: GameManager(b.game, b.parent),
-                 order=10, title="core.wid.pages.gameManager")
+                 order=10, title="core.wid.pages.gameManager", layer="stack")
 
     # 左栏那个「设置」功能页。它管的是**某个实例**，实例名从 GameManager
     # 现取（b.parent.game）—— 容器里改了名，这里跟着换，不用自己同步。

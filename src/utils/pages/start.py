@@ -636,9 +636,8 @@ class Start(Page):
                 self.layout.addWidget(self.mod,2,1,1,1)
 
                 self.start.clicked.connect(self.on_start_clicked)
-                self.settings.clicked.connect(lambda: events.emit(
-                    "stackRequested",
-                    _open_game_manager(self, events.settings["defaultGame"])))
+                self.settings.clicked.connect(
+                    lambda: _open_game_manager(self, events.settings["defaultGame"]))
 
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""
@@ -1095,7 +1094,7 @@ def _open_game_manager(parent, game):
     管哪个实例由**这里**说清楚（走 Box 上下文），浮层自己不去摸全局默认值 ——
     否则「谁的设置」就成了浮层的隐藏前提，别的入口想给指定实例开管理没法表达。
     """
-    return open_overlay("core.gameManager", parent, game=game)
+    open_overlay("core.gameManager", parent, game=game)
 
 def register():
     """底部按钮页的登记。由 pages/builtin.py 调用一次。
