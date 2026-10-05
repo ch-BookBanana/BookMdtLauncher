@@ -77,7 +77,7 @@ registry.declare("core.download.item.actions", registrant="core.download",
                  required=("init", "title", "icon"),
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
-registry.declare("core.gameManage.sections", registrant="core.gameManage",
+registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
                  fields=("init", "attr", "order", "spacing"),
                  required=("init", "attr"),
                  doc="游戏管理页的区块（文件夹 / Java …）")

@@ -33,7 +33,7 @@ from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING,
 from ..registry import Box, registry
 
 from ._init import *
-from .fStack.gameManage import GameManage
+from .fStack.gameSettings import GameSettings
 
 
 def _page():
@@ -640,7 +640,7 @@ class Start(Page):
                 self.start.clicked.connect(self.on_start_clicked)
                 self.settings.clicked.connect(lambda: events.emit(
                     "stackRequested",
-                    GameManage(events.settings["defaultGame"], self, self.root)))
+                    GameSettings(events.settings["defaultGame"], self, self.root)))
 
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""

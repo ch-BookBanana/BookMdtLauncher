@@ -22,7 +22,7 @@ from ..registry import registry
 from ..resources import BTN_GAME
 
 from ._init import *
-from .fStack.gameManage import GameManage
+from .fStack.gameSettings import GameSettings
 
 
 class Game(Page):

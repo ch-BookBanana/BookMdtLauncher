@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 1. **登记期不碰 Qt**。重复 key、字段拼错、缺必填，这些都能在没有窗口的时候查出来，
    报的是「哪个扩展点的哪个条目错了」，而不是构造到一半的 AttributeError。
 2. **构建期顺序显式**。谁先被 import、谁先 new 都不再决定顺序，order 说了算。
-3. **加载顺序与界面创建解耦**。插件加载完 ≠ 界面已构建（GameManage 就是点开才建），
+3. **加载顺序与界面创建解耦**。插件加载完 ≠ 界面已构建（GameSettings 就是点开才建），
    登记只要全部完成于构建之前即可。
 
 数据结构

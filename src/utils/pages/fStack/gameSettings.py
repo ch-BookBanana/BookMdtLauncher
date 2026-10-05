@@ -61,7 +61,7 @@ class _ElideLabel(QLabel):
         super().setText(metrics.elidedText(self._text, Qt.ElideRight, self.width()))
 
 
-class GameManage(Scroll):
+class GameSettings(Scroll):
     """游戏管理页：整页就是那层滚动区（顶部信息在内），管理项直接挂在 self.scroll_layout 上。
 
     页面本身铺满，内容列收在 MAX_WIDTH 里居中，跟设置页那条 600px 的正文列对齐。
@@ -92,14 +92,14 @@ class GameManage(Scroll):
         # 本页是懒加载的（点开浮层才建），所以这些登记发生在构建期而非启动期 ——
         # 注册中心「先登记后构建」的两段式本来就允许这样，各界面按自己的时机构建。
 
-        registry.add("core.gameManage.sections", "core.gameManage.folders",
+        registry.add("core.gameSettings.sections", "core.gameSettings.folders",
                      init=lambda b: self.Folders(b.parent, b.root),
                      attr="folders", order=10, spacing=10)
-        registry.add("core.gameManage.sections", "core.gameManage.java",
+        registry.add("core.gameSettings.sections", "core.gameSettings.java",
                      init=lambda b: self.Java(b.parent, b.root),
                      attr="java", order=20, spacing=20)
 
-        for e in registry.entries("core.gameManage.sections"):
+        for e in registry.entries("core.gameSettings.sections"):
             wid = e.init(Box(parent=self, root=self.root, entry=e))
             setattr(self, e.attr, self.add(wid, e.get("spacing", 0)))
 
@@ -261,7 +261,7 @@ class GameManage(Scroll):
 
         @property
         def game(self):
-            """本页管理的实例名（从 GameManage 现取，改名后自动跟着换）。"""
+            """本页管理的实例名（从 GameSettings 现取，改名后自动跟着换）。"""
             return self.parent.game
 
         def init_ui(self):
@@ -478,7 +478,7 @@ class GameManage(Scroll):
                 """目标实例名：从 Top 现取，改名后自动跟着换，浮层不用自己同步。
 
                 原先写的是 self.parent.parent.game —— 一次跨两层，靠「Top 的 parent
-                恰好是 GameManage」这条隐含前提撑着。现在每层只依赖自己的直接 parent。
+                恰好是 GameSettings」这条隐含前提撑着。现在每层只依赖自己的直接 parent。
                 """
                 return self.parent.game
 
@@ -599,7 +599,7 @@ class GameManage(Scroll):
             def _on_ok(self):
                 """提交改名：字形/占用/锁全在 mdtManager.Editor.rename 里判。
 
-                成功后本页出叠；GameManage 收到 nameChanged 会把实例名连同顶部
+                成功后本页出叠；GameSettings 收到 nameChanged 会把实例名连同顶部
                 信息一起换掉，浮层这边无需再同步。
                 """
                 if not self._final_name:
@@ -769,7 +769,7 @@ class GameManage(Scroll):
             def _on_ok(self):
                 """确认删除：连目录一起删，登记与 defaultGame 由 mdtManager 收拾。
 
-                成功后本页出叠；GameManage 收到 deleteGame 会自己出栈——
+                成功后本页出叠；GameSettings 收到 deleteGame 会自己出栈——
                 实例都没了，那一页已经没有可管理的对象。
                 """
                 editor = events.mdtManager.edit(self.game)
@@ -799,7 +799,7 @@ class GameManage(Scroll):
         AUTO = "auto"   # 「自动匹配」在 combo 里的占位值（写回 BML.json 时落成 null）
 
         def __init__(self, parent=None, root=None):
-            self.page = parent       # 所属的 GameManage 页，实例名现取（改名后自动是新名）
+            self.page = parent       # 所属的 GameSettings 页，实例名现取（改名后自动是新名）
             self._none = False       # 一个 Java 也没嗅到：第 0 项文案改挂「无可用 Java」
             # 左侧标题走 Combo 那套 i18n，bus 的绑定也在 Combo.__init__ 里做完了；
             # 那条链上 MRO 先命中这里的 langing，所以覆写时必须 super() 上去
