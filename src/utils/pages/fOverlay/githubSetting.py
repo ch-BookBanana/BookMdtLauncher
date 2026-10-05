@@ -203,9 +203,10 @@ class GithubSetting(QWidget):
 
             class Content(Scroll):
                 def __init__(self, parent=None):
-                    # 原先这里是 super().__init__(parent, root, …) —— 而 Scroll 的第二个
-                    # 位置参数是 horizontal，传进去的宿主对象一直被当成 True，内容区
-                    # 这些年其实是按**横向**排的。现在按本意竖排。
+                    # 这里原先写的是 super().__init__(parent, root, …) —— 传参错，
+                    # 不是有人选了横排：Scroll 的第二个位置参数是 horizontal，
+                    # 那个宿主对象就被当成了 horizontal=True，内容区一直是横着排的
+                    # （滚轮也转成了横向滚动）。去掉那个位置参数即恢复竖排。
                     super().__init__(parent, margins=(20, 20, 20, 20), spacing=10)
                     self.parent = parent
                     self._editing = False
