@@ -78,19 +78,21 @@ def _item_action_link(b):
     return btn
 
 
-def _declare_item_actions():
-    """注册列表项的操作按钮。
+_ITEM_ACTIONS_ADDED = False
 
-    幂等：Item 是虚拟列表的池化行，构造会反复发生，而注册只该做一次
-    （registry.add 不允许重复 key，重复调用会直接报错）。
+
+def _register_item_actions():
+    """登记列表项的操作按钮。
+
+    幂等靠这个模块级标志，**不能**用 registry.declared(point) 当守卫 ——
+    契约声明已经集中到 pages/builtin.py（import 即声明），那个判断一上来
+    就是 True，条目会一条都登记不上。这里的幂等要管的是「add 过没有」。
     """
-    point = "core.download.item.actions"
-    if registry.declared(point):
+    global _ITEM_ACTIONS_ADDED
+    if _ITEM_ACTIONS_ADDED:
         return
-    registry.declare(point, registrant="core.download",
-                     fields=("init", "title", "icon", "order", "attr"),
-                     required=("init", "title", "icon"),
-                     doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
+    _ITEM_ACTIONS_ADDED = True
+    point = "core.download.item.actions"
     registry.add(point, "core.download.item.download",
                  init=_item_action_download, attr="btn_download", order=10,
                  title="wid.pages.download.item.download", icon=BTN_DOWNLOAD)
@@ -243,12 +245,6 @@ class Game(QWidget):
             # 下载源走注册中心：init 由源自己提供（装配方不猜构造签名），
             # 仓库 / README / 缓存文件名仍由各 Template 子类的类属性提供，
             # 只有界面要用的语言键与图标登记一份。
-            registry.declare(
-                "core.download.sources", registrant="core.download",
-                fields=("init", "title", "icon", "order", "color"),
-                required=("init", "title", "icon"),
-                built=("main", "btn"),
-                doc="下载页顶部页签的游戏来源")
 
             def _src_init(cls):
                 return lambda b: cls(b.parent, b.root, b.title, b.icon)
@@ -956,7 +952,7 @@ class Game(QWidget):
 
                         # 右侧操作按钮走注册中心：加一个按钮 = 写一个 init + 一条 registry.add。
                         # 回调在 init 里接（按钮自己知道该弹什么），这里只管摆位置与统一控显隐。
-                        _declare_item_actions()
+                        _register_item_actions()
                         self._action_btns = []
                         for e in registry.entries("core.download.item.actions"):
                             btn = e.init(Box(parent=self, root=self.root, entry=e))

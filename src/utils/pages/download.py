@@ -146,11 +146,6 @@ class Download(Page):
 
             # 左栏页签走注册中心：加一个页签 = 写一个 Page 子类 + 一条 registry.add。
             # init 由页签自己提供，这里不猜它的构造签名。
-            registry.declare("core.download.tabs", registrant="core.download",
-                             fields=("init", "title", "icon", "order"),
-                             required=("init", "title", "icon"),
-                             built=("main", "btn"),
-                             doc="下载页左栏的页签")
 
             registry.add("core.download.tabs", "core.download.game",
                          init=lambda b: Game(b.parent, b.root, b.title, b.icon),

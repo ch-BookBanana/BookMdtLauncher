@@ -91,10 +91,6 @@ class GameManage(Scroll):
         # 区块走注册中心：加一个区块 = 写一个 QWidget 子类 + 一条 registry.add。
         # 本页是懒加载的（点开浮层才建），所以这些登记发生在构建期而非启动期 ——
         # 注册中心「先登记后构建」的两段式本来就允许这样，各界面按自己的时机构建。
-        registry.declare("core.gameManage.sections", registrant="core.gameManage",
-                         fields=("init", "attr", "order", "spacing"),
-                         required=("init", "attr"),
-                         doc="游戏管理页的区块（文件夹 / Java …）")
 
         registry.add("core.gameManage.sections", "core.gameManage.folders",
                      init=lambda b: self.Folders(b.parent, b.root),

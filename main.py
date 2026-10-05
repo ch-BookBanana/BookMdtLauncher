@@ -59,6 +59,7 @@ try:
     from src.utils.on_start import startup
     from src.utils.on_start.java import attach as _attach_java_ui
     from src.utils.registry import Box, registry
+    from src.utils import pluginLoader
     from src.utils.pages.fOverlay._init import FloatingOverlay
     from src.utils.pages.fStack._init import FloatingStack
     # import 内置页面包即完成登记：各页面模块在自己末尾往 core.pages 登记条目
@@ -163,6 +164,13 @@ try:
             self.signals.register("overlayClosed", Signal(object, bool))
             self.signals.register("stackRequested", Signal(object))
             self.signals.register("stackClosed", Signal(object, bool))
+
+            # 加载插件。位置有讲究：必须早于建窗口 —— 插件在 setup() 里往扩展点
+            # 登记，而界面要到构建时才去读那些条目；同时又必须晚于 events.bind()
+            # 与 Langer，插件才用得上 logger / lang。
+            # load_all 逐个隔离：坏插件只记进它自己的 error，绝不往外抛
+            # （外面整个包在一个大 try 里，抛出去就是「启动失败」弹窗）。
+            self.plugins = pluginLoader.load_all()
 
             self.tray = self.Tray(self, self)
             self.window = self.Window(self, self)

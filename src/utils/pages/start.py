@@ -316,10 +316,6 @@ class Start(Page):
             def init_wid(self):
                 # 底部按钮页走注册中心：每个 Pages 子类自己 addWidget 进栈，
                 # 这里只声明「有哪些、什么顺序、绑到哪个属性名」，init 由各自提供。
-                registry.declare("core.start.bottom", registrant="core.start",
-                                 fields=("init", "attr", "order"),
-                                 required=("init", "attr"),
-                                 doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
 
                 registry.add("core.start.bottom", "core.start.bottom.start",
                              init=lambda b: self.Start(b.parent, b.root),

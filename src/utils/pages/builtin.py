@@ -14,27 +14,77 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-内置页面：import 本模块 = 完成内置页面的登记。
+内置界面：声明扩展点契约 + import 各页面模块完成登记。
 
-各页面模块在自己末尾往 core.pages 登记条目（见 pages/start.py 末尾），所以
-「有哪些内置页面」这件事的出处在这里，而不在 main.py —— main.py 只 import
-本模块触发登记，然后按 registry.entries("core.pages") 构建，不认识任何一个
-页面类。
+各页面模块在自己末尾往扩展点登记条目（见 pages/start.py 末尾），所以
+「有哪些内置页面」的出处在这里，而不在 main.py —— main.py 只 import 本模块
+触发登记，再按 registry.entries(...) 构建，不认识任何一个页面类。
 
-加一个内置页面 = 写一个页面模块（末尾自登记）+ 在下面加一行 import。
-导航顺序由各条目自己的 order 决定，import 顺序不影响它。
+加一个内置页面 = 写页面模块（末尾自登记）+ 在下面加一行 import。
+导航顺序由各条目的 order 决定，import 顺序不影响它。
+
+为什么契约集中在这里声明
+------------------------
+声明是**静态契约**，必须在任何登记发生之前就位。原先各扩展点的 declare
+散在 init_wid 里（构建期才执行），而插件是在 Main 构造期加载的 —— 那时界面
+还没建，插件一 add 就撞上「扩展点 'core.setting.items' 尚未声明」。
+集中到这里 = import 即声明，早于一切登记（内置的、插件的都在其后）。
+
+顺带一个好处：所有扩展点长什么样，在一个文件里看得全。
 """
 
 from ..registry import registry
 
-# core.pages 的契约在这里声明：谁提供条目谁声明它。
-# 必须排在下面那几行 import 之前 —— 那些模块 import 时就会立刻往表里 add，
-# 扩展点还没声明的话 add 会直接报错。
+# ─────────────────────────── 契约声明 ───────────────────────────
+
 registry.declare("core.pages", registrant="core",
                  fields=("init", "title", "icon", "order", "default"),
                  required=("init", "title"),
                  built=("main", "btn"),
                  doc="主窗口左栏导航页（顺序由各条目的 order 决定）")
+
+registry.declare("core.setting.pages", registrant="core.setting",
+                 fields=("init", "title", "icon", "order"),
+                 required=("init", "title", "icon"),
+                 doc="设置页左栏的子页")
+
+registry.declare("core.setting.items", registrant="core.setting",
+                 fields=("init", "group", "order", "title", "spacing", "attr"),
+                 required=("init", "group", "title"),
+                 doc="设置子页里的条目（Title 分组标题 / Bool / Combo …）。"
+                     "attr 可选：内置条目靠它绑回 self 上的老名字，插件用不着。"
+                     "group='plugins' 的条目会被设置页单独归到末尾")
+
+registry.declare("core.start.bottom", registrant="core.start",
+                 fields=("init", "attr", "order"),
+                 required=("init", "attr"),
+                 doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
+
+registry.declare("core.download.tabs", registrant="core.download",
+                 fields=("init", "title", "icon", "order"),
+                 required=("init", "title", "icon"),
+                 built=("main", "btn"),
+                 doc="下载页左栏的页签")
+
+registry.declare("core.download.sources", registrant="core.download",
+                 fields=("init", "title", "icon", "order", "color"),
+                 required=("init", "title", "icon"),
+                 built=("main", "btn"),
+                 doc="下载页顶部页签的游戏来源")
+
+registry.declare("core.download.item.actions", registrant="core.download",
+                 fields=("init", "title", "icon", "order", "attr"),
+                 required=("init", "title", "icon"),
+                 doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
+
+registry.declare("core.gameManage.sections", registrant="core.gameManage",
+                 fields=("init", "attr", "order", "spacing"),
+                 required=("init", "attr"),
+                 doc="游戏管理页的区块（文件夹 / Java …）")
+
+# ─────────────────────────── 内置条目登记 ───────────────────────────
+# 下面这几行 import 会执行各页面模块末尾的 registry.add，
+# 所以必须排在契约声明之后。
 
 from . import start      # noqa: E402,F401
 from . import download   # noqa: E402,F401

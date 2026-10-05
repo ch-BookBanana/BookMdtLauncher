@@ -158,10 +158,6 @@ class Setting(Page):
 
             # 设置子页走注册中心：加一个子页 = 写一个 Page 子类 + 一条 registry.add。
             # init 由子页自己提供，装配方不猜它的构造签名。
-            registry.declare("core.setting.pages", registrant="core.setting",
-                             fields=("init", "title", "icon", "order"),
-                             required=("init", "title", "icon"),
-                             doc="设置页左栏的子页")
             registry.add("core.setting.pages", "core.setting.launcher",
                          init=lambda b: self.Launcher(b.parent, b.root, b.title, b.icon),
                          order=10,
@@ -226,10 +222,6 @@ class Setting(Page):
                 # 标准条目（分组标题 / Bool / Combo）走注册中心：加一项 = 一条 registry.add。
                 # attr 是绑到 self 上的名字 —— 下面的行为代码仍按老名字引用控件；
                 # 这一批只把「有哪些项、什么顺序、归哪组」数据化，行为绑定留在原地。
-                registry.declare("core.setting.items", registrant="core.setting",
-                                 fields=("init", "group", "order", "title", "spacing", "attr"),
-                                 required=("init", "group", "title", "attr"),
-                                 doc="设置子页里的标准条目（Title 分组标题 / Bool / Combo …）")
 
                 registry.add("core.setting.items", "core.setting.preferences",
                              init=simple(Title), group="launcher", order=10, spacing=30,
@@ -256,7 +248,20 @@ class Setting(Page):
                 for e in registry.entries("core.setting.items", where={"group": "launcher"}):
                     wid = e.init(Box(parent=self, root=self.root, entry=e))
                     self.add(wid, e.get("spacing", 0))
-                    setattr(self, e.attr, wid)
+                    attr = e.get("attr")          # 可选：只有内置条目要绑回老名字
+                    if attr:
+                        setattr(self, attr, wid)
+
+                # 插件登记进来的设置项：单独归到末尾，不和内置项混排。
+                # 分组名固定 'plugins'（Plugin.add_setting 的默认值）；卸载插件时
+                # 它按命名空间摘条目，这一段自然就空了。
+                plugin_items = registry.entries("core.setting.items",
+                                                where={"group": "plugins"})
+                if plugin_items:
+                    self.add(Title(self, self.root, "wid.pages.setting.plugins"), 30)
+                    for e in plugin_items:
+                        wid = e.init(Box(parent=self, root=self.root, entry=e))
+                        self.add(wid, e.get("spacing", 0))
 
                 # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
                 self._t1_theme.btn.setChecked(events.settings["theme"])

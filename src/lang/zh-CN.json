@@ -145,6 +145,7 @@
 
     "wid.pages.setting": "设置",
     "wid.pages.setting.launcher": "启动器",
+    "wid.pages.setting.plugins": "插件",
     "wid.pages.setting.launcher.preferences": "外观",
     "wid.pages.setting.launcher.preferences.theme": "浅色主题",
     "wid.pages.setting.launcher.preferences.lang": "选择语言",

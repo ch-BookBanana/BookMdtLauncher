@@ -1,0 +1,9 @@
+{
+  "id": "com.example.hello",
+  "name": "Hello",
+  "version": "1.0.0",
+  "api": "1.x",
+  "entry": "main.py",
+  "author": "BookBanana",
+  "description": "最小插件示例：往设置页加一项、订阅一个事件、打一行日志。"
+}
