@@ -472,17 +472,22 @@ def load_all(base=None):
     _expose_api()
     infos = discover(base)
     by_id = {i.id: i for i in infos}
+    # 按**真实加载顺序**记（依赖在前、依赖者在后），不是发现顺序：
+    # plugin_langs 靠这份顺序决定谁盖谁的文案，而依赖是会被提前拉起来的 ——
+    # 用发现顺序的话，依赖包目录名恰好排在后面时，它的语言包会盖掉依赖者的。
+    order = []
     for info in infos:
-        _load_tree(info, by_id, ())
-    _STATE["loaded"] = [i for i in infos if i.ok]
+        _load_tree(info, by_id, (), order)
+    _STATE["loaded"] = order
     return infos
 
 
-def _load_tree(info, by_id, chain):
+def _load_tree(info, by_id, chain, order):
     """加载 info —— 先把它的依赖拉起来，再加载自己。
 
     chain 是「当前正在加载的这条链」（不含自己），用来挡依赖成环：
     A→B→A 不挡就是无限递归，表现像卡死，比报错难查得多。
+    order 按加载成功的先后收集，最后成为 _STATE["loaded"]。
 
     已经在链上的插件也不重复打「开始加载」；依赖走同一套日志（递归进来说），
     所以读日志的人看到的就是「谁在等谁」。
@@ -510,13 +515,14 @@ def _load_tree(info, by_id, chain):
             _fail(info, "依赖成环：" + " -> ".join(chain + (info.id, dep_id)))
             return
         if not dep.ok:
-            _load_tree(dep, by_id, chain + (info.id,))
+            _load_tree(dep, by_id, chain + (info.id,), order)
         if not dep.ok:
             _fail(info, f"依赖加载失败：{dep_id}")
             return
 
     load_one(info)
     if info.ok:
+        order.append(info)
         events.logger.info(f"[{info.id}]加载完成", name="Plugin")
     else:
         _report_fail(info)

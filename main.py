@@ -1370,7 +1370,10 @@ try:
                         # 产物也用这些名字，改名要连带一起改。
                         self.default_page = None
                         for e in registry.entries("core.pages"):
-                            btn = self.nav.add_btn(e.title, e.icon)
+                            # icon 用 get：契约里它是可选的（required 只要 init/title），
+                            # 直接 e.icon 会让「插件页面没配图标」炸掉整个装配循环 ——
+                            # NavBtn 本来就接受 None。
+                            btn = self.nav.add_btn(e.title, e.get("icon"))
                             page = e.init(Box(parent=self, entry=e, btn=btn))
                             btn.clicked.connect(page.changePage)
                             setattr(self, e.name, page)
