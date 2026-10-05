@@ -128,6 +128,7 @@
     "core.wid.pages.downloadList.delete": "刪除",
 
     "core.wid.pages.game": "遊戲",
+    "core.wid.pages.gameManager": "遊戲管理",
 
     "core.wid.pages.gameManage.java.follow": "跟隨全域",
     "core.wid.pages.gameManage.rename": "變更名稱",

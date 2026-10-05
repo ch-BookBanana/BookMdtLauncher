@@ -213,7 +213,7 @@ class Start(Page):
         self.main.stack.setCurrentWidget(getattr(self.main, name))
 
     class Left(Leftw):
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             super().__init__(parent)
             self.resize_(250)
             self.init_wid()
@@ -250,7 +250,7 @@ class Start(Page):
             self.versTxt.setText("版本")
 
             self.layout.addSpacing(30)
-            self.main = self.Bottom(self,self.root)
+            self.main = self.Bottom(self)
             self.layout.addWidget(self.main,1)
 
         def sets(self,icon=(False,None),gameTxt=(False,None),versTxt=(False,None)):
@@ -313,9 +313,8 @@ class Start(Page):
                 self.refresh()
             
         class Bottom(QStackedWidget):
-            def __init__(self, parent=None, root=None):
+            def __init__(self, parent=None):
                 super().__init__()
-                self.root = root
                 self.parent = parent
                 self.init_wid()
                 
@@ -324,45 +323,43 @@ class Start(Page):
                 # 这里只声明「有哪些、什么顺序、绑到哪个属性名」，init 由各自提供。
 
                 registry.add("core.start.bottom", "core.start.bottom.start",
-                             init=lambda b: self.Start(b.parent, b.root),
+                             init=lambda b: self.Start(b.parent),
                              attr="start", order=10)
                 registry.add("core.start.bottom", "core.start.bottom.mod",
-                             init=lambda b: self.Mod(b.parent, b.root),
+                             init=lambda b: self.Mod(b.parent),
                              attr="mod", order=20)
                 registry.add("core.start.bottom", "core.start.bottom.world",
-                             init=lambda b: self.World(b.parent, b.root),
+                             init=lambda b: self.World(b.parent),
                              attr="world", order=30)
                 registry.add("core.start.bottom", "core.start.bottom.launch",
-                             init=lambda b: self.Launch(b.parent, b.root),
+                             init=lambda b: self.Launch(b.parent),
                              attr="launch", order=40)
                 registry.add("core.start.bottom", "core.start.bottom.suspend",
-                             init=lambda b: self.Suspend(b.parent, b.root),
+                             init=lambda b: self.Suspend(b.parent),
                              attr="suspend", order=50)
 
                 for e in registry.entries("core.start.bottom"):
                     setattr(self, e.attr,
-                            e.init(Box(parent=self, root=self.root, entry=e)))
+                            e.init(Box(parent=self, entry=e)))
 
             def set_have_game(self, have: bool):
                 """切换左侧底部按钮：有游戏显示「选择游戏」，无游戏显示「下载界面」。"""
                 self.start.set_have_game(have)
 
             class Pages(QWidget):
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None):
                     super().__init__()
-                    self.root = root
                     self.parent = parent
                     self.index = self.parent.addWidget(self)
 
                 class Btn(QPushButton):
-                    def __init__(self, parent=None, root=None):
+                    def __init__(self, parent=None):
                         super().__init__()
-                        self.root = root
                         self.parent = parent
                         self.setProperty("wid","btn")
 
             class Start(Pages):
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None):
                     super().__init__(parent)
                     self.have_game = True
                     self.init_wid()
@@ -375,7 +372,7 @@ class Start(Page):
                     self.layout.setSpacing(10)
                     self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
 
-                    self.action =self.Btn(self,self.root)
+                    self.action =self.Btn(self)
                     self.action.setFixedSize(QSize(170,50))
                     self.layout.addWidget(self.action)
 
@@ -404,7 +401,7 @@ class Start(Page):
                     self.action.setText(events.lang.get(btn))
 
             class Mod(Pages):
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
@@ -416,7 +413,7 @@ class Start(Page):
                     self.layout.setSpacing(10)
                     self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
 
-                    self.cancle =self.Btn(self,self.root)
+                    self.cancle =self.Btn(self)
                     self.cancle.setFixedSize(QSize(170,50))
                     self.layout.addWidget(self.cancle)
 
@@ -427,7 +424,7 @@ class Start(Page):
                     self.cancle.setText(events.lang.get("core.text.return"))
 
             class World(Pages):
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
@@ -439,7 +436,7 @@ class Start(Page):
                     self.layout.setSpacing(10)
                     self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
 
-                    self.cancle =self.Btn(self,self.root)
+                    self.cancle =self.Btn(self)
                     self.cancle.setFixedSize(QSize(170,50))
                     self.layout.addWidget(self.cancle)
 
@@ -451,7 +448,7 @@ class Start(Page):
 
             class Launch(Pages):
                 """左 stacked 的启动/Java 下载状态页：只允许有一个 label 显示状态。"""
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
@@ -488,7 +485,7 @@ class Start(Page):
 
             class Suspend(Pages):
                 """左侧栏「游戏运行中」页：唯一按钮是强制关闭（强杀游戏进程）。"""
-                def __init__(self, parent=None, root=None):
+                def __init__(self, parent=None):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
@@ -500,7 +497,7 @@ class Start(Page):
                     self.layout.setSpacing(10)
                     self.layout.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
 
-                    self.stop = self.Btn(self,self.root)
+                    self.stop = self.Btn(self)
                     self.stop.setFixedSize(QSize(170,50))
                     self.layout.addWidget(self.stop)
 
@@ -520,7 +517,7 @@ class Start(Page):
     class Main(Mainw):
         LOG_MAX_LINES = 2000   # 控制台保留的最大行数，超出后丢弃最旧的行
 
-        def __init__(self,parent=None,root=None):
+        def __init__(self,parent=None):
             super().__init__(parent)
             # 已输出的日志（前缀, 正文, 配色角色）：主题切换时按新配色整篇重绘
             self.log_lines = []
@@ -537,7 +534,7 @@ class Start(Page):
             self.layout = QStackedLayout(self)
             self.layout.setStackingMode(QStackedLayout.StackAll)
 
-            self.backg = self.Backg(self,self.root)
+            self.backg = self.Backg(self)
             self.layout.addWidget(self.backg)
 
             self.stack = QStackedWidget()
@@ -548,11 +545,11 @@ class Start(Page):
             # 日志控制台：Launch（启动准备中）与 Log（进程运行中）两页
             self.consoles = []
 
-            self.start = self.Start(self,self.root)
-            self.mod = self.Mod(self,self.root)
-            self.world = self.World(self,self.root)
-            self.launch = self.Console(self,self.root)
-            self.log = self.Console(self,self.root)
+            self.start = self.Start(self)
+            self.mod = self.Mod(self)
+            self.world = self.World(self)
+            self.launch = self.Console(self)
+            self.log = self.Console(self)
 
         def set_have_game(self, have):
             """有无可用实例：无实例时直接隐藏主区按钮层。
@@ -597,10 +594,9 @@ class Start(Page):
                 console.render(self.log_lines, self.colors, self.tags)
 
         class _Main(QWidget):
-            def __init__(self,parent=None,root=None):
+            def __init__(self,parent=None):
                 super().__init__()
                 self.parent = parent
-                self.root = root
                 self.setProperty("wid","color2")
                 self.index = self.parent.stack.addWidget(self)
 
@@ -610,7 +606,7 @@ class Start(Page):
                 self.parent.stack.setStyleSheet(""if self.testAttribute(Qt.WA_StyledBackground) else "background:transparent;")
 
         class Start(_Main):
-            def __init__(self,parent=None,root=None):
+            def __init__(self,parent=None):
                 super().__init__(parent)
                 self.init_wid()
                 self.langing()
@@ -629,28 +625,27 @@ class Start(Page):
                 self.layout.setRowStretch(1,0)
                 self.layout.setRowStretch(2,0)
 
-                self.start = self.Btn(self,self.root,"255,184, 0")
+                self.start = self.Btn(self,"255,184, 0")
                 self.start.setFixedSize(180,50)
                 self.layout.addWidget(self.start,1,1,1,2)
 
-                self.settings = self.Btn(self,self.root,"110,65,151")
+                self.settings = self.Btn(self,"110,65,151")
                 self.settings.setFixedSize(50,50)
                 self.settings.setIconSize(QSize(25,25))
                 self.settings.setIcon(QIcon(QPixmap(getPath(BTN_SETTING)).scaled(50,50,Qt.KeepAspectRatio,Qt.FastTransformation)))
                 self.layout.addWidget(self.settings,2,2,1,1)
 
-                self.mod = self.Btn(self,self.root,"52, 152, 219")
+                self.mod = self.Btn(self,"52, 152, 219")
                 self.mod.setFixedHeight(50)
                 self.layout.addWidget(self.mod,2,1,1,1)
 
                 self.start.clicked.connect(self.on_start_clicked)
                 self.settings.clicked.connect(lambda: events.emit(
                     "stackRequested",
-                    GameManager(events.settings["defaultGame"], self, self.root)))
+                    _open_game_manager(self)))
 
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""
-                root = self.root
                 if events.java_flow is not None:
                     return  # 已有 Java 下载流程在运行
                 launcher = events.launcher
@@ -674,10 +669,9 @@ class Start(Page):
                 
 
             class Btn(QPushButton):
-                def __init__(self,parent=None,root=None,color="0,0,0"):
+                def __init__(self,parent=None,color="0,0,0"):
                     super().__init__()
                     self.parent = parent
-                    self.root = root
                     self.color = color
                     self.setAttribute(Qt.WA_StyledBackground, True)
                     self.setStyleSheet(f"""
@@ -694,14 +688,14 @@ class Start(Page):
                     """)
 
         class Mod(_Main):
-            def __init__(self,parent=None,root=None):
+            def __init__(self,parent=None):
                 super().__init__(parent)
                 self.setAttribute(Qt.WA_StyledBackground,True)
 
         class World(_Main):
             """游戏分组列表：订阅 mdtManager 事件增量更新，不做整页重建。"""
 
-            def __init__(self,parent=None,root=None):
+            def __init__(self,parent=None):
                 super().__init__(parent)
                 self.setAttribute(Qt.WA_StyledBackground,True)
                 self.groups = {}
@@ -730,7 +724,7 @@ class Start(Page):
                     group.deleteLater()
                 self.groups = {}
                 for name, games in events.settings["gameList"].items():
-                    self.groups[name] = self.Group(self, self.root, name, games)
+                    self.groups[name] = self.Group(self, name, games)
 
             def _on_game_changed(self, data):
                 """newGame/deleteGame/nameChanged/groupChanged/iconChanged → 精确更新对应条目。"""
@@ -766,10 +760,9 @@ class Start(Page):
             class Group(QWidget):
                 """一个游戏分组：标题栏 + 可折叠的条目列表。"""
 
-                def __init__(self,parent=None,root=None,name="",games=()):
+                def __init__(self,parent=None,name="",games=()):
                     super().__init__()
                     self.parent = parent
-                    self.root = root
                     self.name = name
                     self.items = {}
                     self.light = None
@@ -844,7 +837,7 @@ class Start(Page):
                 def add(self, name):
                     """新增条目（幂等，newGame 事件用）。"""
                     if name not in self.items:
-                        self.items[name] = self.Item(self, self.root, name)
+                        self.items[name] = self.Item(self, name)
                         self.count.setText(f"({len(self.items)})")
 
                 def remove(self, name):
@@ -895,10 +888,9 @@ class Start(Page):
                 class Item(QPushButton):
                     """单个游戏条目：图标 + 名称 + 版本。"""
 
-                    def __init__(self,parent=None,root=None,game=None):
+                    def __init__(self,parent=None,game=None):
                         super().__init__()
                         self.parent = parent
-                        self.root = root
                         self.game = game
                         self._held = False
                         self.parent.body_l.addWidget(self)
@@ -966,7 +958,7 @@ class Start(Page):
 
         class Console(_Main):
             """主区日志控制台：Launch（启动准备中）与 Log（进程运行中）两页各一个视图。"""
-            def __init__(self,parent=None,root=None):
+            def __init__(self,parent=None):
                 super().__init__(parent)
                 self.setAttribute(Qt.WA_StyledBackground,True)
                 self.parent.consoles.append(self)
@@ -1052,10 +1044,9 @@ class Start(Page):
                     clip.removeSelectedText()
 
         class Backg(QWidget):
-            def __init__(self,parent=None,root=None):
+            def __init__(self,parent=None):
                 super().__init__()
                 self.parent = parent
-                self.root = root
                 self.setAttribute(Qt.WA_StyledBackground, True)
                 self.png = 0
                 self.pixs = [None,None]
@@ -1099,3 +1090,11 @@ class Start(Page):
                 self.shadow.setGeometry(0,0,200,self.height())
                 super().resizeEvent(event)
 
+
+def _open_game_manager(parent):
+    """打开游戏管理浮层：从注册表取，本文件不必认识 GameManager 这个类。
+
+    容器在 gameManager.py 的 register() 里登记（由 pages/builtin.py 调用）。
+    """
+    ov = registry.entry("core.overlays", "core.gameManager")
+    return ov.init(Box(parent=parent, entry=ov))

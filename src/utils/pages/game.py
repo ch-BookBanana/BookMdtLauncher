@@ -22,7 +22,6 @@ from ..registry import page, registry
 from ..resources import BTN_GAME
 
 from ._init import *
-from .fStack.gameSettings import GameSettings
 
 
 @page("core.game")
@@ -35,7 +34,7 @@ class Game(Page):
         super().__init__(btn)
 
     class Main(Mainw):
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             super().__init__(parent)
             self.init_wid()
 

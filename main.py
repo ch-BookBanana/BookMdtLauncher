@@ -569,7 +569,7 @@ try:
                 conn.deleteLater()
 
             def init_wid(self):
-                self.floatingStack = FloatingStack(self, self.root)
+                self.floatingStack = FloatingStack(self)
                 self.root.logger.debug("init QW.window.left")
                 self.left = self.Left(self, self.root)
                 self.root.logger.debug("init QW.window.lline")
@@ -600,7 +600,7 @@ try:
                 # GitHub 设置页：改为叠加浮层页面（遮罩/居中由 floatingOverlay 提供）；
                 # 子控件的主题/语言由各自在总线上订阅，和创建时机没有关系
                 self.githubSetting = self.GithubSetting(self, self.root)
-                self.floatingOverlay = FloatingOverlay(self, self.root)
+                self.floatingOverlay = FloatingOverlay(self)
 
                 # 浮层/栈请求在这里落地：请求方只管发信号，
                 # 挂载点（叠加层还是栈层）由窗口自己决定
@@ -2486,7 +2486,7 @@ try:
                         self.default_page = None
                         for e in registry.entries("core.pages"):
                             btn = self.nav.add_btn(e.title, e.icon)
-                            page = e.init(Box(parent=self, root=self.root, entry=e, btn=btn))
+                            page = e.init(Box(parent=self, entry=e, btn=btn))
                             btn.clicked.connect(page.changePage)
                             setattr(self, e.name, page)
                             # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到

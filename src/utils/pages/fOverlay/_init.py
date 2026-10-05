@@ -24,10 +24,9 @@ from ...events import events
 class FloatingOverlay(QWidget):
     """叠加形悬浮窗：注册方式与 FloatingStack 相同（add_page/pop_page/clear + close_page 闭包），
     但页面为叠加显示（后进者盖在上层、互不销毁），样式参照 GithubSetting（全屏半透明遮罩+居中）。"""
-    def __init__(self,parent=None,root=None):
+    def __init__(self,parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.root = root
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setProperty("wid_", "_window.overlay")
         self.setStyleSheet('QWidget[wid_="_window.overlay"]{background-color: rgba(0,0,0,0.5);}')

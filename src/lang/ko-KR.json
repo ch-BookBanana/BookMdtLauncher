@@ -128,6 +128,7 @@
     "core.wid.pages.downloadList.delete": "삭제",
 
     "core.wid.pages.game": "게임",
+    "core.wid.pages.gameManager": "게임 관리",
 
     "core.wid.pages.gameManage.java.follow": "전역 설정 따르기",
     "core.wid.pages.gameManage.rename": "이름 변경",

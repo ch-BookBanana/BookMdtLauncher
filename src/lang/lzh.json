@@ -128,6 +128,7 @@
     "core.wid.pages.downloadList.delete": "刪除",
 
     "core.wid.pages.game": "藏戲",
+    "core.wid.pages.gameManager": "遊戲管理",
 
     "core.wid.pages.gameManage.java.follow": "隨全局",
     "core.wid.pages.gameManage.rename": "易名",

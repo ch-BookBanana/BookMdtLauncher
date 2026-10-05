@@ -55,25 +55,25 @@ _ACTIVE_DOWNLOADS = []
 def _item_action_download(b):
     """下载：点开下载弹窗（叠加浮层）。"""
     item = b.parent
-    btn = item.RBtn(getPath(b.icon), b.title, item, item.root)
-    btn.clicked.connect(lambda: item.root.signals.emit(
-        "overlayRequested", item.template.Download(item, item.root, item.data)))
+    btn = item.RBtn(getPath(b.icon), b.title, item)
+    btn.clicked.connect(lambda: events.emit(
+        "overlayRequested", item.template.Download(item, item.data)))
     return btn
 
 
 def _item_action_repo(b):
     """仓库信息：压进浮层栈。"""
     item = b.parent
-    btn = item.RBtn(getPath(b.icon), b.title, item, item.root)
-    btn.clicked.connect(lambda: item.root.signals.emit(
-        "stackRequested", item.template.RepoInfo(item, item.root, item.data, item.pixmap)))
+    btn = item.RBtn(getPath(b.icon), b.title, item)
+    btn.clicked.connect(lambda: events.emit(
+        "stackRequested", item.template.RepoInfo(item, item.data, item.pixmap)))
     return btn
 
 
 def _item_action_link(b):
     """外部链接：交给系统浏览器。"""
     item = b.parent
-    btn = item.RBtn(getPath(b.icon), b.title, item, item.root)
+    btn = item.RBtn(getPath(b.icon), b.title, item)
     btn.clicked.connect(item.open_release)
     return btn
 
@@ -105,10 +105,9 @@ def _register_item_actions():
 
 
 class Game(QWidget):
-    def __init__(self, parent=None, root=None, text=None, icon=None):
+    def __init__(self, parent=None, text=None, icon=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.text = text
         self.icon = icon
         self.init_wid()
@@ -118,7 +117,7 @@ class Game(QWidget):
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(0)
 
-        self.top = self.Top(self, self.root)
+        self.top = self.Top(self)
         self.layout.addWidget(self.top,0)
 
         self.line = QWidget()
@@ -127,14 +126,13 @@ class Game(QWidget):
         self.line.setAttribute(Qt.WA_StyledBackground, True)
         self.layout.addWidget(self.line,0)
 
-        self.main = self.Main(self, self.root)
+        self.main = self.Main(self)
         self.layout.addWidget(self.main, 1)
     
     class Top(QWidget):
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             super().__init__()
             self.parent = parent
-            self.root = root
             self.setFixedHeight(35)  # 30 按钮 + 5 底部横向滑块
             self.init_wid()
 
@@ -150,16 +148,15 @@ class Game(QWidget):
             self.bthGroup = QButtonGroup(self)
 
         def add_btn(self, text=None, icon=None, color=True):
-            btn = self.Btns(text, getPath(icon), self, self.root, color)
+            btn = self.Btns(text, getPath(icon), self, color)
             self.scroll.add(btn)
             self.bthGroup.addButton(btn)
             return btn
 
         class Btns(QPushButton):
-            def __init__(self, text=None, icon=None, parent=None, root=None, color=True):
+            def __init__(self, text=None, icon=None, parent=None, color=True):
                 super().__init__()
                 self.parent = parent
-                self.root = root
                 self.text_ = text
                 self.icon_ = icon
                 self.colorable = color
@@ -222,10 +219,9 @@ class Game(QWidget):
                 self.lighting(events.settings["theme"])
 
     class Main(QWidget):
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             super().__init__()
             self.parent = parent
-            self.root = root
             self.init_wid()
             self.btns_[0].click()
 
@@ -247,7 +243,7 @@ class Game(QWidget):
             # 只有界面要用的语言键与图标登记一份。
 
             def _src_init(cls):
-                return lambda b: cls(b.parent, b.root, b.title, b.icon)
+                return lambda b: cls(b.parent, b.title, b.icon)
 
             registry.add("core.download.sources", "core.origin",
                          init=_src_init(self.Origin), order=10, color=False,
@@ -266,7 +262,7 @@ class Game(QWidget):
         def add_page(self, entry, color=True):
             """按条目建一个下载源：备好页签按钮 → 交给条目的 init 去造。"""
             btn = self.parent.top.add_btn(entry.title, entry.icon, color=color)
-            page_ = entry.init(Box(parent=self, root=self.root, entry=entry))
+            page_ = entry.init(Box(parent=self, entry=entry))
             self.pages_.append(page_)
             self.btns_.append(btn)
             self.stack.addWidget(page_)
@@ -284,10 +280,9 @@ class Game(QWidget):
             # intro 抓取超时（秒），只作用于附加介绍，子类可覆盖
             introTimeout = 10
 
-            def __init__(self, parent=None, root=None, text=None, icon=None):
+            def __init__(self, parent=None, text=None, icon=None):
                 super().__init__()
                 self.parent = parent
-                self.root = root
                 self.text = text
                 self.data = self._read_cache()
                 self.icon = icon
@@ -592,10 +587,9 @@ class Game(QWidget):
                 raise NotImplementedError("Subclass must implement classify()")
 
             class Classs(QWidget):
-                def __init__(self,parent=None,root=None):
+                def __init__(self,parent=None):
                     super().__init__()
                     self.parent = parent
-                    self.root = root
                     self.light = None
                     self.data = {}
                     self.btnPix = [QPixmap(),QPixmap()]
@@ -697,10 +691,9 @@ class Game(QWidget):
                     self.scroll.setFixedHeight(min(400, len(self.data)*60-10))
 
             class Scroll(QWidget):
-                def __init__(self,parent=None,root=None):
+                def __init__(self,parent=None):
                     super().__init__()
                     self.parent = parent
-                    self.root = root
                     # 上层模板（Classs.parent 即 Template 子类），供 Item 引用 RepoInfo 等嵌套类
                     self.template = self.parent.parent if self.parent is not None else None
                     self.itemd = {}   # 数据列表
@@ -762,7 +755,7 @@ class Game(QWidget):
                     self.viewport_h = self.height()
                     visible = int((self.viewport_h + self.item_h - 1) / self.item_h) + 2
                     while len(self.itemw) < visible:
-                        it = self.Item(self.main, self.root, self.template)
+                        it = self.Item(self.main, self.template)
                         it.setParent(self.main)
                         it.hide()
                         self.itemw.append(it)
@@ -818,7 +811,7 @@ class Game(QWidget):
                             self.viewport_h = 400
                         visible = max(1, int(self.viewport_h / self.item_h)) + 1
                         for _ in range(visible):
-                            it = self.Item(self.main, self.root, self.template)
+                            it = self.Item(self.main, self.template)
                             it.setParent(self.main)
                             it.hide()
                             self.itemw.append(it)
@@ -845,10 +838,9 @@ class Game(QWidget):
                         widget.show()
 
                 class Item(QWidget):
-                    def __init__(self,parent=None,root=None,template=None):
+                    def __init__(self,parent=None,template=None):
                         super().__init__(parent)
                         self.parent = parent
-                        self.root = root
                         self.template = template
                         if self.template is None:
                             # 兜底：沿父链查找包含 RepoInfo 的模板
@@ -883,10 +875,9 @@ class Game(QWidget):
                             self.icon.clear()
 
                     class RBtn(QPushButton):
-                        def __init__(self, icon_path, tooltip_key, parent=None, root=None):
+                        def __init__(self, icon_path, tooltip_key, parent=None):
                             super().__init__(parent)
                             self.parent = parent
-                            self.root = root
                             self._icon_path = icon_path
                             self._tooltip_key = tooltip_key
                             self._is_show = True   # 悬浮 Item 时是否显示该按钮
@@ -955,7 +946,7 @@ class Game(QWidget):
                         _register_item_actions()
                         self._action_btns = []
                         for e in registry.entries("core.download.item.actions"):
-                            btn = e.init(Box(parent=self, root=self.root, entry=e))
+                            btn = e.init(Box(parent=self, entry=e))
                             setattr(self, e.attr, btn)
                             self.layout.addWidget(btn, 0)
                             self._action_btns.append(btn)
@@ -1016,10 +1007,9 @@ class Game(QWidget):
                 只保留「名称输入 + 校验提示 + 确定/关闭」；release 的图标、标题、
                 发布时间由调用方 Item 自行呈现，此处不再重复展示。"""
 
-                def __init__(self, parent=None, root=None, data=None):
+                def __init__(self, parent=None, data=None):
                     super().__init__()
                     self.parent = parent
-                    self.root = root
                     self.data = data
                     self._final_name = None
                     self._validate_key = None
@@ -1334,10 +1324,9 @@ class Game(QWidget):
             class RepoInfo(QWidget):
                 mdImageReady = Signal(object, object)
 
-                def __init__(self, parent=None, root=None, data=None, pixmap=None): 
+                def __init__(self, parent=None, data=None, pixmap=None): 
                     super().__init__()
                     self.parent = parent
-                    self.root = root
                     self.data = data
                     self.pixmap = pixmap
                     self.setObjectName("repoInfo")
@@ -1441,7 +1430,7 @@ class Game(QWidget):
                         return md_to_html(
                             intro_md,
                             base_url=base_url,
-                            session=events.githubAPI._session if self.root else None,
+                            session=events.githubAPI._session,
                             cache_dir=getPath("BML/.tmp/mdimg"),
                             on_image=on_image,
                         )
@@ -1517,7 +1506,7 @@ class Game(QWidget):
                     self.files = []
                     assets = data.get("assets") or {}
                     for name in assets.keys():
-                        fi = self.FileItem(self.files_w, self.root, name)
+                        fi = self.FileItem(self.files_w, name)
                         self.files.append(fi)
                         self.files_layout.addWidget(fi, 0)
 
@@ -1541,10 +1530,9 @@ class Game(QWidget):
                         fi.lighting(light)
 
                 class FileItem(QWidget):
-                    def __init__(self, parent=None, root=None, name=""):
+                    def __init__(self, parent=None, name=""):
                         super().__init__(parent)
                         self.parent = parent
-                        self.root = root
                         self.name = name
                         self.setFixedHeight(40)
                         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -1602,10 +1590,10 @@ class Game(QWidget):
             iconPath    = ICON_MDT
             cache_name  = ".origin.json"
 
-            def __init__(self, parent=None, root=None, text=None, icon=None):
+            def __init__(self, parent=None, text=None, icon=None):
                 self.tmpPath = getPath(f"BML/.tmp/search/games/{self.cache_name}")
                 self.classs = {}
-                super().__init__(parent, root, text, icon)
+                super().__init__(parent, text, icon)
                 self.setClasss()
 
             def _before_search(self):
@@ -1628,7 +1616,7 @@ class Game(QWidget):
                 if os.path.exists(icon_full):
                     icon_pixmap.load(icon_full)
                 for i, j in self.data["versions"].items():
-                    clss = self.Classs(self, self.root)
+                    clss = self.Classs(self)
                     clss.setData(i, j, icon_pixmap)
                     self.classs[i] = clss
                     self.scroll_layout.addWidget(clss,0)
@@ -1676,10 +1664,10 @@ class Game(QWidget):
             iconPath    = ICON_MDTX
             cache_name  = "mindustryx.json"
 
-            def __init__(self, parent=None, root=None, text=None, icon=None):
+            def __init__(self, parent=None, text=None, icon=None):
                 self.tmpPath = getPath(f"BML/.tmp/search/games/{self.cache_name}")
                 self.classs = {}
-                super().__init__(parent, root, text, icon)
+                super().__init__(parent, text, icon)
                 self.init_wid()
                 self.setClasss()
 
@@ -1782,7 +1770,7 @@ class Game(QWidget):
                     pass
 
                 for i, j in self.data["versions"].items():
-                    clss = self.Classs(self, self.root)
+                    clss = self.Classs(self)
                     display_name = events.lang.get(f"core.wid.pages.download.{i}")
                     clss.setData(display_name, j, icon_pixmap)
                     self.classs[i] = clss
@@ -1882,10 +1870,10 @@ class Game(QWidget):
             iconPath    = ICON_MDTARC
             cache_name  = "mindustryarc.json"
 
-            def __init__(self, parent=None, root=None, text=None, icon=None):
+            def __init__(self, parent=None, text=None, icon=None):
                 self.tmpPath = getPath(f"BML/.tmp/search/games/{self.cache_name}")
                 self.classs = {}
-                super().__init__(parent, root, text, icon)
+                super().__init__(parent, text, icon)
                 self.scroll_layout.setContentsMargins(1, 1, 1, 1)
                 self.setClasss()
 

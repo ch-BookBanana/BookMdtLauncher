@@ -78,11 +78,18 @@ registry.declare("core.download.item.actions", registrant="core.download",
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
 # 游戏管理浮层左栏的功能页（设置 / Mods / …）。项由各子页自己登记。
-registry.declare("core.gameManager.pages", registrant="core.gameManager",
+# 浮层页面：盖在窗口上的整页界面，由 FloatingStack 承载。
+# 与 core.pages 的区别是它不进左栏、而是弹出来；条目形态一样。
+registry.declare("core.overlays", registrant="core",
                  fields=("init", "title", "order"),
                  required=("init", "title"),
+                 doc="浮层页面（盖在窗口上的整页界面）")
+
+registry.declare("core.gameManager.pages", registrant="core.gameManager",
+                 fields=("init", "title", "icon", "order"),
+                 required=("init", "title"),
                  built=("main", "btn"),
-                 doc="游戏管理浮层左栏的功能页（设置 / Mods / …）")
+                 doc="游戏管理浮层左栏的功能页（设置 / Mods / …）。icon 可省")
 
 registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
                  fields=("init", "attr", "order", "spacing"),
@@ -97,5 +104,5 @@ from . import start      # noqa: E402,F401
 from . import download   # noqa: E402,F401
 from . import game       # noqa: E402,F401
 from . import setting    # noqa: E402,F401
-from .fStack import gameSettings   # noqa: E402,F401  它的末尾往 core.gameManager.pages 登记
 from .fStack import gameManager    # noqa: E402,F401
+gameManager.register()             # 容器入口自登记（功能页在它文件末尾自己登记）

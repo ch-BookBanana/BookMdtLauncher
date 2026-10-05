@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QHBoxLayout, QLabel,
 from ..events import events
 from ..javaManager import javaManager
 
+from ..options.navBtn import NavBtn
 from ..options.items import Bool, Combo
 from ..options.scrolls import Scroll
 from ..options.texts import Title
@@ -47,7 +48,7 @@ class Setting(Page):
         super().__init__(btn)
 
     class Left(Leftw):
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             super().__init__(parent)
             self.resize_(120)
             self.init_wid()
@@ -65,80 +66,14 @@ class Setting(Page):
             self.bthGroup = QButtonGroup(self)
 
         def add_btn(self, text=None, icon=None):
-            btn = self.Btns(text, icon, self, self.root)
+            btn = NavBtn(text, icon, self)
             self.scroll.add(btn)
             self.bthGroup.addButton(btn)
             return btn
 
 
-        class Btns(QPushButton):
-            def __init__(self, text=None, icon=None, parent=None, root=None):
-                super().__init__()
-                self.parent = parent
-                self.root = root
-                self.text_ = text
-                self.icon_ = icon
-                self.init_ui()
-                self.init_wid()
-                bus.bind(self)
-
-            def init_ui(self):
-                self.setFixedSize(120, 30)
-                self.setAttribute(Qt.WA_StyledBackground, False)
-                self.setProperty("wid", "lbtn")
-                self.setCheckable(True)
-
-            def init_wid(self):
-                self.layout = QHBoxLayout(self)
-                self.layout.setContentsMargins(0, 0, 0, 0)
-                self.layout.setSpacing(5)
-
-                self.icon = QLabel()
-                self.icon.setAttribute(Qt.WA_StyledBackground, False)
-                self.icon.setFixedSize(30, 30)
-                self.icon.setScaledContents(False)
-                self.layout.addWidget(self.icon)
-                self.icon.setAlignment(Qt.AlignCenter)
-
-                self.text = QLabel()
-                self.text.setAttribute(Qt.WA_StyledBackground, False)
-                self.text.setFixedSize(90, 30)
-                self.text.setProperty("wid", "lbtn")
-                self.langing()
-                self.layout.addWidget(self.text)
-
-            def langing(self):
-                if self.text_ is not None:
-                    self.text.setText(events.lang.get(self.text_))
-                    self.setToolTip(events.lang.get(self.text_))
-
-            def lighting(self, light: bool):
-                if self.icon_ is not None:
-                    color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
-                    logo = change_color(self.icon_, color)
-                    pixmap = logo.pixmap(30,30)
-
-                    if not pixmap.isNull():
-                        smooth_pixmap = pixmap.scaled(
-                            22, 22,
-                            Qt.KeepAspectRatio,
-                            Qt.FastTransformation
-                        )
-                        self.icon.setPixmap(smooth_pixmap)
-                    else:
-                        events.logger.warning(f"Failed to load pixmap for {self.icon_}")
-
-
-            def setText(self, _text):
-                self.text_ = _text
-                self.langing()
-
-            def setIcon(self, _icon):
-                self.icon_ = _icon
-                self.lighting(events.settings["theme"])
-    
     class Main(Mainw):
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             super().__init__(parent)
             self.init_wid()
             self.btns_[0].click()
@@ -164,7 +99,7 @@ class Setting(Page):
             # 设置子页走注册中心：加一个子页 = 写一个 Page 子类 + 一条 registry.add。
             # init 由子页自己提供，装配方不猜它的构造签名。
             registry.add("core.setting.pages", "core.setting.launcher",
-                         init=lambda b: self.Launcher(b.parent, b.root, b.title, b.icon),
+                         init=lambda b: self.Launcher(b.parent, b.title, b.icon),
                          order=10,
                          title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
 
@@ -174,7 +109,7 @@ class Setting(Page):
         def add_page(self, entry):
             """按条目建一个子页：备好按钮 → 交给条目的 init 去造。"""
             btn = self.parent.left.add_btn(entry.title, entry.icon)
-            page_ = entry.init(Box(parent=self, root=self.root, entry=entry, btn=btn))
+            page_ = entry.init(Box(parent=self, entry=entry, btn=btn))
             self.pages_.append(page_)
             self.btns_.append(btn)
             self.pages.addWidget(page_)
@@ -183,10 +118,9 @@ class Setting(Page):
             return page_
 
         class Page(QWidget):
-            def __init__(self,parent=None,root=None,text=None,icon=None):
+            def __init__(self,parent=None,text=None,icon=None):
                 super().__init__()
                 self.parent = parent
-                self.root = root
                 self.text=text
                 self.icon=icon
 
@@ -219,8 +153,8 @@ class Setting(Page):
                 return self.scroll.add(wid, spacing)
 
         class Launcher(Page):
-            def __init__(self, parent=None, root=None, text=None,icon=None):
-                super().__init__(parent,root,text,icon)
+            def __init__(self, parent=None, text=None,icon=None):
+                super().__init__(parent,text,icon)
                 self.init_wid()
 
             def init_wid(self):
@@ -251,7 +185,7 @@ class Setting(Page):
                              title="core.wid.pages.setting.launcher.java.select")
 
                 for e in registry.entries("core.setting.items", where={"group": "launcher"}):
-                    wid = e.init(Box(parent=self, root=self.root, entry=e))
+                    wid = e.init(Box(parent=self, entry=e))
                     self.add(wid, e.get("spacing", 0))
                     attr = e.get("attr")          # 可选：只有内置条目要绑回老名字
                     if attr:
@@ -265,7 +199,7 @@ class Setting(Page):
                 if plugin_items:
                     self.add(Title(self, "core.wid.pages.setting.plugins"), 30)
                     for e in plugin_items:
-                        wid = e.init(Box(parent=self, root=self.root, entry=e))
+                        wid = e.init(Box(parent=self, entry=e))
                         self.add(wid, e.get("spacing", 0))
 
                 # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
@@ -355,7 +289,7 @@ class Setting(Page):
                         events.logger.warning(error,name="Java")
                     events.emit(
                         "overlayRequested",
-                        self.AddJava(self.root,folder,_t3_add_java,error))
+                        self.AddJava(folder,_t3_add_java,error))
 
                 self._t3_add.clicked.connect(lambda: _t3_add_clicked())
 
@@ -370,9 +304,8 @@ class Setting(Page):
                 不可用，这里只说明原因，不写候选表；确认后把 java.exe 路径交给 on_ok()。
                 """
 
-                def __init__(self, root=None, folder=None, on_ok=None, error=None):
+                def __init__(self, folder=None, on_ok=None, error=None):
                     super().__init__()
-                    self.root = root
                     self.on_ok = on_ok
                     self.error = error     # 非空则是错误态：只显示原因
                     self.folder = folder   # 外面选好的目录（绝对路径）

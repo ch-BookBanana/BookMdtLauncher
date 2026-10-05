@@ -33,10 +33,9 @@ def _shell():
 
 
 class Leftw(QWidget):
-    def __init__(self, parent=None, root=None):
+    def __init__(self, parent=None):
         super().__init__(None)
         self.parent = parent
-        self.root = root
         self.width_ = 0
         self.resize_(0)
         _shell().left.addWidget(self)
@@ -51,17 +50,15 @@ class Leftw(QWidget):
 
        
 class Mainw(QWidget):
-    def __init__(self, parent=None, root=None):
+    def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         _shell().main.addWidget(self)
 
 class Rightw(QWidget):
-    def __init__(self, parent=None, root=None):
+    def __init__(self, parent=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.width_ = 0
         self.resize_(0)
         _shell().right.addWidget(self)

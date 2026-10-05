@@ -26,10 +26,9 @@ from ...resources import (NAV_BACK, TBT_CLOSE)
 
 
 class FloatingStack(QWidget):
-    def __init__(self,parent=None,root=None):
+    def __init__(self,parent=None):
         super().__init__(parent)
         self.parent = parent
-        self.root = root
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.init_wid()
         self.refresh()
@@ -53,7 +52,7 @@ class FloatingStack(QWidget):
         self.l2.setSpacing(0)
         self.l2.setAlignment(Qt.AlignLeft)
 
-        self.left = self.Left(self,self.root)
+        self.left = self.Left(self)
         self.l2.addWidget(self.left,0)
 
         self.line2 = QWidget()
@@ -61,7 +60,7 @@ class FloatingStack(QWidget):
         self.line2.setFixedWidth(1)
         self.l2.addWidget(self.line2,0)
 
-        self.main = self.Main(self,self.root)
+        self.main = self.Main(self)
         self.l2.addWidget(self.main,1)
 
     def refresh(self):
@@ -117,10 +116,9 @@ class FloatingStack(QWidget):
         self.refresh()
 
     class Left(QWidget):
-        def __init__(self,parent=None,root=None):
+        def __init__(self,parent=None):
             super().__init__(parent)
             self.parent = parent
-            self.root = root
             self.setFixedWidth(40)
             self.init_wid()
 
@@ -131,11 +129,11 @@ class FloatingStack(QWidget):
             self.layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
 
             # 内置退出按钮（左箭头，返回上一页）
-            self.back = self.NavBtn(self, self.root, NAV_BACK, "core.text.return", self.parent.pop_page)
+            self.back = self.NavBtn(self, NAV_BACK, "core.text.return", self.parent.pop_page)
             self.layout.addWidget(self.back,0,Qt.AlignHCenter)
 
             # 清空整个栈按钮（叉号）
-            self.btn_close = self.NavBtn(self, self.root, TBT_CLOSE, "core.wid.top.close", self.parent.clear)
+            self.btn_close = self.NavBtn(self, TBT_CLOSE, "core.wid.top.close", self.parent.clear)
             self.layout.addWidget(self.btn_close,0,Qt.AlignHCenter)
 
         def refresh(self):
@@ -146,10 +144,9 @@ class FloatingStack(QWidget):
 
         class NavBtn(QPushButton):
             """浮动栈导航按钮：Back/Close 通用（图标、tooltip、回调参数化）"""
-            def __init__(self, parent=None, root=None, icon=None, tip_key=None, callback=None):
+            def __init__(self, parent=None, icon=None, tip_key=None, callback=None):
                 super().__init__(parent)
                 self.parent = parent
-                self.root = root
                 self.icon_ = icon
                 self.tip_key_ = tip_key
                 self.setFixedSize(30,30)
@@ -172,10 +169,9 @@ class FloatingStack(QWidget):
                 self.setToolTip(events.lang.get(self.tip_key_))
 
     class Main(QStackedWidget):
-        def __init__(self,parent=None,root=None):
+        def __init__(self,parent=None):
             super().__init__(parent)
             self.parent = parent
-            self.root = root
             self.init_wid()
 
         def init_wid(self):

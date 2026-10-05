@@ -171,7 +171,8 @@ class Box:
     签名不一致、需要额外参数、甚至是几个控件拼出来的复合控件，都由 init 自己解决。
 
     box.parent  该条目该挂到哪个容器
-    box.root    全局对象（将来会被宿主接口取代）
+    （原先还有个 root —— 「把宿主整个递进去」的旧做法，已去掉：
+     组件要什么从 events 取，构造只要容器与自己的元信息）
     box.entry   条目自身，可读 title / icon / order / name / key 等
     box.btn     配套按钮（扩展点声明了 btn 产物槽位时才有，否则为 None）
 
@@ -180,9 +181,8 @@ class Box:
 
     __slots__ = ("parent", "root", "entry", "btn")
 
-    def __init__(self, parent=None, root=None, entry=None, btn=None):
+    def __init__(self, parent=None, entry=None, btn=None):
         self.parent = parent
-        self.root = root
         self.entry = entry
         self.btn = btn
 
@@ -496,7 +496,8 @@ def page(key, *, point="core.pages", **meta):
         kw = dict(meta)          # 额外字段原样带上，也可以覆盖下面几项
         kw.setdefault("init", lambda b: cls(btn=getattr(b, "btn", None)))
         kw.setdefault("title", cls.name)
-        kw.setdefault("icon", cls.icon)
+        if "icon" in fields:
+            kw.setdefault("icon", cls.icon)
         kw.setdefault("order", getattr(cls, "order", 100))
         if "default" in fields:
             kw.setdefault("default", getattr(cls, "default", False))
