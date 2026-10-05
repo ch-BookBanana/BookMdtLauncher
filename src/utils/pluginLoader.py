@@ -453,6 +453,8 @@ def load_one(info):
 
     mod_name = "bml_plugin_" + info.id.replace(".", "_")
     inst = None
+    # 先记下当前有哪些控件：插件跑完（或炸掉）之后，多出来的就是它造的
+    widgets_before = _widget_snapshot()
     # 登记走一次**加载会话**：插件写进暂存区，跑完才并进正表。
     # 这样「setup 跑到一半抛异常」不会在正表里留下半截条目（界面会冒出点不动
     # 的项，重试还撞「已存在条目」）—— 而且不必靠事后按命名空间去擦。
@@ -479,7 +481,7 @@ def load_one(info):
         info.error = traceback.format_exc(limit=6)
         sys.modules.pop(mod_name, None)
         registry.abort()
-        _cleanup_failed(info, inst)
+        _cleanup_failed(info, inst, widgets_before)
         return info
     except BaseException:
         # 上面不接的那些（比如 Ctrl+C）：会话必须关掉，否则下一个插件会注册进
@@ -491,16 +493,84 @@ def load_one(info):
         # 也就是说别的插件不可能看到它「一半」的样子。
         registry.commit()
 
+    # 跑成功了也把「它造了哪些控件」记下来：卸载时已经没法回溯了
+    owned = _widgets_since(widgets_before)
+    if owned:
+        _OWNED_WIDGETS[info.id] = owned
     info.instance = inst
     return info
 
 
-def _cleanup_failed(info, inst=None):
-    """插件没跑完时的收尾。
+def _qapp():
+    """当前 QApplication；没有 Qt 上下文（纯逻辑测试）时返回 None。"""
+    try:
+        from PySide6.QtWidgets import QApplication
+        return QApplication.instance()
+    except Exception:
+        return None
+
+
+def _widget_snapshot():
+    """当前所有控件的快照。没有 QApplication 时返回 None（那就没什么可管）。"""
+    app = _qapp()
+    if app is None:
+        return None
+    try:
+        return set(app.allWidgets())
+    except Exception:
+        return None
+
+
+def _widgets_since(before):
+    """这次加载期间新冒出来的控件。
+
+    加载期间是单线程主线程，除了插件自己没别人在建控件 —— 所以新出现的
+    就是它造的。这条判据是「删了不会误伤」的依据。
+    """
+    if before is None:
+        return []
+    app = _qapp()
+    if app is None:
+        return []
+    try:
+        return [w for w in app.allWidgets() if w not in before]
+    except Exception:
+        return []
+
+
+def _destroy_widgets(widgets):
+    """删掉一批控件，返回删了几个。
+
+    先 setParent(None) 把它从布局里摘出来再 deleteLater() —— 直接 deleteLater
+    也行，但先摘出来能让「正在显示的页」立刻从三栏容器里消失，不留中间态。
+    已经没了（C++ 那边被上层顺手删了）就跳过。
+    """
+    n = 0
+    for w in list(widgets or ()):
+        try:
+            w.setParent(None)
+            w.deleteLater()
+            n += 1
+        except RuntimeError:
+            pass                        # 包装对象还在、C++ 对象已经没了
+        except Exception:
+            pass
+    return n
+
+
+# 加载成功后，这个插件「造出来的控件」记在这儿（卸载时按 id 取出来删）
+_OWNED_WIDGETS = {}
+
+
+def _cleanup_failed(info, inst=None, widgets_before=None):
+    """插件没跑完时的收尾，按「先摘登记、再跑析构、最后删控件」来。
 
     注册表那部分已经由会话回滚了（abort），这里管会话管不到的：
       * 事件 —— 它不在注册表里，没法回滚，按命名空间摘一遍；
-      * teardown —— setup 可能只做了一半，尽力试一次，抛什么都吞掉。
+      * teardown —— 析构是插件自己写的（它才知道自己起了什么线程、开了什么文件），
+        setup 可能只做了一半，所以尽力跑一次、抛什么都吞掉；
+      * 控件 —— 最后把它这次造出来的控件全删掉。放在 teardown **之后**，
+        因为析构里可能还要摸自己的控件，先删了它就得撞悬空对象。
     """
     from .events import events
 
@@ -515,6 +585,11 @@ def _cleanup_failed(info, inst=None):
         except (Exception, SystemExit):
             events.logger.warning(f"回滚时 teardown 抛异常（已忽略）：{info.id}",
                                   name="Plugin")
+    _OWNED_WIDGETS.pop(info.id, None)
+    n = _destroy_widgets(_widgets_since(widgets_before))
+    if n:
+        events.logger.info(f"回滚插件控件：{info.id} 删掉 {n} 个（加载失败时它已经建出来的）",
+                           name="Plugin")
     _notify_changed()
 
 
@@ -680,6 +755,12 @@ def unload(info):
         # 同 load_one：SystemExit 也得接住，卸载一个插件不该把启动器带走
         events.logger.error(f"插件 teardown 抛异常：{info.id}\n{traceback.format_exc(limit=4)}",
                             name="Plugin")
+    # 析构跑完再删它加载时造出来的控件（那时没法回溯，所以加载成功时就记下了）。
+    # 由扩展点构建出来的那些（页面等）不在这里 —— 那是装配方按注册表建的，
+    # 摘条目的时候它们自己会走。
+    n = _destroy_widgets(_OWNED_WIDGETS.pop(info.id, ()))
+    if n:
+        events.logger.info(f"卸载时删掉插件造的控件：{info.id} × {n}", name="Plugin")
     info.instance = None
     info.error = ""
     info.reported = False

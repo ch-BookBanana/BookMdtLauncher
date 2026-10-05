@@ -464,9 +464,8 @@ try:
               * 样式片段 —— apply_theme 每次重新收 core.qss；
               * 托盘菜单项 —— 托盘照 core.tray.menu 重建。
 
-            **页面（core.pages）不在此列**：左栏按钮与三栏控件是启动时建好的，
-            要让插件页面能热摘，得让页容器支持重建 —— 那是另一件事。所以卸掉一个
-            带页面的插件要重启才干净。
+            页面（core.pages）不在这里：页容器自己订了这条事件，收到就按注册表
+            对账（sync_pages）—— 它才知道怎么拆自己的按钮与三栏控件。
 
             启动期（窗口还没建）也会收到这条：那时 theme/lang 的最终状态还由启动
             流程自己定，所以这里做守卫。
@@ -990,6 +989,21 @@ try:
                         self.btsGroup.addButton(btn)
                         return btn
 
+                    def remove_btn(self, btn):
+                        """摘掉一颗按钮（插件页面被卸掉时）。
+
+                        三处都要摘：按钮组（否则它还占着互斥）、布局、以及
+                        「当前选中」那个记录 —— 不然后面点别人时 chooser 会跳错位置。
+                        """
+                        if btn in self.btns_:
+                            self.btns_.remove(btn)
+                        self.btsGroup.removeButton(btn)
+                        self.layout.removeWidget(btn)
+                        btn.setParent(None)
+                        btn.deleteLater()
+                        if self._btn is btn:
+                            self._btn = None
+
                     class Btns(QPushButton):
                         def __init__(self, logo=None, text=None, parent=None, root=None):
                             super().__init__(parent)
@@ -1375,8 +1389,9 @@ try:
                         self.parent = parent
                         self.root = root
                         self.nav = nav          # 左栏导航按钮组，由 Window 注入
-                        self.pages = []
-                        self.btns = []
+                        self.pages = []         # 建好的页面，与 btns 一一对应
+                        self.btns = []          # 对应的左栏按钮（pages[i].btn is btns[i]）
+                        self._page_keys = {}    # core.pages 的 key -> (page, btn)，对账用
                         self.init_wid()
                         # 默认页由 core.pages 里 default=True 的那条决定；
                         # 没有标记（或注册表为空）时退回第一个。
@@ -1416,23 +1431,85 @@ try:
                         # （java_show_progress / java_finish），registry.bind 回填的
                         # 产物也用这些名字，改名要连带一起改。
                         self.default_page = None
-                        for e in registry.entries("core.pages"):
-                            # icon 用 get：契约里它是可选的（required 只要 init/title），
-                            # 直接 e.icon 会让「插件页面没配图标」炸掉整个装配循环 ——
-                            # NavBtn 本来就接受 None。
-                            btn = self.nav.add_btn(e.title, e.get("icon"))
-                            page = e.init(Box(parent=self, entry=e, btn=btn))
-                            # 这两张表归装配方维护，不由页面自己追加 ——
-                            # 插件页面不走内置的 Page 基类，靠自己就会漏。
-                            # btns 装的是左栏按钮（pages[i].btn is btns[i]）。
-                            self.pages.append(page)
-                            self.btns.append(btn)
-                            btn.clicked.connect(page.changePage)
-                            setattr(self, e.name, page)
-                            # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到
-                            registry.bind("core.pages", e.key, main=page, btn=btn)
-                            if e.get("default"):
-                                self.default_page = page
+                        self.sync_pages()
+
+                        # 插件集合一变就对账：卸掉一个带页面的插件，它的按钮与
+                        # 三栏控件不能留在界面上（原先要重启才干净）。
+                        events.on("plugins_changed", self.sync_pages)
+
+                    def sync_pages(self):
+                        """按 core.pages 对账：没建的补上、不在表里的摘掉。
+
+                        为什么是对账而不是整体重建：整体重建会把所有页面的状态
+                        （滚动位置、正在走的任务、控制台内容）一起清掉，而且每次
+                        插件变动都重建一遍内置页很浪费。对账只动变化的那几个。
+                        """
+                        want = registry.entries("core.pages")
+                        keys = [e.key for e in want]
+
+                        # 先摘：建过、但现在不在注册表里的（插件被卸了）
+                        for key in [k for k in self._page_keys if k not in keys]:
+                            self._drop_page(key)
+
+                        # 再补：按注册表顺序插到该在的位置
+                        for index, e in enumerate(want):
+                            if e.key not in self._page_keys:
+                                self._build_page(e, index)
+
+                        # 默认页跟着注册表走
+                        self.default_page = next(
+                            (self._page_keys[e.key][0] for e in want if e.get("default")),
+                            None)
+
+                    def _build_page(self, e, index):
+                        """建一页并插到 index（左栏按钮、三栏控件、注册表产物一起）。"""
+                        # icon 用 get：契约里它是可选的（required 只要 init/title），
+                        # 直接 e.icon 会让「插件页面没配图标」炸掉整个装配循环 ——
+                        # NavBtn 本来就接受 None。
+                        btn = self.nav.add_btn(e.title, e.get("icon"))
+                        page = e.init(Box(parent=self, entry=e, btn=btn))
+                        # 这两张表归装配方维护，不由页面自己追加 ——
+                        # 插件页面不走内置的 Page 基类，靠自己就会漏。
+                        # btns 装的是左栏按钮（pages[i].btn is btns[i]）。
+                        self.pages.insert(index, page)
+                        self.btns.insert(index, btn)
+                        self._page_keys[e.key] = (page, btn)
+                        btn.clicked.connect(page.changePage)
+                        setattr(self, e.name, page)
+                        # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到
+                        registry.bind("core.pages", e.key, main=page, btn=btn)
+                        return page
+
+                    def _drop_page(self, key):
+                        """拆一页：三栏控件、左栏按钮、挂在本容器上的属性一起摘。
+
+                        注册表那边不用管 —— 条目已经先被 remove_namespace 摘掉了，
+                        所以这里拿不到（也不需要）Entry。
+                        """
+                        page, btn = self._page_keys.pop(key)
+                        was_current = self.main.currentWidget() is getattr(page, "main", None)
+
+                        for stack, wid in ((self.left, getattr(page, "left", None)),
+                                           (self.main, getattr(page, "main", None)),
+                                           (self.right, getattr(page, "right", None))):
+                            if wid is None:
+                                continue
+                            stack.removeWidget(wid)
+                            wid.deleteLater()
+                        self.nav.remove_btn(btn)
+                        if page in self.pages:
+                            self.pages.remove(page)
+                        if btn in self.btns:
+                            self.btns.remove(btn)
+
+                        # setattr(self, e.name, page) 挂上去的那个属性也要摘
+                        attr = key.rpartition(".")[2]
+                        if getattr(self, attr, None) is page:
+                            delattr(self, attr)
+
+                        # 当前页被拆了：切到还在的第一页，别停在一个已经删掉的控件上
+                        if was_current and self.pages:
+                            self.pages[0].changePage()
 
                     class Left_(QStackedWidget):
                         def __init__(self, parent=None, root=None):
