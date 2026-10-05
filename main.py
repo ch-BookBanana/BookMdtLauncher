@@ -171,6 +171,9 @@ try:
             # load_all 逐个隔离：坏插件只记进它自己的 error，绝不往外抛
             # （外面整个包在一个大 try 里，抛出去就是「启动失败」弹窗）。
             self.plugins = pluginLoader.load_all()
+            # 插件语言包要等插件加载完才进得来（Langer 建得比插件早），
+            # 所以这里按当前语言重载一次，把插件的覆盖项并进去。
+            self.langer.load(self.langer.current_lang)
 
             self.tray = self.Tray(self, self)
             self.window = self.Window(self, self)
@@ -2743,6 +2746,10 @@ try:
                 try:
                     with open(lang_path, "r", encoding="utf-8") as f:
                         self.langs = json.load(f)
+                    # 插件语言包（<插件>/langs/<lang>.json）覆盖内置同名键 ——
+                    # 插件想改哪句文案，直接在自己的语言包里写那个键即可。
+                    from src.utils.pluginLoader import plugin_langs
+                    self.langs.update(plugin_langs(lang))
                     self.parent.settings["language"] = lang
                 except Exception as e:
                     self.root.logger.error(f"Failed to load language file {lang_path}: {e}")

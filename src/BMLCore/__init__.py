@@ -55,6 +55,8 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
 from . import Widgets
 from .Plugin import API_VERSION, Plugin
 from ..utils.events import events
+from ..utils.path_utils import getPath
 from ..utils.registry import registry, simple
 
-__all__ = ["API_VERSION", "Plugin", "Widgets", "events", "registry", "simple"]
+__all__ = ["API_VERSION", "Plugin", "Widgets", "events", "registry", "simple",
+           "getPath"]

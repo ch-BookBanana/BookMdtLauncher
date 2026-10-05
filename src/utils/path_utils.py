@@ -32,6 +32,18 @@ def _is_nuitka():
         return False
 
 
+# 当前正在加载的插件目录，由 pluginLoader 在 setup 期间设置。
+# 插件资源统一写 getPath("${plugin}/assets/xxx.png") —— 不写死自己叫什么、
+# 也不写死装在哪个位置，换个 id 或换个安装目录都不用改代码。
+_PLUGIN_DIR = None
+
+
+def set_plugin_dir(path):
+    """加载器进出插件上下文时调用（退出传 None）。"""
+    global _PLUGIN_DIR
+    _PLUGIN_DIR = path
+
+
 def getPath(relative_path):
     """获取资源的绝对路径，兼容开发环境 / PyInstaller / Nuitka 打包环境
 
@@ -45,6 +57,15 @@ def getPath(relative_path):
       - Nuitka onefile：sys.argv[0]=原始exe路径(已绝对化)，__file__=解压临时目录
       - Nuitka standalone：二者同在 dist 目录，逻辑可复用
     """
+    norm = str(relative_path).replace("\\", "/")
+    if norm == "${plugin}" or norm.startswith("${plugin}/"):
+        if _PLUGIN_DIR is None:
+            raise RuntimeError(
+                "getPath('${plugin}/…') 只在插件加载期间可用（setup 里）。"
+                "运行期才要取的资源，请在 setup 里先把路径取好再登记。")
+        tail = norm[len("${plugin}"):].strip("/")
+        return os.path.join(_PLUGIN_DIR, *tail.split("/")) if tail else _PLUGIN_DIR
+
     if _is_nuitka():
         if relative_path.startswith('src'):
             # 内置资源位于解压目录/二进制目录。Nuitka 的 __file__ 为

@@ -27,6 +27,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 必须在 BML/ 下：src/ 是打包进 exe 的只读解压目录（onefile 下每次运行还换位置），
 而 BML/ 在 exe 旁边、可写、跟着启动器一起搬走。
 
+两种形态都收：
+    BML/plugins/hello/          一个目录
+    BML/plugins/hello.zip       一个压缩包（解压到 BML/.tmp/plugins/ 再按目录加载）
+zip 是为了分发方便 —— 下载一个文件丢进 plugins/ 就能用。
+
 两条硬规矩
 ----------
 1. **插件只能 import BMLCore**。import src.* 或 main 会被闸门当场拦下 ——
@@ -40,16 +45,19 @@ import builtins
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import traceback
+import zipfile
 from dataclasses import dataclass, field
 
 from .path_utils import getPath
 
 __all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all",
-           "unload", "loaded", "PLUGIN_DIR", "MANIFEST"]
+           "unload", "loaded", "plugin_langs", "PLUGIN_DIR", "MANIFEST"]
 
 PLUGIN_DIR = "BML/plugins"
+PLUGIN_CACHE = "BML/.tmp/plugins"     # zip 插件的解压落点（跟其他临时文件一个待遇）
 MANIFEST = "plugin.json"
 
 # 插件不得触达的顶层模块名（BMLCore 是唯一的合法入口）
@@ -75,6 +83,7 @@ class PluginInfo:
     author: str = ""
     description: str = ""
 
+    source: str = ""                # 来自目录还是 zip 文件（界面显示/排查用）
     instance: object = None          # 加载成功后的 Plugin 实例
     error: str = ""                  # 非空 = 加载失败（界面据此标红）
 
@@ -85,6 +94,46 @@ class PluginInfo:
     @property
     def dir_name(self):
         return os.path.basename(self.path)
+
+
+def _safe_extract(zf, dest):
+    """解压前先查一遍路径：zip 里的条目不许跑到 dest 外面去（zip slip）。
+
+    别人给的 zip 里写个 ../../.. 是常见套路，先全查完再解，别边解边发现。
+    """
+    dest_abs = os.path.abspath(dest)
+    for name in zf.namelist():
+        target = os.path.abspath(os.path.join(dest, name))
+        if target != dest_abs and not target.startswith(dest_abs + os.sep):
+            raise PluginLoadError(f"zip 里有越界路径，拒绝解压：{name}")
+    zf.extractall(dest)
+
+
+def _prepare_zip(zip_path, cache_root):
+    """把 .zip 插件解压到缓存目录，返回解压后的插件根目录。
+
+    每次发现都重解一遍（先删旧的）：插件很小，这样更新 zip 后自动生效，
+    省掉一整套缓存失效判断 —— 而缓存失效搞错的代价是「插件改了没反应」，
+    那比多解压几百 KB 难查得多。
+
+    解压目录同时是运行期的插件根：${plugin}/… 与 langs/ 都指向它。
+    """
+    name = os.path.splitext(os.path.basename(zip_path))[0]
+    dest = os.path.join(cache_root, name)
+    shutil.rmtree(dest, ignore_errors=True)
+    os.makedirs(dest, exist_ok=True)
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            _safe_extract(zf, dest)
+    except zipfile.BadZipFile as e:
+        raise PluginLoadError(f"不是有效的 zip：{e}") from None
+
+    # 打包时容易把文件夹一起压进去，多套一层就再往里走一层
+    if not os.path.isfile(os.path.join(dest, MANIFEST)):
+        subs = [d for d in os.listdir(dest) if os.path.isdir(os.path.join(dest, d))]
+        if len(subs) == 1 and os.path.isfile(os.path.join(dest, subs[0], MANIFEST)):
+            return os.path.join(dest, subs[0])
+    return dest
 
 
 def _read_manifest(folder):
@@ -199,29 +248,95 @@ class _SrcImportGuard:
         return False
 
 
+class _PluginDir:
+    """把「当前插件目录」告诉 path_utils，让 ${plugin}/… 能解析。
+
+    只在 exec_module + setup 期间生效：插件要在 setup 里把资源路径取好
+    （取到的是绝对路径），运行期再调 getPath 就没有上下文了。
+    """
+
+    def __init__(self, path):
+        self._path = path
+
+    def __enter__(self):
+        from .path_utils import set_plugin_dir
+        set_plugin_dir(self._path)
+        return self
+
+    def __exit__(self, *exc):
+        from .path_utils import set_plugin_dir
+        set_plugin_dir(None)
+        return False
+
+
+def plugin_langs(lang):
+    """收集已加载插件的语言包：<插件>/langs/<lang>.json。
+
+    按加载顺序合并，**后加载的覆盖先前的** —— 插件因此可以盖掉内置的键
+    （想改一句文案，直接在自己的 langs/zh-CN.json 里写那个键就行）。
+    坏文件只记日志，不影响其他插件与内置语言。
+    """
+    out = {}
+    for info in _STATE["loaded"]:
+        path = os.path.join(info.path, "langs", f"{lang}.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                out.update(data)
+            else:
+                raise ValueError("顶层必须是对象")
+        except Exception as e:
+            try:
+                from .events import events
+                events.logger.error(f"插件语言包读不了：{info.id}/{lang}.json —— {e}",
+                                    name="Plugin")
+            except Exception:
+                pass
+    return out
+
+
 # ─────────────────────────── 发现 / 加载 ───────────────────────────
 
 _STATE = {"loaded": []}
 
 
-def discover(base=None):
+def discover(base=None, cache=None):
     """扫描插件目录，返回清单列表。坏清单也会作为一条（error 非空）返回，
     这样插件管理界面能把它显示出来，而不是「凭空少了一个插件」。
 
-    base 留了参数：测试用临时目录，不必碰真实的 BML/plugins。
+    base / cache 留了参数：测试用临时目录，不必碰真实的 BML/。
+    目录与 .zip 两种形态都收。
     """
     base = base or getPath(PLUGIN_DIR)
+    cache = cache or getPath(PLUGIN_CACHE)
     found = []
     if not os.path.isdir(base):
         return found
     for name in sorted(os.listdir(base)):
-        folder = os.path.join(base, name)
-        if name.startswith((".", "_")) or not os.path.isdir(folder):
+        if name.startswith((".", "_")):
             continue
-        try:
-            found.append(_read_manifest(folder))
-        except PluginLoadError as e:
-            found.append(PluginInfo(id=f"<{name}>", path=folder, error=str(e)))
+        full = os.path.join(base, name)
+        if os.path.isdir(full):
+            try:
+                info = _read_manifest(full)
+                info.source = full
+                found.append(info)
+            except PluginLoadError as e:
+                found.append(PluginInfo(id=f"<{name}>", path=full, error=str(e)))
+        elif name.lower().endswith(".zip") and os.path.isfile(full):
+            try:
+                root = _prepare_zip(full, cache)
+                info = _read_manifest(root)
+                info.source = full
+                found.append(info)
+            except PluginLoadError as e:
+                found.append(PluginInfo(id=f"<{name}>", path=full, source=full, error=str(e)))
+            except Exception as e:
+                found.append(PluginInfo(id=f"<{name}>", path=full, source=full,
+                                        error=f"解压失败：{e}"))
     return found
 
 
@@ -253,7 +368,7 @@ def load_one(info):
 
     mod_name = "bml_plugin_" + info.id.replace(".", "_")
     try:
-        with _SrcImportGuard():
+        with _SrcImportGuard(), _PluginDir(info.path):
             spec = importlib.util.spec_from_file_location(mod_name, entry_path)
             if spec is None or spec.loader is None:
                 raise PluginLoadError(f"无法为 {info.entry} 建立模块规格")

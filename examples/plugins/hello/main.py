@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """最小插件示例。
 
-放进 BML/plugins/hello/ 就能被加载（BML/ 在 exe 旁边）。
+放进 BML/plugins/hello/（或打包成 hello.zip 丢进 BML/plugins/）就能被加载。
 插件只能 import BMLCore —— import src.* 或 main 会被加载器当场拦下。
 """
 
-from BMLCore import Plugin, Widgets
+from BMLCore import Plugin, Widgets, getPath
 
 
 class Hello(Plugin):
@@ -18,15 +18,17 @@ class Hello(Plugin):
     def setup(self):
         """登记阶段：往扩展点里加东西。这里不要碰 Qt —— 界面还没建。"""
 
-        # 往设置页加一项：给控件类就行，构造参数由宿主拼。
-        # group 默认 'plugins'，设置页会把它单独归到末尾，不和内置项混排。
-        self.add_setting("greet", Widgets.Bool, title="Hello（插件示例）", order=900)
+        # 文案来自本插件自己的语言包 langs/zh-CN.json；
+        # 插件语言包还能盖掉内置的键（想改宿主某句文案，直接写那个键就行）。
+        self.add_setting("greet", Widgets.Bool, title="hello.greet", order=900)
 
-        # 订阅事件。名字原样 —— 宿主的事件和别的插件的事件都这么订。
-        # （宿主目前还没有 pagesReady 这个事件，这里只是示范写法；
-        #   发一个不存在的事件名不会报错，只是没人收到。）
+        # 自己的资源用 ${plugin}/ 取：不写死自己叫什么、也不写死装在哪儿，
+        # 换成 zip 分发、换个 id、换个安装目录都不用改代码。
+        # 取到的是绝对路径 —— ${plugin} 只在加载期间有效，
+        # 运行期才要用的资源必须在这里先取好。
+        self._icon = getPath("${plugin}/assets/icon.png")
+
         self.on("com.example.hello.ping", self._on_ping)
-
         self.log("已登记 1 个设置项")
 
     def teardown(self):
