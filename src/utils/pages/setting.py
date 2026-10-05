@@ -31,7 +31,7 @@ from ..options.texts import Title
 from ..path_utils import getPath
 from ..utils import change_color, t
 from ..resources import (ACT_UNITS, FILE_FOLDER, TBT_CLOSE)
-from ..registry import registry
+from ..registry import Box, registry, simple
 
 from ._init import *
 
@@ -155,22 +155,24 @@ class Setting(Page):
             self.pages_ = []
             self.btns_ = []
 
-            # 设置子页走注册中心：加一个子页 = 写一个 Page 子类 + 一条 registry.add
+            # 设置子页走注册中心：加一个子页 = 写一个 Page 子类 + 一条 registry.add。
+            # init 由子页自己提供，装配方不猜它的构造签名。
             registry.declare("core.setting.pages", registrant="core.setting",
-                             fields=("cls", "title", "icon", "order"),
-                             required=("cls", "title", "icon"),
+                             fields=("init", "title", "icon", "order"),
+                             required=("init", "title", "icon"),
                              doc="设置页左栏的子页")
             registry.add("core.setting.pages", "core.setting.launcher",
-                         cls=self.Launcher, order=10,
+                         init=lambda b: self.Launcher(b.parent, b.root, b.title, b.icon),
+                         order=10,
                          title="wid.pages.setting.launcher", icon=ACT_UNITS)
 
             for e in registry.entries("core.setting.pages"):
-                self.add_page(e.title, getPath(e.icon), e.cls)
+                self.add_page(e)
 
-        def add_page(self,text=None,icon=None,page=None):
-            if page is None: page = self.Page
-            btn = self.parent.left.add_btn(text,icon)
-            page_ = page(self,self.root,text,icon)
+        def add_page(self, entry):
+            """按条目建一个子页：备好按钮 → 交给条目的 init 去造。"""
+            btn = self.parent.left.add_btn(entry.title, entry.icon)
+            page_ = entry.init(Box(parent=self, root=self.root, entry=entry, btn=btn))
             self.pages_.append(page_)
             self.btns_.append(btn)
             self.pages.addWidget(page_)
@@ -224,31 +226,34 @@ class Setting(Page):
                 # attr 是绑到 self 上的名字 —— 下面的行为代码仍按老名字引用控件；
                 # 这一批只把「有哪些项、什么顺序、归哪组」数据化，行为绑定留在原地。
                 registry.declare("core.setting.items", registrant="core.setting",
-                                 fields=("cls", "group", "order", "title", "spacing", "attr"),
-                                 required=("cls", "group", "title", "attr"),
+                                 fields=("init", "group", "order", "title", "spacing", "attr"),
+                                 required=("init", "group", "title", "attr"),
                                  doc="设置子页里的标准条目（Title 分组标题 / Bool / Combo …）")
 
                 registry.add("core.setting.items", "core.setting.preferences",
-                             cls=Title, group="launcher", order=10, spacing=30, attr="_title1",
+                             init=simple(Title), group="launcher", order=10, spacing=30,
+                             attr="_title1",
                              title="wid.pages.setting.launcher.preferences")
                 registry.add("core.setting.items", "core.setting.theme",
-                             cls=Bool, group="launcher", order=20, attr="_t1_theme",
+                             init=simple(Bool), group="launcher", order=20, attr="_t1_theme",
                              title="wid.pages.setting.launcher.preferences.theme")
                 registry.add("core.setting.items", "core.setting.lang",
-                             cls=Combo, group="launcher", order=30, attr="_t1_lang",
+                             init=simple(Combo), group="launcher", order=30, attr="_t1_lang",
                              title="wid.pages.setting.launcher.preferences.lang")
                 registry.add("core.setting.items", "core.setting.general",
-                             cls=Title, group="launcher", order=40, spacing=30, attr="_title2",
+                             init=simple(Title), group="launcher", order=40, spacing=30,
+                             attr="_title2",
                              title="wid.pages.setting.launcher.general")
                 registry.add("core.setting.items", "core.setting.java",
-                             cls=Title, group="launcher", order=50, spacing=30, attr="_title3",
+                             init=simple(Title), group="launcher", order=50, spacing=30,
+                             attr="_title3",
                              title="wid.pages.setting.launcher.java")
                 registry.add("core.setting.items", "core.setting.java.select",
-                             cls=Combo, group="launcher", order=60, attr="_t3_select",
+                             init=simple(Combo), group="launcher", order=60, attr="_t3_select",
                              title="wid.pages.setting.launcher.java.select")
 
                 for e in registry.entries("core.setting.items", where={"group": "launcher"}):
-                    wid = e.cls(self, self.root, e.title)
+                    wid = e.init(Box(parent=self, root=self.root, entry=e))
                     self.add(wid, e.get("spacing", 0))
                     setattr(self, e.attr, wid)
 
@@ -337,7 +342,8 @@ class Setting(Page):
                     if not javaManager.isJava(java):
                         error = t(self.root.langer.get("log.warning.javaAddInvalid"),folder)
                         self.root.logger.warning(error,name="Java")
-                    self.root.window.floatingOverlay.add_page(
+                    self.root.signals.emit(
+                        "overlayRequested",
                         self.AddJava(self.root,folder,_t3_add_java,error))
 
                 self._t3_add.clicked.connect(lambda: _t3_add_clicked())
@@ -466,7 +472,7 @@ class Setting(Page):
                 def _close(self):
                     """出叠并销毁；防手滑连点两次 × 时对象已没了。"""
                     try:
-                        self.root.window.floatingOverlay.pop_page(self)
+                        self.root.signals.emit("overlayClosed", self, True)
                     except RuntimeError:
                         pass
 

@@ -144,6 +144,12 @@ try:
 
 
             self.signals.register("tokenVerified", Signal(bool, str, object))
+            # 浮层 / 栈走信号：页面不直接点 root.window.floatingOverlay|floatingStack，
+            # 而是发一个请求，挂到哪一层由 Window 自己决定（页面因此不必知道窗口结构）
+            self.signals.register("overlayRequested", Signal(object))
+            self.signals.register("overlayClosed", Signal(object, bool))
+            self.signals.register("stackRequested", Signal(object))
+            self.signals.register("stackClosed", Signal(object, bool))
 
             self.tray = self.Tray(self, self)
             self.window = self.Window(self, self)
@@ -574,6 +580,14 @@ try:
                 self.githubSetting = self.GithubSetting(self, self.root)
                 self.floatingOverlay = FloatingOverlay(self, self.root)
 
+                # 浮层/栈请求在这里落地：请求方只管发信号，
+                # 挂载点（叠加层还是栈层）由窗口自己决定
+                _sig = self.root.signals
+                _sig.connect("overlayRequested", self.floatingOverlay.add_page)
+                _sig.connect("overlayClosed", self.floatingOverlay.pop_page)
+                _sig.connect("stackRequested", self.floatingStack.add_page)
+                _sig.connect("stackClosed", self.floatingStack.pop_page)
+
             def eventFilter(self, obj, event):
                 if obj is self and event.type() == QEvent.Resize:
                     new_width = self.left.width()  # 假设宽度固定，或者从配置读取
@@ -719,7 +733,7 @@ try:
 
                 def close_(self):
                     """关闭自身：从叠加浮层出叠并保留实例，供下次直接复用"""
-                    self.root.window.floatingOverlay.pop_page(self, deletable=False)
+                    self.root.signals.emit("overlayClosed", self, False)
 
                 def _sync_rate_from_api(self):
                     """将 GithubAPI 中的实时 rate 同步到 settings 内存（不写盘）。"""
@@ -1874,7 +1888,7 @@ try:
 
                         def _on_click(self):
                             """打开下载列表页（floatingStack 导航页）。"""
-                            self.root.window.floatingStack.add_page(self.DlListPage(self, self.root))
+                            self.root.signals.emit("stackRequested", self.DlListPage(self, self.root))
 
                         def _check_state(self, event):
                             """子线程：读取任务表，与本地状态比对，变化才 emit。"""
@@ -2431,36 +2445,37 @@ try:
                         from src.utils.pages.download import Download
                         from src.utils.pages.game import Game
                         from src.utils.pages.setting import Setting
-                        from src.utils.registry import registry
+                        from src.utils.registry import Box, registry
 
                         registry.declare(
                             "core.pages", registrant="core",
-                            fields=("cls", "title", "icon", "order", "default"),
-                            required=("cls", "title"),
+                            fields=("init", "title", "icon", "order", "default"),
+                            required=("init", "title"),
                             built=("main", "btn"),
                             doc="主窗口左栏导航页（登记顺序即导航顺序）")
 
+                        # init 由注册方提供：装配方只管「备好按钮 → 调 init → 接线 → 回填」，
+                        # 不再需要知道每个页面类的构造签名（那是页面自己才知道的事）。
+                        def _page_init(cls):
+                            return lambda b: cls(b.parent, b.root, b.title, b.icon, btn=b.btn)
+
                         registry.add("core.pages", "core.start",
-                                     cls=Start, order=10, default=True,
+                                     init=_page_init(Start), order=10, default=True,
                                      title="wid.pages.start", icon=BTN_START)
                         registry.add("core.pages", "core.download",
-                                     cls=Download, order=20,
+                                     init=_page_init(Download), order=20,
                                      title="wid.pages.download", icon=BTN_DOWNLOAD)
                         registry.add("core.pages", "core.game",
-                                     cls=Game, order=30,
+                                     init=_page_init(Game), order=30,
                                      title="wid.pages.game", icon=BTN_GAME)
                         registry.add("core.pages", "core.setting",
-                                     cls=Setting, order=40,
+                                     init=_page_init(Setting), order=40,
                                      title="wid.pages.setting", icon=BTN_SETTING)
-
-                        # 装配方负责「建按钮 → 建页面 → 接线 → 回填」整套：
-                        # 页面不再自己摸主窗口要按钮，也不知道按钮点了切到哪去。
-                        pagebtns = self.nav
 
                         self.default_page = None
                         for e in registry.entries("core.pages"):
-                            btn = pagebtns.add_btn(e.title, getPath(e.icon))
-                            page = e.cls(self, self.root, e.title, getPath(e.icon), btn=btn)
+                            btn = self.nav.add_btn(e.title, e.icon)
+                            page = e.init(Box(parent=self, root=self.root, entry=e, btn=btn))
                             btn.clicked.connect(page.changePage)
                             setattr(self, e.name, page)
                             # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到

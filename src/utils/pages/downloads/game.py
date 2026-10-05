@@ -36,7 +36,7 @@ from ...bus import bus
 from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
-from ...registry import registry
+from ...registry import Box, registry
 
 
 class Game(QWidget):
@@ -177,31 +177,35 @@ class Game(QWidget):
             self.pages_ = []
             self.btns_ = []
 
-            # 下载源走注册中心：这里只声明「有哪些源、什么顺序、要不要改色」，
-            # 仓库 / README / 图标 / 缓存文件名由各 Template 子类的类属性提供。
-            # 加一个下载源 = 写一个 Template 子类 + 加一条 registry.add。
+            # 下载源走注册中心：init 由源自己提供（装配方不猜构造签名），
+            # 仓库 / README / 缓存文件名仍由各 Template 子类的类属性提供，
+            # 只有界面要用的语言键与图标登记一份。
             registry.declare(
                 "core.download.sources", registrant="core.download",
-                fields=("cls", "order", "color"),
-                required=("cls",),
+                fields=("init", "title", "icon", "order", "color"),
+                required=("init", "title", "icon"),
                 doc="下载页顶部页签的游戏来源")
 
+            def _src_init(cls):
+                return lambda b: cls(b.parent, b.root, b.title, b.icon)
+
             registry.add("core.download.sources", "core.origin",
-                         cls=self.Origin, order=10, color=False)
+                         init=_src_init(self.Origin), order=10, color=False,
+                         title=self.Origin.title_key, icon=self.Origin.iconPath)
             registry.add("core.download.sources", "core.mindustryx",
-                         cls=self.MindustryX, order=20, color=False)
+                         init=_src_init(self.MindustryX), order=20, color=False,
+                         title=self.MindustryX.title_key, icon=self.MindustryX.iconPath)
             registry.add("core.download.sources", "core.mindustryarc",
-                         cls=self.MindustryARC, order=30, color=False)
+                         init=_src_init(self.MindustryARC), order=30, color=False,
+                         title=self.MindustryARC.title_key, icon=self.MindustryARC.iconPath)
 
             for e in registry.entries("core.download.sources"):
-                # 展示信息（语言键 / 图标）由源自己的类属性提供，注册表只管
-                # 「有哪些源、什么顺序、要不要改色」，不重复存一份。
-                cls = e.cls
-                self.add_page(cls, cls.title_key, cls.iconPath, color=e.get("color", True))
+                self.add_page(e, color=e.get("color", True))
 
-        def add_page(self, page_cls, text=None, icon=None, color=True):
-            btn = self.parent.top.add_btn(text, icon, color=color)
-            page_ = page_cls(self, self.root, text, icon)
+        def add_page(self, entry, color=True):
+            """按条目建一个下载源：备好页签按钮 → 交给条目的 init 去造。"""
+            btn = self.parent.top.add_btn(entry.title, entry.icon, color=color)
+            page_ = entry.init(Box(parent=self, root=self.root, entry=entry))
             self.pages_.append(page_)
             self.btns_.append(btn)
             self.stack.addWidget(page_)
@@ -888,11 +892,13 @@ class Game(QWidget):
                         # right-side action buttons
                         self.btn_download = self.RBtn(getPath(BTN_DOWNLOAD), "wid.pages.download.item.download", self, self.root)
                         self.layout.addWidget(self.btn_download, 0)
-                        self.btn_download.clicked.connect(lambda:self.root.window.floatingOverlay.add_page(self.template.Download(self,self.root,self.data)))
+                        self.btn_download.clicked.connect(lambda: self.root.signals.emit(
+                            "overlayRequested", self.template.Download(self,self.root,self.data)))
 
                         self.btn_repoInfo = self.RBtn(getPath(NAV_MENU), "wid.pages.download.item.repoInfo", self, self.root)
                         self.layout.addWidget(self.btn_repoInfo, 0)
-                        self.btn_repoInfo.clicked.connect(lambda:self.root.window.floatingStack.add_page(self.template.RepoInfo(self,self.root,self.data,self.pixmap)))
+                        self.btn_repoInfo.clicked.connect(lambda: self.root.signals.emit(
+                            "stackRequested", self.template.RepoInfo(self,self.root,self.data,self.pixmap)))
                         
                         self.btn_link = self.RBtn(getPath(NAV_LINK), "wid.pages.download.item.link", self, self.root)
                         self.layout.addWidget(self.btn_link, 0)
@@ -1109,7 +1115,7 @@ class Game(QWidget):
 
                 def _close(self):
                     """关闭弹窗：从叠加浮层出叠并销毁（on_close 会停止周期检测）。"""
-                    self.root.window.floatingOverlay.pop_page(self)
+                    self.root.signals.emit("overlayClosed", self, True)
 
                 def on_close(self):
                     """浮层出叠（或被清空）时同步调用：停止周期检测，防止对已销毁对象回调。"""
@@ -1230,7 +1236,7 @@ class Game(QWidget):
                     dl.start()
                     self.root.logger.info("[mdt-download] 开始下载 %s: %s" % (name, url))
                     # 关闭弹窗，下载在后台由 QDownloader 自行处理
-                    self.root.window.floatingOverlay.pop_page(self)
+                    self.root.signals.emit("overlayClosed", self, True)
 
                 def _on_dl_finished(self, dl, name, ok):
                     """下载完成收尾：释放 QDownloader；成功后刷新 BML.json 并删除 downloading.json。"""

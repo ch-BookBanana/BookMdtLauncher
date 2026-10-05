@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from ..options.scrolls import Scroll
 from ..utils import change_color
 from ..resources import (NAV_MENU)
-from ..registry import registry
+from ..registry import Box, registry
 
 from ._init import *
 from .downloads.game import Game
@@ -144,25 +144,27 @@ class Download(Page):
             self.btns_ = []
 
             # 左栏页签走注册中心：加一个页签 = 写一个 Page 子类 + 一条 registry.add。
-            # icon 按老规矩给相对路径即可（沿路的控件自己会过 getPath 改色）。
+            # init 由页签自己提供，这里不猜它的构造签名。
             registry.declare("core.download.tabs", registrant="core.download",
-                             fields=("cls", "title", "icon", "order"),
-                             required=("cls", "title", "icon"),
+                             fields=("init", "title", "icon", "order"),
+                             required=("init", "title", "icon"),
                              built=("main", "btn"),
                              doc="下载页左栏的页签")
 
             registry.add("core.download.tabs", "core.download.game",
-                         cls=Game, order=10,
+                         init=lambda b: Game(b.parent, b.root, b.title, b.icon),
+                         order=10,
                          title="wid.pages.download.game", icon=NAV_MENU)
 
             for e in registry.entries("core.download.tabs"):
-                page = self.add_page(e.cls, e.title, e.icon)
+                page = self.add_page(e)
                 setattr(self, e.name, page)          # self.game
                 registry.bind("core.download.tabs", e.key, main=page, btn=page.btn)
 
-        def add_page(self, page_cls, text=None, icon=None):
-            btn = self.parent.left.add_btn(text, icon)
-            page_ = page_cls(self, self.root, text, icon)
+        def add_page(self, entry):
+            """按条目建一个页签：备好按钮 → 交给条目的 init 去造。"""
+            btn = self.parent.left.add_btn(entry.title, entry.icon)
+            page_ = entry.init(Box(parent=self, root=self.root, entry=entry, btn=btn))
             self.pages_.append(page_)
             self.btns_.append(btn)
             self.stack.addWidget(page_)

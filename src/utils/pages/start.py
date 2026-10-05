@@ -28,7 +28,7 @@ from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
 from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING)
-from ..registry import registry
+from ..registry import Box, registry
 
 from ._init import *
 from .fStack.gameManage import GameManage
@@ -292,25 +292,31 @@ class Start(Page):
                 
             def init_wid(self):
                 # 底部按钮页走注册中心：每个 Pages 子类自己 addWidget 进栈，
-                # 这里只声明「有哪些、什么顺序、绑到哪个属性名」。
+                # 这里只声明「有哪些、什么顺序、绑到哪个属性名」，init 由各自提供。
                 registry.declare("core.start.bottom", registrant="core.start",
-                                 fields=("cls", "attr", "order"),
-                                 required=("cls", "attr"),
+                                 fields=("init", "attr", "order"),
+                                 required=("init", "attr"),
                                  doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
 
                 registry.add("core.start.bottom", "core.start.bottom.start",
-                             cls=self.Start, attr="start", order=10)
+                             init=lambda b: self.Start(b.parent, b.root),
+                             attr="start", order=10)
                 registry.add("core.start.bottom", "core.start.bottom.mod",
-                             cls=self.Mod, attr="mod", order=20)
+                             init=lambda b: self.Mod(b.parent, b.root),
+                             attr="mod", order=20)
                 registry.add("core.start.bottom", "core.start.bottom.world",
-                             cls=self.World, attr="world", order=30)
+                             init=lambda b: self.World(b.parent, b.root),
+                             attr="world", order=30)
                 registry.add("core.start.bottom", "core.start.bottom.launch",
-                             cls=self.Launch, attr="launch", order=40)
+                             init=lambda b: self.Launch(b.parent, b.root),
+                             attr="launch", order=40)
                 registry.add("core.start.bottom", "core.start.bottom.suspend",
-                             cls=self.Suspend, attr="suspend", order=50)
+                             init=lambda b: self.Suspend(b.parent, b.root),
+                             attr="suspend", order=50)
 
                 for e in registry.entries("core.start.bottom"):
-                    setattr(self, e.attr, e.cls(self, self.root))
+                    setattr(self, e.attr,
+                            e.init(Box(parent=self, root=self.root, entry=e)))
 
             def set_have_game(self, have: bool):
                 """切换左侧底部按钮：有游戏显示「选择游戏」，无游戏显示「下载界面」。"""
@@ -612,7 +618,9 @@ class Start(Page):
                 self.layout.addWidget(self.mod,2,1,1,1)
 
                 self.start.clicked.connect(self.on_start_clicked)
-                self.settings.clicked.connect(lambda: self.root.window.floatingStack.add_page(GameManage(self.root.settings["defaultGame"], self, self.root)))
+                self.settings.clicked.connect(lambda: self.root.signals.emit(
+                    "stackRequested",
+                    GameManage(self.root.settings["defaultGame"], self, self.root)))
 
             def on_start_clicked(self):
                 """开始游戏：先校验这个实例要用的 Java 再放行（缺了就直接走下载流程）。"""

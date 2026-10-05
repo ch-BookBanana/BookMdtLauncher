@@ -11,7 +11,7 @@ from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import change_color, openFolder, t
 from ...resources import (FILE_FOLDER, TBT_CLOSE)
-from ...registry import registry
+from ...registry import Box, registry
 
 
 def group_of(settings, game):
@@ -91,17 +91,20 @@ class GameManage(Scroll):
         # 本页是懒加载的（点开浮层才建），所以这些登记发生在构建期而非启动期 ——
         # 注册中心「先登记后构建」的两段式本来就允许这样，各界面按自己的时机构建。
         registry.declare("core.gameManage.sections", registrant="core.gameManage",
-                         fields=("cls", "attr", "order", "spacing"),
-                         required=("cls", "attr"),
+                         fields=("init", "attr", "order", "spacing"),
+                         required=("init", "attr"),
                          doc="游戏管理页的区块（文件夹 / Java …）")
 
         registry.add("core.gameManage.sections", "core.gameManage.folders",
-                     cls=self.Folders, attr="folders", order=10, spacing=10)
+                     init=lambda b: self.Folders(b.parent, b.root),
+                     attr="folders", order=10, spacing=10)
         registry.add("core.gameManage.sections", "core.gameManage.java",
-                     cls=self.Java, attr="java", order=20, spacing=20)
+                     init=lambda b: self.Java(b.parent, b.root),
+                     attr="java", order=20, spacing=20)
 
         for e in registry.entries("core.gameManage.sections"):
-            setattr(self, e.attr, self.add(e.cls(self, self.root), e.get("spacing", 0)))
+            wid = e.init(Box(parent=self, root=self.root, entry=e))
+            setattr(self, e.attr, self.add(wid, e.get("spacing", 0)))
 
         self.todoText = QLabel("UNFINISHED")
         self.todoText.setProperty("wid", "title")
@@ -159,7 +162,7 @@ class GameManage(Scroll):
             # 实例被删（本页删的，或目录在外面没了）：本页已无操作对象，直接出栈。
             # 叠在上面的浮层不属于本页（Qt 上没有父子关系），由删除流程自己出叠。
             if data["game"] == self.game:
-                self.root.window.floatingStack.pop_page(self)
+                self.root.signals.emit("stackClosed", self, True)
             return
         else:
             return
@@ -354,7 +357,7 @@ class GameManage(Scroll):
 
         def open_page(self, page):
             """把页面实例化后交给叠加浮层：遮罩、居中、叠层都由浮层统一管。"""
-            self.root.window.floatingOverlay.add_page(page(self, self.root))
+            self.root.signals.emit("overlayRequested", page(self, self.root))
 
         def set_running(self, running):
             """实例运行期间三个按钮全禁：目录被锁，改名/删除必定失败。"""
@@ -490,7 +493,7 @@ class GameManage(Scroll):
 
             def _close(self):
                 """出叠并销毁（on_close 由浮层在出叠时统一调）。"""
-                self.root.window.floatingOverlay.pop_page(self)
+                self.root.signals.emit("overlayClosed", self, True)
 
         class Rename(Page):
             """更改名称弹层：输入框 + 校验提示 + 确定。

@@ -67,7 +67,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 「什么都知道」的上帝对象。
 """
 
-__all__ = ["RegistryError", "Entry", "Registry", "registry", "DEFAULT_ORDER"]
+__all__ = ["RegistryError", "Entry", "Box", "Registry", "registry",
+           "simple", "DEFAULT_ORDER"]
 
 # 条目没写 order 时排在这里：够小，自定义项默认落在内置项之后
 DEFAULT_ORDER = 100
@@ -160,6 +161,50 @@ class Entry:
     def __repr__(self):
         mark = f" +built{sorted(self.built)}" if self.built else ""
         return f"<Entry {self.key} fields={sorted(self.fields)}{mark}>"
+
+
+class Box:
+    """构建一个条目时交给 init 的「匣子」。
+
+    装配方只负责「备好容器与配套产物 → 调 e.init(box)」，不再需要知道每个条目
+    类的构造签名 —— 那本来就是**注册方**（写下那个类的人）才知道的事。
+    签名不一致、需要额外参数、甚至是几个控件拼出来的复合控件，都由 init 自己解决。
+
+    box.parent  该条目该挂到哪个容器
+    box.root    全局对象（将来会被宿主接口取代）
+    box.entry   条目自身，可读 title / icon / order / name / key 等
+    box.btn     配套按钮（扩展点声明了 btn 产物槽位时才有，否则为 None）
+
+    b.title 这类读取直接代理到条目，省得每次都写 b.entry.title。
+    """
+
+    __slots__ = ("parent", "root", "entry", "btn")
+
+    def __init__(self, parent=None, root=None, entry=None, btn=None):
+        self.parent = parent
+        self.root = root
+        self.entry = entry
+        self.btn = btn
+
+    def __getattr__(self, item):
+        try:
+            entry = object.__getattribute__(self, "entry")
+        except AttributeError:
+            raise AttributeError(item) from None
+        return getattr(entry, item)
+
+    def __repr__(self):
+        key = getattr(self.entry, "key", None)
+        return f"<Box {key}>"
+
+
+def simple(cls, **extra):
+    """便捷 init：控件构造签名正好是 (parent, root, title, **extra) 时用它。
+
+    这只是**注册方**替自己省事 —— 注册方知道自己的类长什么样；
+    装配方不必知道，它只管调 init。
+    """
+    return lambda b: cls(b.parent, b.root, b.title, **extra)
 
 
 class Registry:
