@@ -194,26 +194,12 @@ class GameSettings(Scroll):
         self.line.setProperty("wid", "line")
         self.scroll_layout.addWidget(self.line, 0)
 
-        # 区块走注册中心：加一个区块 = 写一个 QWidget 子类 + 一条 registry.add。
-        # 本页是懒加载的（点开浮层才建），所以这些登记发生在构建期而非启动期 ——
-        # 注册中心「先登记后构建」的两段式本来就允许这样，各界面按自己的时机构建。
-
-        registry.add("core.gameSettings.sections", "core.gameSettings.folders",
-                     init=lambda b: self.Folders(b.parent),
-                     attr="folders", order=10, spacing=10)
-        registry.add("core.gameSettings.sections", "core.gameSettings.java",
-                     init=lambda b: self.Java(b.parent),
-                     attr="java", order=20, spacing=20)
-
+        # 区块从注册表取：加一个区块 = 写一个 QWidget 子类 + 在本文件末尾加一条
+        # registry.add。登记在**模块加载时**做一次（见文件末尾）—— 不能写在这里：
+        # init_wid 每次构建都会跑，重复登记会直接撞「已存在条目」。
         for e in registry.entries("core.gameSettings.sections"):
             wid = e.init(Box(parent=self, entry=e))
             setattr(self, e.attr, self.add(wid, e.get("spacing", 0)))
-
-        self.todoText = QLabel("UNFINISHED")
-        self.todoText.setProperty("wid", "title")
-        self.todoText.setAlignment(Qt.AlignCenter)
-        self.todoText.setStyleSheet("font-size: 20px;")
-        self.scroll_layout.addWidget(self.todoText, 1)
 
         # 顶部信息填真实数据（图标/名称/分组/版本），并订阅实例事件：
         # 本页后续的管理项都以 self.game 为操作对象，改名时必须跟着换。
@@ -1015,6 +1001,15 @@ class GameSettings(Scroll):
         def langing(self):
             super().langing()   # 左侧标题
             self._texts()
+
+# GameSettings 的区块：本文件定义了它们，所以在这里交出去（模块加载时一次）。
+registry.add("core.gameSettings.sections", "core.gameSettings.folders",
+             init=lambda b: GameSettings.Folders(b.parent),
+             attr="folders", order=10, spacing=10)
+registry.add("core.gameSettings.sections", "core.gameSettings.java",
+             init=lambda b: GameSettings.Java(b.parent),
+             attr="java", order=20, spacing=20)
+
 
 # 往 core.gameManager.pages 登记自己：GameManager 左栏的「设置」那一页。
 # 本页管的是某个实例，实例名从 GameManager 现取（b.parent.game）——
