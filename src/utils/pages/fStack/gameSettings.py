@@ -70,7 +70,7 @@ class GameSettings(Scroll):
     MAX_WIDTH = 600     # 内容列最大宽度，与设置页 Page 的 max-width 一致
 
     def __init__(self, game, parent=None, root=None):
-        super().__init__(parent, root, margins=(30, 30, 30, 30), spacing=0,
+        super().__init__(parent, margins=(30, 30, 30, 30), spacing=0,
                          content_align=Qt.AlignHCenter)
         self.main.setMaximumWidth(self.MAX_WIDTH)
         self.parent = parent
@@ -96,7 +96,7 @@ class GameSettings(Scroll):
                      init=lambda b: self.Folders(b.parent, b.root),
                      attr="folders", order=10, spacing=10)
         registry.add("core.gameSettings.sections", "core.gameSettings.java",
-                     init=lambda b: self.Java(b.parent, b.root),
+                     init=lambda b: self.Java(b.parent),
                      attr="java", order=20, spacing=20)
 
         for e in registry.entries("core.gameSettings.sections"):
@@ -188,9 +188,9 @@ class GameSettings(Scroll):
         """
 
         # 按钮：i18n 词条 + mdtManager.DATA_FOLDERS 里的类别名
-        KINDS = (("wid.pages.gameManage.folder.data", "data"),
-                 ("wid.pages.gameManage.folder.blueprint", "blueprint"),
-                 ("wid.pages.gameManage.folder.mod", "mod"))
+        KINDS = (("core.wid.pages.gameManage.folder.data", "data"),
+                 ("core.wid.pages.gameManage.folder.blueprint", "blueprint"),
+                 ("core.wid.pages.gameManage.folder.mod", "mod"))
 
         def __init__(self, parent=None, root=None):
             super().__init__(parent)
@@ -337,9 +337,9 @@ class GameSettings(Scroll):
             self.layout.addLayout(self.l2)
 
             self.buttons = [
-                self._button("wid.pages.gameManage.rename", self.Rename),
-                self._button("wid.pages.gameManage.group", self.Group),
-                self._button("wid.pages.gameManage.delete", self.Delete, danger=True),
+                self._button("core.wid.pages.gameManage.rename", self.Rename),
+                self._button("core.wid.pages.gameManage.group", self.Group),
+                self._button("core.wid.pages.gameManage.delete", self.Delete, danger=True),
             ]
 
         def _button(self, key, page, danger=False):
@@ -390,7 +390,7 @@ class GameSettings(Scroll):
             """
             group = group_of(events.settings, self._name)
             if group == mdtManager.DEFAULT_GROUP:
-                group = events.lang.get("text.default")
+                group = events.lang.get("core.text.default")
             self.group.setText(group)
             self.group.setVisible(bool(group))
             self.dot.setVisible(bool(group))
@@ -489,7 +489,7 @@ class GameSettings(Scroll):
 
             def langing(self):
                 self.title.setText(events.lang.get(self.TITLE_KEY))
-                self.btn_close.setToolTip(events.lang.get("wid.top.close"))
+                self.btn_close.setToolTip(events.lang.get("core.wid.top.close"))
 
             def lighting(self, light):
                 # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
@@ -509,7 +509,7 @@ class GameSettings(Scroll):
             唯一的差别是重名判定要略过实例自身——改名成自己不算撞名。
             """
 
-            TITLE_KEY = "wid.pages.gameManage.rename"
+            TITLE_KEY = "core.wid.pages.gameManage.rename"
 
             def init_body(self, layout):
                 self._final_name = None
@@ -554,7 +554,7 @@ class GameSettings(Scroll):
 
             def langing(self):
                 super().langing()
-                self.btn_ok.setText(events.lang.get("text.yes"))
+                self.btn_ok.setText(events.lang.get("core.text.yes"))
                 self._validate()    # 提示与「将改名为」都是译文，得按新语言重算
 
             def _validate(self, *_):
@@ -571,13 +571,13 @@ class GameSettings(Scroll):
                 else:
                     error = mdtManager.check_name(text)
                     if error == "dot":
-                        state, msg = "dot", langer.get("wid.pages.download.item.name.dot")
+                        state, msg = "dot", langer.get("core.wid.pages.download.item.name.dot")
                     elif error:
-                        state, msg = "illegal", langer.get("wid.pages.download.item.name.illegal")
+                        state, msg = "illegal", langer.get("core.wid.pages.download.item.name.illegal")
                     elif events.mdtManager.name_conflict(text, except_name=self.game):
                         final = events.mdtManager.unique_name(text)
                         state = "dup"
-                        msg = t(langer.get("wid.pages.download.item.name.willBe"), final)
+                        msg = t(langer.get("core.wid.pages.download.item.name.willBe"), final)
                     else:
                         state, msg = "ok", ""
                         final = text
@@ -612,7 +612,7 @@ class GameSettings(Scroll):
                     self._final_name = None
                     self.input.setStyleSheet("border: 1px solid red;")
                     self.tip.setStyleSheet("font-size: 13px; color: red;")
-                    self.tip.setText(events.lang.get("wid.pages.gameManage.failed"))
+                    self.tip.setText(events.lang.get("core.wid.pages.gameManage.failed"))
                     self._set_ok_enabled(False)
                     return
                 self._close()
@@ -626,8 +626,8 @@ class GameSettings(Scroll):
             比其它弹层高 60%（190 → 304），多出来的高度全给列表滚动用。
             """
 
-            TITLE_KEY = "wid.pages.gameManage.group"
-            TIP_KEY = "wid.pages.gameManage.group.tip"
+            TITLE_KEY = "core.wid.pages.gameManage.group"
+            TIP_KEY = "core.wid.pages.gameManage.group.tip"
             HEIGHT = 304            # 其余弹层是 190，这里是它的 1.6 倍
 
             def init_body(self, layout):
@@ -648,7 +648,7 @@ class GameSettings(Scroll):
                 self.box = QWidget()
                 self.box.setProperty("wid", "color2")
                 self.box.setAttribute(Qt.WA_StyledBackground, True)
-                self.scroll = Scroll(self, self.root, content=self.box,
+                self.scroll = Scroll(self, content=self.box,
                                      margins=(10, 5, 10, 5))
                 layout.addWidget(self.scroll, 1)
 
@@ -686,13 +686,13 @@ class GameSettings(Scroll):
                 顺带让它在切语言时自动跟着变。
                 """
                 if name == mdtManager.DEFAULT_GROUP:
-                    return "text.default"
+                    return "core.text.default"
                 return name
 
             def _build(self):
                 """按 gameList 的键铺一组互斥项，勾上当前分组。"""
                 for name in events.settings["gameList"]:
-                    item = Bool(self.scroll, self.root, self._label(name))
+                    item = Bool(self.scroll, self._label(name))
                     item.setStyleSheet("background: transparent;")
                     self.choices.addButton(item.btn)
                     # 只认被勾上的那个；老项被组里自动取消时也会回调，忽略掉
@@ -709,7 +709,7 @@ class GameSettings(Scroll):
             def langing(self):
                 super().langing()
                 self.tip.setText(events.lang.get(self.TIP_KEY))
-                self.btn_ok.setText(events.lang.get("text.yes"))
+                self.btn_ok.setText(events.lang.get("core.text.yes"))
 
             def _on_ok(self):
                 """提交：分组只写在 settings 里，搬表的活交给 Editor.group。
@@ -721,7 +721,7 @@ class GameSettings(Scroll):
                 editor.group(self._choice)
                 if not editor.ok:
                     self.tip.setStyleSheet("font-size: 14px; color: red;")
-                    self.tip.setText(events.lang.get("wid.pages.gameManage.failed"))
+                    self.tip.setText(events.lang.get("core.wid.pages.gameManage.failed"))
                     self._set_ok_enabled(False)
                     return
                 self._close()
@@ -729,9 +729,9 @@ class GameSettings(Scroll):
         class Delete(Page):
             """删除游戏弹层：警示文案 + 红底白字确认按钮。"""
 
-            TITLE_KEY = "wid.pages.gameManage.delete"
-            TIP_KEY = "wid.pages.gameManage.delete.tip"
-            CONFIRM_KEY = "wid.pages.gameManage.delete.confirm"
+            TITLE_KEY = "core.wid.pages.gameManage.delete"
+            TIP_KEY = "core.wid.pages.gameManage.delete.tip"
+            CONFIRM_KEY = "core.wid.pages.gameManage.delete.confirm"
 
             def init_body(self, layout):
                 layout.addStretch(1)
@@ -777,7 +777,7 @@ class GameSettings(Scroll):
                 if not editor.ok:
                     # notFound / locked / ioError：把警示换成失败，按钮随即禁掉
                     self.warn.setStyleSheet("font-size: 14px; color: red;")
-                    self.warn.setText(events.lang.get("wid.pages.gameManage.failed"))
+                    self.warn.setText(events.lang.get("core.wid.pages.gameManage.failed"))
                     self.btn_ok.setEnabled(False)
                     return
                 self._close()
@@ -798,12 +798,12 @@ class GameSettings(Scroll):
 
         AUTO = "auto"   # 「自动匹配」在 combo 里的占位值（写回 BML.json 时落成 null）
 
-        def __init__(self, parent=None, root=None):
+        def __init__(self, parent=None):
             self.page = parent       # 所属的 GameSettings 页，实例名现取（改名后自动是新名）
             self._none = False       # 一个 Java 也没嗅到：第 0 项文案改挂「无可用 Java」
             # 左侧标题走 Combo 那套 i18n，bus 的绑定也在 Combo.__init__ 里做完了；
             # 那条链上 MRO 先命中这里的 langing，所以覆写时必须 super() 上去
-            super().__init__(parent, root, "wid.pages.setting.launcher.java.select")
+            super().__init__(parent, "core.wid.pages.setting.launcher.java.select")
             self.combo.popupAboutToShow.connect(self.fill)
             self.combo.activated.connect(self._apply)
             QTimer.singleShot(0, self.fill)
@@ -883,12 +883,12 @@ class GameSettings(Scroll):
             if index >= 0:
                 # 没装 Java 时这条改挂「无可用 Java」，两种情况都复用设置页的词条；
                 # 「跟随全局」是本页独有的，设置页没有对应文案
-                key = ("wid.pages.setting.launcher.java.select.none" if self._none
-                       else "wid.pages.gameManage.java.follow")
+                key = ("core.wid.pages.setting.launcher.java.select.none" if self._none
+                       else "core.wid.pages.gameManage.java.follow")
                 combo.setItemText(index, events.lang.get(key))
             index = combo.findData(self.AUTO)
             if index >= 0:
-                combo.setItemText(index, events.lang.get("wid.pages.setting.launcher.java.select.auto"))
+                combo.setItemText(index, events.lang.get("core.wid.pages.setting.launcher.java.select.auto"))
 
         def _apply(self, index):
             """把选中的 Java 写进实例：校验与失败码全在 mdtManager.edit() 里。"""
@@ -912,10 +912,10 @@ class GameSettings(Scroll):
         def langing(self):
             super().langing()   # 左侧标题
             self._texts()
-
+
 # 往 core.gameManager.pages 登记自己：GameManager 左栏的「设置」那一页。
 # 本页管的是某个实例，实例名从 GameManager 现取（b.parent.game）——
 # 因此在 GameManager 里改名后，这里跟着换，不用自己同步。
 registry.add("core.gameManager.pages", "core.gameManager.settings",
              init=lambda b: GameSettings(b.parent.game, b.parent, b.root),
-             order=10, title="wid.pages.gameManager.settings")
+             order=10, title="core.wid.pages.gameManager.settings")

@@ -276,7 +276,7 @@ class Start(Page):
                 if default_game is None:
                     self.game["name"] = self.game["vers"] = self.game["icon_key"] = None
                     # 图标需显式清空，否则会残留上一份游戏的图标
-                    self.sets((True,QPixmap()),(True,events.lang.get("wid.pages.start.gameNotfound")),(True,events.lang.get("wid.pages.start.gameNotfound2")))
+                    self.sets((True,QPixmap()),(True,events.lang.get("core.wid.pages.start.gameNotfound")),(True,events.lang.get("core.wid.pages.start.gameNotfound2")))
                 else:
                     self.game["name"] = default_game
                     self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}" if game_msg else None
@@ -394,7 +394,7 @@ class Start(Page):
                     self.langing()
 
                 def langing(self):
-                    btn = "wid.pages.start.gamebtn" if self.have_game else "wid.pages.start.downloadbtn"
+                    btn = "core.wid.pages.start.gamebtn" if self.have_game else "core.wid.pages.start.downloadbtn"
                     self.action.setText(events.lang.get(btn))
 
             class Mod(Pages):
@@ -418,7 +418,7 @@ class Start(Page):
                     self.cancle.clicked.connect(lambda: _page().show_main("start"))
 
                 def langing(self):
-                    self.cancle.setText(events.lang.get("text.return"))
+                    self.cancle.setText(events.lang.get("core.text.return"))
 
             class World(Pages):
                 def __init__(self, parent=None, root=None):
@@ -441,7 +441,7 @@ class Start(Page):
                     self.cancle.clicked.connect(lambda: _page().show_main("start"))
 
                 def langing(self):
-                    self.cancle.setText(events.lang.get("text.return"))
+                    self.cancle.setText(events.lang.get("core.text.return"))
 
             class Launch(Pages):
                 """左 stacked 的启动/Java 下载状态页：只允许有一个 label 显示状态。"""
@@ -464,14 +464,14 @@ class Start(Page):
                     self.layout.addWidget(self.label)
 
                 def langing(self):
-                    self.label.setText(events.lang.get("wid.pages.start.java.idle"))
+                    self.label.setText(events.lang.get("core.wid.pages.start.java.idle"))
 
                 def setStatus(self, status, pct=None):
                     """唯一状态 label：resume/downloading/extracting/done/error/idle。
 
                     pct 不为 None 时追加百分比（如 正在下载Java... 45%）。
                     """
-                    key = "wid.pages.start.java." + status
+                    key = "core.wid.pages.start.java." + status
                     text = events.lang.get(key)
                     if pct is not None:
                         text = t(text, pct)
@@ -509,7 +509,7 @@ class Start(Page):
                     _page().show_main("start")
 
                 def langing(self):
-                    self.stop.setText(events.lang.get("wid.pages.start.suspend.stop"))
+                    self.stop.setText(events.lang.get("core.wid.pages.start.suspend.stop"))
 
     class Main(Mainw):
         LOG_MAX_LINES = 2000   # 控制台保留的最大行数，超出后丢弃最旧的行
@@ -663,8 +663,8 @@ class Start(Page):
                 launcher.run(game)
 
             def langing(self):
-                self.start.setText(events.lang.get("wid.pages.start.startbtn"))
-                self.mod.setText(events.lang.get("wid.pages.start.modbtn"))
+                self.start.setText(events.lang.get("core.wid.pages.start.startbtn"))
+                self.mod.setText(events.lang.get("core.wid.pages.start.modbtn"))
                 
 
             class Btn(QPushButton):
@@ -712,7 +712,7 @@ class Start(Page):
 
                 self.box = QWidget()
                 self.box.setProperty("wid","color2")
-                self.scroll = Scroll(self, self.root, content=self.box, margins=(10, 10, 10, 10),
+                self.scroll = Scroll(self, content=self.box, margins=(10, 10, 10, 10),
                                      spacing=10, align=Qt.AlignTop | Qt.AlignHCenter)
                 self.box_l = self.scroll.scroll_layout
                 self.layout.addWidget(self.scroll)
@@ -821,7 +821,7 @@ class Start(Page):
                     self.body_l.addWidget(self.line)
 
                 def langing(self):
-                    self.title.setText(self.name if self.name != "<:|default|:>" else events.lang.get("text.default"))
+                    self.title.setText(self.name if self.name != "<:|default|:>" else events.lang.get("core.text.default"))
 
                 def lighting(self,light):
                     if self.light != light:
@@ -1099,4 +1099,4 @@ class Start(Page):
 registry.add("core.pages", "core.start",
              init=lambda b: Start(b.parent, b.root, b.title, b.icon, btn=b.btn),
              order=10, default=True,
-             title="wid.pages.start", icon=BTN_START)
+             title="core.wid.pages.start", icon=BTN_START)

@@ -45,7 +45,7 @@ class Download(Page):
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.layout.setSpacing(0)
 
-            self.scroll = Scroll(self, self.root)
+            self.scroll = Scroll(self)
             self.layout.addWidget(self.scroll)
 
             self.bthGroup = QButtonGroup(self)
@@ -150,7 +150,7 @@ class Download(Page):
             registry.add("core.download.tabs", "core.download.game",
                          init=lambda b: Game(b.parent, b.root, b.title, b.icon),
                          order=10,
-                         title="wid.pages.download.game", icon=NAV_MENU)
+                         title="core.wid.pages.download.game", icon=NAV_MENU)
 
             for e in registry.entries("core.download.tabs"):
                 page = self.add_page(e)
@@ -176,4 +176,4 @@ class Download(Page):
 registry.add("core.pages", "core.download",
              init=lambda b: Download(b.parent, b.root, b.title, b.icon, btn=b.btn),
              order=20,
-             title="wid.pages.download", icon=BTN_DOWNLOAD)
+             title="core.wid.pages.download", icon=BTN_DOWNLOAD)

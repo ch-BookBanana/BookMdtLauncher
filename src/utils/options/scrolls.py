@@ -33,11 +33,10 @@ class Scroll(QScrollArea):
     虚拟列表这类自己 setGeometry 摆子控件的，传 layout=False 别给它套布局。
     """
 
-    def __init__(self, parent=None, root=None, horizontal=False, margins=(0, 0, 0, 0),
+    def __init__(self, parent=None, horizontal=False, margins=(0, 0, 0, 0),
                  spacing=0, align=None, content=None, content_align=None,
                  bar_size=5, layout=True, drag=False):
         super().__init__(parent)
-        self.root = root
         self.horizontal = horizontal
         self._bar_size = bar_size
         self._drag = drag

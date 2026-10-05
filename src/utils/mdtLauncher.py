@@ -268,12 +268,12 @@ class mdtLauncher(QProcess):
                 javas = []
             if javas:
                 self.settings["javaPaths"] = javas
-                _log.info(_tr("log.info.javaRescanFound"))
+                _log.info(_tr("core.log.info.javaRescanFound"))
                 target = mdt_name or self.data.get("mdtName")
                 if target:
                     QTimer.singleShot(0, lambda: self._launch(target))
                     return
-            _log.info(_tr("log.info.javaRescanEmpty"))
+            _log.info(_tr("core.log.info.javaRescanEmpty"))
         self.log.emit({"type": "error", "text": problem})
         self._auto_java_download()
 
@@ -294,7 +294,7 @@ class mdtLauncher(QProcess):
             self._emit_finished(-1)
             return
         self._java_download_attempts += 1
-        _log.info(_tr("log.info.javaAutoDlStart", self._java_download_attempts))
+        _log.info(_tr("core.log.info.javaAutoDlStart", self._java_download_attempts))
         self.java_missing.emit()
         try:
             from src.utils import javaDownload
@@ -308,12 +308,12 @@ class mdtLauncher(QProcess):
         flow.finished.connect(self._on_java_download_finished)
         flow.cancelled.connect(self._on_java_flow_cancelled)
         flow.paused_changed.connect(self.java_paused)
-        flow.error.connect(lambda msg: self.log.emit({"type": "error", "text": _tr("log.error.javaDlErrorPrefix", str(msg))}))
+        flow.error.connect(lambda msg: self.log.emit({"type": "error", "text": _tr("core.log.error.javaDlErrorPrefix", str(msg))}))
         flow.start()
 
     def _on_java_flow_cancelled(self):
         """Java 下载被用户取消（下载列表页/退出时）：记录标记，结束时显示"已取消"。"""
-        _log.info(_tr("log.info.javaAutoDlCancelled"))
+        _log.info(_tr("core.log.info.javaAutoDlCancelled"))
         self._java_cancelled = True
 
     def _on_java_download_finished(self, ok):
@@ -341,13 +341,13 @@ class mdtLauncher(QProcess):
             self._java_download_attempts = 0
             cancelled = self._java_cancelled
             self._java_cancelled = False
-            _log.info(_tr("log.info.javaAutoDlFinished", ok, cancelled))
+            _log.info(_tr("core.log.info.javaAutoDlFinished", ok, cancelled))
             if cancelled:
                 self.java_cancelled.emit()   # main 显示"Java下载已取消"
             else:
                 self.java_done.emit(False)   # main 显示"下载失败"
             return
-        _log.info(_tr("log.info.javaAutoDlSuccess"))
+        _log.info(_tr("core.log.info.javaAutoDlSuccess"))
         self.java_done.emit(ok)
         # 新装的 JDK 已经落在盘上：让 javaManager 子线程重扫一遍候选表
         # （扫完广播 changed，设置页/游戏管理页的 Java 选项跟着刷新；
@@ -358,7 +358,7 @@ class mdtLauncher(QProcess):
 
     def _restart_after_java(self):
         """Java 下载完成后：刷新 Java 设置并重新启动游戏。"""
-        _log.info(_tr("log.info.javaAutoDlRestart"))
+        _log.info(_tr("core.log.info.javaAutoDlRestart"))
         try:
             # force：这里必须无视缓存重扫，否则可能拿到下载前那份旧候选表，
             # 新装的 JDK 就被跳过了（此处在子线程刚扫过之后，通常直接命中）

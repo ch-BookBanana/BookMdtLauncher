@@ -95,13 +95,13 @@ def _register_item_actions():
     point = "core.download.item.actions"
     registry.add(point, "core.download.item.download",
                  init=_item_action_download, attr="btn_download", order=10,
-                 title="wid.pages.download.item.download", icon=BTN_DOWNLOAD)
+                 title="core.wid.pages.download.item.download", icon=BTN_DOWNLOAD)
     registry.add(point, "core.download.item.repoInfo",
                  init=_item_action_repo, attr="btn_repoInfo", order=20,
-                 title="wid.pages.download.item.repoInfo", icon=NAV_MENU)
+                 title="core.wid.pages.download.item.repoInfo", icon=NAV_MENU)
     registry.add(point, "core.download.item.link",
                  init=_item_action_link, attr="btn_link", order=30,
-                 title="wid.pages.download.item.link", icon=NAV_LINK)
+                 title="core.wid.pages.download.item.link", icon=NAV_LINK)
 
 
 class Game(QWidget):
@@ -144,7 +144,7 @@ class Game(QWidget):
             self.layout.setSpacing(0)
 
             # 横向区：滚轮转为横向滚动，空白处可拖拽
-            self.scroll = Scroll(self, self.root, horizontal=True, drag=True)
+            self.scroll = Scroll(self, horizontal=True, drag=True)
             self.layout.addWidget(self.scroll)
 
             self.bthGroup = QButtonGroup(self)
@@ -312,14 +312,14 @@ class Game(QWidget):
                 self.layout.addWidget(self.action_bar)
 
                 # 统一注册搜索按钮（增量/全量），子类无需重复注册
-                self.add_action_btn("wid.pages.download.origin.search", lambda: self.search())
-                self.add_action_btn("wid.pages.download.origin.searchAll", lambda: self.searchAll())
+                self.add_action_btn("core.wid.pages.download.origin.search", lambda: self.search())
+                self.add_action_btn("core.wid.pages.download.origin.searchAll", lambda: self.searchAll())
                 self.action_bar_layout.addStretch()
 
                 self.main = QWidget()
                 self.main.setProperty("wid", "color2")
                 self.main.setAttribute(Qt.WA_StyledBackground, True)
-                self.scroll = Scroll(self, self.root, content=self.main, margins=(30, 20, 30, 20),
+                self.scroll = Scroll(self, content=self.main, margins=(30, 20, 30, 20),
                                      spacing=10, align=Qt.AlignTop | Qt.AlignHCenter)
                 self.layout.addWidget(self.scroll)
 
@@ -670,7 +670,7 @@ class Game(QWidget):
                     self.line.setProperty("wid","line")
                     self.contentL.addWidget(self.line)
 
-                    self.scroll = self.parent.Scroll(self,self.root)
+                    self.scroll = self.parent.Scroll(self)
                     self.contentL.addWidget(self.scroll,0)
                     self.lighting(events.settings["theme"])
 
@@ -723,7 +723,7 @@ class Game(QWidget):
                     self.layout.setSpacing(10)
 
                     # 虚拟列表：子控件自己 setGeometry 定位，所以不要内容布局
-                    self.scroll = Scroll(self, self.root, layout=False)
+                    self.scroll = Scroll(self, layout=False)
                     bar = self.scroll.bar()
                     # 滚动时：1) 刷新 item 池内容 2) 刷新悬停状态
                     bar.valueChanged.connect(self._update_visible)
@@ -738,7 +738,7 @@ class Game(QWidget):
                     self.empty_label.setAlignment(Qt.AlignCenter)
                     self.empty_label.setProperty("wid", "title")
                     self.empty_label.setStyleSheet("font-size:16px;")
-                    self.empty_label.setText(events.lang.get("wid.pages.download.empty"))
+                    self.empty_label.setText(events.lang.get("core.wid.pages.download.empty"))
                     self.empty_label.hide()
 
                 def setData(self, data: dict, icon_pixmap=None):
@@ -1122,8 +1122,8 @@ class Game(QWidget):
                     self.bottom_layout.addWidget(self.btn_ok, 0)
 
                 def langing(self):
-                    self.btn_ok.setText(events.lang.get("text.yes"))
-                    self.btn_close.setToolTip(events.lang.get("wid.top.close"))
+                    self.btn_ok.setText(events.lang.get("core.text.yes"))
+                    self.btn_close.setToolTip(events.lang.get("core.wid.top.close"))
                 
                 def lighting(self, light: bool):
                     # 关闭按钮图标：随主题取色（本页其余控件由全局 qss 控制）
@@ -1200,11 +1200,11 @@ class Game(QWidget):
                         error = mdtManager.check_name(text)
                         unique = events.mdtManager.unique_name(text, existing)
                         if error == "dot":
-                            state, final, msg = "dot", None, events.lang.get("wid.pages.download.item.name.dot")
+                            state, final, msg = "dot", None, events.lang.get("core.wid.pages.download.item.name.dot")
                         elif error:
-                            state, final, msg = "illegal", None, events.lang.get("wid.pages.download.item.name.illegal")
+                            state, final, msg = "illegal", None, events.lang.get("core.wid.pages.download.item.name.illegal")
                         elif unique != text:
-                            state, final, msg = "dup", unique, t(events.lang.get("wid.pages.download.item.name.willBe"), unique)
+                            state, final, msg = "dup", unique, t(events.lang.get("core.wid.pages.download.item.name.willBe"), unique)
                         else:
                             state, final, msg = "ok", text, ""
                     self._final_name = final
@@ -1250,7 +1250,7 @@ class Game(QWidget):
                                 break
                     if not url:
                         self.label2.setStyleSheet("font-size: 13px; color: red;")
-                        self.label2.setText(events.lang.get("wid.pages.download.item.name.noUrl"))
+                        self.label2.setText(events.lang.get("core.wid.pages.download.item.name.noUrl"))
                         return
                     target_dir = getPath("BML/.Mindustrys/" + name)
                     try:
@@ -1358,7 +1358,7 @@ class Game(QWidget):
                     self.main.setObjectName("repoMain")
                     self.main.setAttribute(Qt.WA_StyledBackground, True)
                     self.main.setMaximumWidth(800)
-                    self.scroll = Scroll(self, self.root, content=self.main, margins=(20, 15, 20, 15),
+                    self.scroll = Scroll(self, content=self.main, margins=(20, 15, 20, 15),
                                          spacing=10, content_align=Qt.AlignHCenter)
                     self.scroll_layout = self.scroll.scroll_layout
                     self.layout.addWidget(self.scroll, 1)
@@ -1413,7 +1413,7 @@ class Game(QWidget):
                     self.intro.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                     self.intro.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                     self.intro.document().setDocumentMargin(0)
-                    self.intro_area = Scroll(self.main, self.root, content=self.intro, content_align=Qt.AlignTop)
+                    self.intro_area = Scroll(self.main, content=self.intro, content_align=Qt.AlignTop)
                     self.intro_area.setFixedHeight(300)
                     self.scroll_layout.addWidget(self.intro_area, 0)
 
@@ -1525,7 +1525,7 @@ class Game(QWidget):
 
                 def langing(self):
                     time_str = (self.data or {}).get("time") or ""
-                    self.time.setText(t(events.lang.get("wid.pages.download.item.repoInfo.publish"), time_str))
+                    self.time.setText(t(events.lang.get("core.wid.pages.download.item.repoInfo.publish"), time_str))
                     for fi in self.files:
                         fi.langing()
 
@@ -1577,7 +1577,7 @@ class Game(QWidget):
                         self.layout.addWidget(self.btn_download, 0)
 
                     def langing(self):
-                        self.btn_download.setToolTip(events.lang.get("wid.pages.download.item.download"))
+                        self.btn_download.setToolTip(events.lang.get("core.wid.pages.download.item.download"))
 
                     def lighting(self, light):
                         color = QColor(0, 0, 0) if light else QColor(255, 255, 255)
@@ -1596,7 +1596,7 @@ class Game(QWidget):
             # ── 下载源元信息：注册与展示的唯一出处 ──
             # 以前这些值一半写在 __init__ 里、一半又当参数传给 add_page()，
             # 同一份数据两处维护；现在集中在类属性上，Main 只按表读取。
-            title_key   = "wid.pages.download.origin"
+            title_key   = "core.wid.pages.download.origin"
             introUrl    = "https://raw.githubusercontent.com/Anuken/Mindustry/master/README.md"
             releaseRepo = "Anuken/Mindustry"
             iconPath    = ICON_MDT
@@ -1715,11 +1715,11 @@ class Game(QWidget):
                     self.betaTipsIcon.setPixmap(change_color(getPath(ACT_TIPS), QColor(255,165,0)).pixmap(QSize(18,18)))
                 except Exception:
                     pass
-                self.betaTipsText.setText(events.lang.get("wid.pages.download.mindustryx.betaTips"))
+                self.betaTipsText.setText(events.lang.get("core.wid.pages.download.mindustryx.betaTips"))
 
             def langing(self):
                 super().langing()
-                self.betaTipsText.setText(events.lang.get("wid.pages.download.mindustryx.betaTips"))
+                self.betaTipsText.setText(events.lang.get("core.wid.pages.download.mindustryx.betaTips"))
 
             def _before_search(self):
                 for w in self.classs.values():
@@ -1783,7 +1783,7 @@ class Game(QWidget):
 
                 for i, j in self.data["versions"].items():
                     clss = self.Classs(self, self.root)
-                    display_name = events.lang.get(f"wid.pages.download.{i}")
+                    display_name = events.lang.get(f"core.wid.pages.download.{i}")
                     clss.setData(display_name, j, icon_pixmap)
                     self.classs[i] = clss
                     self.scroll_layout.addWidget(clss,0)
@@ -1914,7 +1914,7 @@ class Game(QWidget):
                 flat = {}
                 for j in self.data["versions"].values():
                     flat.update(j)
-                scroll = self.Scroll(self, self.root)
+                scroll = self.Scroll(self)
                 # Scroll.template 默认取 parent.parent（Classs 场景），平铺时需手动指向当前模板
                 scroll.template = self
                 scroll.setData(copy.deepcopy(flat), icon_pixmap)

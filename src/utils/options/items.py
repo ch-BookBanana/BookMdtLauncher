@@ -16,15 +16,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from ._init import *
+from ..events import events
 from ..resources import (ACT_INTRO, ACT_OFF, ACT_ON, ACT_TIPS)
 
 
 class Bool(QWidget):
     push = Signal(bool)
-    def __init__(self,parent=None,root=None,text=None):
+    def __init__(self, parent=None, text=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.text_ = text
         self.intro_ = ""
         self.tips_ = ""
@@ -75,7 +75,7 @@ class Bool(QWidget):
         self.tips.setSizePolicy(tip)
 
         self.langing()
-        self.lighting(self.root.settings["theme"])
+        self.lighting(events.settings["theme"])
         self.btn.toggled.connect(self.btnEvent)
         self.btn.setIcon(QIcon(self.btnpix[0]))
 
@@ -94,13 +94,13 @@ class Bool(QWidget):
                 self.tipsable = shown
                 self.tips.setVisible(shown)
             if text is not None: self.tips_ = text
-            self.lighting(self.root.settings["theme"])
+            self.lighting(events.settings["theme"])
             self.langing()
 
     def langing(self):
-        self.text.setText(self.root.langer.get(self.text_))
-        self.intro.setToolTip(self.root.langer.get(self.intro_))
-        self.tips.setToolTip(self.root.langer.get(self.tips_))
+        self.text.setText(events.lang.get(self.text_))
+        self.intro.setToolTip(events.lang.get(self.intro_))
+        self.tips.setToolTip(events.lang.get(self.tips_))
 
     def lighting(self,light):
         self.btnpix =[change_color(getPath(ACT_ON),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35)),change_color(getPath(ACT_OFF),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35))]
@@ -112,10 +112,9 @@ class Bool(QWidget):
 
 class Slider(QWidget):
     push = Signal(int)
-    def __init__(self,parent=None,root=None,text=None):
+    def __init__(self, parent=None, text=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.text_ = text
         self.intro_ = ""
         self.tips_ = ""
@@ -227,9 +226,9 @@ class Slider(QWidget):
             self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
 
     def langing(self):
-        self.text.setText(self.root.langer.get(self.text_))
-        self.intro.setToolTip(self.root.langer.get(self.intro_))
-        self.tips.setToolTip(self.root.langer.get(self.tips_))
+        self.text.setText(events.lang.get(self.text_))
+        self.intro.setToolTip(events.lang.get(self.intro_))
+        self.tips.setToolTip(events.lang.get(self.tips_))
         self.value.setText(self.val(self.scroll.value()))
 
     def pushEvent(self, i):
@@ -247,7 +246,7 @@ class Slider(QWidget):
                 self.tipsable = shown
                 self.tips.setVisible(shown)
             if text is not None: self.tips_ = text
-            self.lighting(self.root.settings["theme"])
+            self.lighting(events.settings["theme"])
             self.langing()
 
 
@@ -279,10 +278,9 @@ class Combo(QWidget):
             if self.parent():
                 self.parent().wheelEvent(event)
 
-    def __init__(self,parent=None,root=None,text=None):
+    def __init__(self, parent=None, text=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.text_ = text
         self.intro_ = ""
         self.tips_ = ""
@@ -345,13 +343,13 @@ class Combo(QWidget):
                 self.tipsable = shown
                 self.tips.setVisible(shown)
             if text is not None: self.tips_ = text
-            self.lighting(self.root.settings["theme"])
+            self.lighting(events.settings["theme"])
             self.langing()
 
     def langing(self):
-        self.text.setText(self.root.langer.get(self.text_))
-        self.intro.setToolTip(self.root.langer.get(self.intro_))
-        self.tips.setToolTip(self.root.langer.get(self.tips_))
+        self.text.setText(events.lang.get(self.text_))
+        self.intro.setToolTip(events.lang.get(self.intro_))
+        self.tips.setToolTip(events.lang.get(self.tips_))
 
     def lighting(self,light):
         if self.introable:

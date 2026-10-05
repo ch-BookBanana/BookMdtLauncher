@@ -15,14 +15,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
+from ..events import events
 from ._init import *
 
 
 class Title(QWidget):
-    def __init__(self,parent=None,root=None,text=None):
+    def __init__(self, parent=None, text=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.text_ = text
         self.init_wid()
         bus.bind(self)
@@ -50,14 +50,13 @@ class Title(QWidget):
         self.layout.addWidget(self.l2,1)
 
     def langing(self):
-        self.text.setText(self.root.langer.get(self.text_))
+        self.text.setText(events.lang.get(self.text_))
 
 
 class Line(QWidget):
-    def __init__(self,parent=None,root=None,text=None):
+    def __init__(self, parent=None, text=None):
         super().__init__()
         self.parent = parent
-        self.root = root
         self.init_wid()
 
     def init_wid(self):

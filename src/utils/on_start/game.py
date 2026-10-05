@@ -35,7 +35,7 @@ def resume_mdt_downloads(root):
     try:
         downloading = root.mdtManager.getDownloadingMdts() or {}
     except Exception as e:
-        root.logger.warning(t(root.langer.get("log.warning.dlMdtScanError"), repr(e)))
+        root.logger.warning(t(root.langer.get("core.log.warning.dlMdtScanError"), repr(e)))
         return
     if not downloading:
         return
@@ -60,9 +60,9 @@ def resume_mdt_downloads(root):
                 dl.pause()   # 同步暂停状态：线程进入下载循环后在安全点等待
             dl.finished.connect(lambda ok, d=dl, n=name: on_mdt_download_finished(root, d, n, ok))
             root._mdt_downloads.append(dl)
-            root.logger.info(t(root.langer.get("log.info.dlMdtResumeStart"), name, paused))
+            root.logger.info(t(root.langer.get("core.log.info.dlMdtResumeStart"), name, paused))
         except Exception as e:
-            root.logger.warning(t(root.langer.get("log.warning.dlMdtResumeError"), name, repr(e)))
+            root.logger.warning(t(root.langer.get("core.log.warning.dlMdtResumeError"), name, repr(e)))
 
 
 def on_mdt_download_finished(root, dl, name, ok):
@@ -78,7 +78,7 @@ def on_mdt_download_finished(root, dl, name, ok):
     except Exception:
         pass
     if not ok:
-        root.logger.error(t(root.langer.get("log.error.dlMdtFinishedFail"), name))
+        root.logger.error(t(root.langer.get("core.log.error.dlMdtFinishedFail"), name))
         return
     try:
         root.mdtManager._retrieve_mdt_data(name)
@@ -86,6 +86,6 @@ def on_mdt_download_finished(root, dl, name, ok):
         if os.path.isfile(dfile):
             os.remove(dfile)
         root.mdtManager.invalidate_cache()
-        root.logger.info(t(root.langer.get("log.info.dlMdtFinishedOk"), name))
+        root.logger.info(t(root.langer.get("core.log.info.dlMdtFinishedOk"), name))
     except Exception as e:
-        root.logger.error(t(root.langer.get("log.error.dlMdtFinishedCleanErr"), name, repr(e)))
+        root.logger.error(t(root.langer.get("core.log.error.dlMdtFinishedCleanErr"), name, repr(e)))

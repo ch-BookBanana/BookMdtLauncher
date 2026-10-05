@@ -444,12 +444,12 @@ try:
             try:
                 Main._atomic_write_json(getPath(self._SETTINGS_PATH), self.settings)
                 try:
-                    self.logger.info(self.langer.get("log.info.saveSettings"))
+                    self.logger.info(self.langer.get("core.log.info.saveSettings"))
                 except Exception:
                     self.logger.info("Settings saved")
             except Exception as e:
                 try:
-                    self.logger.error(self.langer.get("log.error.saveSettings") + "\n--Exception: " + str(e), exc_info=True)
+                    self.logger.error(self.langer.get("core.log.error.saveSettings") + "\n--Exception: " + str(e), exc_info=True)
                 except Exception:
                     self.logger.error("Failed to save settings\n--Exception: " + str(e), exc_info=True)
 
@@ -476,7 +476,7 @@ try:
 
                 # 广播主题变化：各控件的 lighting 已自行接在总线上
                 bus.set_theme(is_light)
-                self.logger.info(t(self.langer.get("log.info.themeChange"), "light" if is_light else "dark"))
+                self.logger.info(t(self.langer.get("core.log.info.themeChange"), "light" if is_light else "dark"))
             finally:
                 # 完成：重新启用绘制（异常也保证恢复，避免窗口卡在不绘制状态）
                 self.window.setUpdatesEnabled(True)
@@ -514,7 +514,7 @@ try:
 
                 self.root.apply_theme()
 
-                self.root.logger.info(self.root.langer.get("log.info.windowLoad"))
+                self.root.logger.info(self.root.langer.get("core.log.info.windowLoad"))
 
             def init_ui(self):
                 self.setWindowTitle("Book MDT Launcher")
@@ -1136,17 +1136,17 @@ try:
 
                             def langing(self):
                                 self.tokenTipsIcon.setPixmap(change_color(getPath(ACT_TIPS), QColor(255, 165, 0)).pixmap(QSize(18, 18)))
-                                self.tokenTipsText.setText(self.root.langer.get("github.settings.tokenTips"))
-                                self.tokenTitle.setText(self.root.langer.get("github.settings.tokenTitle"))
-                                self.tokenSaveBtn.setText(self.root.langer.get("text.save"))
-                                self.tokenCancelBtn.setText(self.root.langer.get("text.cancel"))
-                                self.tokenEditBtn.setText(self.root.langer.get("text.edit"))
-                                self.tokenClearBtn.setText(self.root.langer.get("text.clear"))
-                                self.tokenTestBtn.setText(self.root.langer.get("github.settings.testToken"))
-                                self.tokenLatencyBtn.setText(self.root.langer.get("github.settings.testLatency"))
-                                self.rateTitle.setText(self.root.langer.get("github.settings.rateTitle"))
-                                self.rateCoreLabel.setText(self.root.langer.get("github.settings.rateCore"))
-                                self.rateSearchLabel.setText(self.root.langer.get("github.settings.rateSearch"))
+                                self.tokenTipsText.setText(self.root.langer.get("core.github.settings.tokenTips"))
+                                self.tokenTitle.setText(self.root.langer.get("core.github.settings.tokenTitle"))
+                                self.tokenSaveBtn.setText(self.root.langer.get("core.text.save"))
+                                self.tokenCancelBtn.setText(self.root.langer.get("core.text.cancel"))
+                                self.tokenEditBtn.setText(self.root.langer.get("core.text.edit"))
+                                self.tokenClearBtn.setText(self.root.langer.get("core.text.clear"))
+                                self.tokenTestBtn.setText(self.root.langer.get("core.github.settings.testToken"))
+                                self.tokenLatencyBtn.setText(self.root.langer.get("core.github.settings.testLatency"))
+                                self.rateTitle.setText(self.root.langer.get("core.github.settings.rateTitle"))
+                                self.rateCoreLabel.setText(self.root.langer.get("core.github.settings.rateCore"))
+                                self.rateSearchLabel.setText(self.root.langer.get("core.github.settings.rateSearch"))
                                 self._refresh_ui()
 
                             def showEvent(self, event):
@@ -1166,22 +1166,22 @@ try:
 
                                 if name:
                                     self.userName.setText(name)
-                                    self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
+                                    self.tokenStatus.setText(self.root.langer.get("core.github.settings.tokenStatus.valid"))
                                     if headurl:
                                         self._load_avatar(headurl)
                                     else:
                                         self.headIcon.clear()
                                 elif self.root.settings["github"]["token_enc"] and self.root.settings["github"]["useful"] is False:
-                                    self.userName.setText(self.root.langer.get("github.settings.notLoggedIn"))
-                                    self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.invalid"))
+                                    self.userName.setText(self.root.langer.get("core.github.settings.notLoggedIn"))
+                                    self.tokenStatus.setText(self.root.langer.get("core.github.settings.tokenStatus.invalid"))
                                     self.headIcon.clear()
                                 elif self.root.settings["github"]["token_enc"]:
-                                    self.userName.setText(self.root.langer.get("text.loading"))
+                                    self.userName.setText(self.root.langer.get("core.text.loading"))
                                     self.tokenStatus.setText("")
                                     self.headIcon.clear()
                                 else:
-                                    self.userName.setText(self.root.langer.get("github.settings.notLoggedIn"))
-                                    self.tokenStatus.setText(self.root.langer.get("github.settings.tokenStatus.none"))
+                                    self.userName.setText(self.root.langer.get("core.github.settings.notLoggedIn"))
+                                    self.tokenStatus.setText(self.root.langer.get("core.github.settings.tokenStatus.none"))
                                     self.headIcon.clear()
 
                             def _load_avatar(self, url):
@@ -1253,8 +1253,8 @@ try:
                                     if len(core_reset) == 6:
                                         reset_str = f"{core_reset[0]}-{core_reset[1]:02d}-{core_reset[2]:02d} {core_reset[3]:02d}:{core_reset[4]:02d}:{core_reset[5]:02d}"
                                     self.rateCoreValue.setText(
-                                        f"{self.root.langer.get('github.settings.rateRemaining')}: {core_rem}   "
-                                        f"{self.root.langer.get('github.settings.rateReset')}: {reset_str}"
+                                        f"{self.root.langer.get('core.github.settings.rateRemaining')}: {core_rem}   "
+                                        f"{self.root.langer.get('core.github.settings.rateReset')}: {reset_str}"
                                     )
                                 else:
                                     self.coreBadge.setVisible(False)
@@ -1267,8 +1267,8 @@ try:
                                     if len(search_reset) == 6:
                                         reset_str = f"{search_reset[0]}-{search_reset[1]:02d}-{search_reset[2]:02d} {search_reset[3]:02d}:{search_reset[4]:02d}:{search_reset[5]:02d}"
                                     self.rateSearchValue.setText(
-                                        f"{self.root.langer.get('github.settings.rateRemaining')}: {search_rem}   "
-                                        f"{self.root.langer.get('github.settings.rateReset')}: {reset_str}"
+                                        f"{self.root.langer.get('core.github.settings.rateRemaining')}: {search_rem}   "
+                                        f"{self.root.langer.get('core.github.settings.rateReset')}: {reset_str}"
                                     )
                                 else:
                                     self.searchBadge.setVisible(False)
@@ -1290,7 +1290,7 @@ try:
                             def _save_token(self):
                                 new_token = self.tokenInput.text().strip()
                                 if not new_token:
-                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenEmpty"))
+                                    self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenEmpty"))
                                     return
 
                                 self.root.githubAPI.setToken(new_token)
@@ -1298,7 +1298,7 @@ try:
                                 new_token = None
 
                                 self.tokenSaveBtn.setEnabled(False)
-                                self.tokenMsg.setText(self.root.langer.get("github.settings.tokenChecking"))
+                                self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenChecking"))
 
                                 def _on_checked(result):
                                     ok, error_type, data = result
@@ -1311,18 +1311,18 @@ try:
                                         self._refresh_ui()
                                         self._fetch_user()
                                         # 最后设置，避免被 _refresh_ui 清空（tokenMsg 会随验证结果显性显示）
-                                        self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
+                                        self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenStatus.valid"))
                                     elif error_type == "auth":
                                         self.root.settings["github"]["useful"] = False
                                         self.tokenMsg.setText(
-                                            f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
+                                            f"{self.root.langer.get('core.github.settings.tokenStatus.invalid')}: {data}"
                                         )
                                     elif error_type == "network":
                                         self.tokenMsg.setText(
-                                            f"{self.root.langer.get('github.settings.latencyConnError')}: {data}"
+                                            f"{self.root.langer.get('core.github.settings.latencyConnError')}: {data}"
                                         )
                                     else:
-                                        self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
+                                        self.tokenMsg.setText(f"{self.root.langer.get('core.github.settings.tokenStatus.invalid')}: {data}")
 
                                 QThTimer.task(
                                     0,
@@ -1339,10 +1339,10 @@ try:
 
                             def _test_token(self):
                                 if not self.root.settings["github"]["token_enc"]:
-                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenEmpty"))
+                                    self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenEmpty"))
                                     return
                                 self.tokenTestBtn.setEnabled(False)
-                                self.tokenMsg.setText(self.root.langer.get("github.settings.tokenChecking"))
+                                self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenChecking"))
                                 def _done(result):
                                     self.tokenTestBtn.setEnabled(True)
                                     ok, error_type, data = result
@@ -1351,22 +1351,22 @@ try:
                                         self.root.settings["github"]["useful"] = True
                                         self._refresh_ui()
                                         # 最后设置，避免被 _refresh_ui 清空（tokenMsg 会随验证结果显性显示）
-                                        self.tokenMsg.setText(self.root.langer.get("github.settings.tokenStatus.valid"))
+                                        self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenStatus.valid"))
                                     elif error_type == "auth":
                                         # 仅明确的认证失败才清除 token
                                         self._gs._clear_token_data()
                                         self.root.saveSettings()
                                         self._refresh_ui()
                                         self.tokenMsg.setText(
-                                            f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}"
+                                            f"{self.root.langer.get('core.github.settings.tokenStatus.invalid')}: {data}"
                                         )
                                     elif error_type == "network":
                                         # 网络不通，保留 token
                                         self.tokenMsg.setText(
-                                            f"{self.root.langer.get('github.settings.latencyConnError')}: {data}"
+                                            f"{self.root.langer.get('core.github.settings.latencyConnError')}: {data}"
                                         )
                                     else:
-                                        self.tokenMsg.setText(f"{self.root.langer.get('github.settings.tokenStatus.invalid')}: {data}")
+                                        self.tokenMsg.setText(f"{self.root.langer.get('core.github.settings.tokenStatus.invalid')}: {data}")
                                 QThTimer.task(
                                     0,
                                     lambda e: self.root.githubAPI.checkToken(),
@@ -1376,25 +1376,25 @@ try:
 
                             def _test_latency(self):
                                 if not self.root.settings["github"]["token_enc"]:
-                                    self.tokenMsg.setText(self.root.langer.get("github.settings.tokenEmpty"))
+                                    self.tokenMsg.setText(self.root.langer.get("core.github.settings.tokenEmpty"))
                                     return
                                 self.tokenLatencyBtn.setEnabled(False)
-                                self.tokenMsg.setText(self.root.langer.get("github.settings.latencyChecking"))
+                                self.tokenMsg.setText(self.root.langer.get("core.github.settings.latencyChecking"))
                                 def _done(latency):
                                     self.tokenLatencyBtn.setEnabled(True)
                                     if latency > 0:
                                         self.tokenMsg.setText(
-                                            self.root.langer.get("github.settings.latencyResult").replace("$1", str(latency))
+                                            self.root.langer.get("core.github.settings.latencyResult").replace("$1", str(latency))
                                         )
                                     elif latency == -2:
-                                        self.tokenMsg.setText(self.root.langer.get("github.settings.latencyTimeout"))
+                                        self.tokenMsg.setText(self.root.langer.get("core.github.settings.latencyTimeout"))
                                     elif latency == -3:
-                                        self.tokenMsg.setText(self.root.langer.get("github.settings.latencyConnError"))
+                                        self.tokenMsg.setText(self.root.langer.get("core.github.settings.latencyConnError"))
                                     elif latency == -4:
                                         self.tokenMsg.setText("SSL 连接错误")
                                     else:
                                         self.tokenMsg.setText(
-                                            self.root.langer.get("github.settings.latencyError").replace("$1", str(latency))
+                                            self.root.langer.get("core.github.settings.latencyError").replace("$1", str(latency))
                                         )
                                 QThTimer.task(
                                     0,
@@ -1869,11 +1869,11 @@ try:
                             )
 
                             if token is None:
-                                key = "github.token.none"
+                                key = "core.github.token.none"
                             elif self.root.settings["github"]["useful"] is False:
-                                key = "github.token.error"
+                                key = "core.github.token.error"
                             else:
-                                key = "github.token"
+                                key = "core.github.token"
                             #   $1=通用剩余 $2=通用刷新 $3=搜索剩余 $4=搜索刷新（与文案顺序一致）
                             self.setToolTip(str(t(
                                 self.root.langer.get(key),
@@ -2019,7 +2019,7 @@ try:
                                 self.list_container = QWidget()
                                 self.list_container.setAttribute(Qt.WA_StyledBackground, True)
                                 self.list_container.setStyleSheet("background: transparent")
-                                self.scroll = Scroll(self, self.root, content=self.list_container,
+                                self.scroll = Scroll(self, content=self.list_container,
                                                      margins=(12, 12, 12, 12), spacing=8)
                                 self.list_layout = self.scroll.scroll_layout
                                 self.layout.addWidget(self.scroll, 1)
@@ -2033,8 +2033,8 @@ try:
                                 self.list_layout.addWidget(self.empty_label)
 
                             def langing(self):
-                                self.title_label.setText(self.root.langer.get("wid.pages.downloadList.title"))
-                                self.empty_label.setText(self.root.langer.get("wid.pages.downloadList.empty"))
+                                self.title_label.setText(self.root.langer.get("core.wid.pages.downloadList.title"))
+                                self.empty_label.setText(self.root.langer.get("core.wid.pages.downloadList.empty"))
 
                             def _snapshot_tasks(self, event):
                                 """子线程：收集运行中/暂停中与可续传任务的快照（不触碰 UI）。"""
@@ -2099,14 +2099,14 @@ try:
                                             # 检测循环日志：记录读取到的 Java 任务状态（含暂停/恢复切换），
                                             # 用于排查信号竞争导致的"暂停后被覆盖成正在下载"
                                             if _paused != self._last_java_paused:
-                                                self.root.logger.info(t(self.root.langer.get("log.info.dlJavaState"),
+                                                self.root.logger.info(t(self.root.langer.get("core.log.info.dlJavaState"),
                                                                         "paused" if _paused else "downloading",
                                                                         _pct,
                                                                         os.path.basename(_dest) or _dest))
                                                 self._last_java_paused = _paused
                                             break
                                 except Exception as e:
-                                    self.root.logger.warning(t(self.root.langer.get("log.warning.dlJavaSyncError"), repr(e)))
+                                    self.root.logger.warning(t(self.root.langer.get("core.log.warning.dlJavaSyncError"), repr(e)))
                                 all_tasks = dict(actives)
                                 all_tasks.update(pendings)
                                 # 移除已消失的任务卡片
@@ -2150,7 +2150,7 @@ try:
                                     except Exception:
                                         pass
                                 except Exception as e:
-                                    self.root.logger.error(t(self.root.langer.get("log.error.dlResumeFailed"), task_id, e))
+                                    self.root.logger.error(t(self.root.langer.get("core.log.error.dlResumeFailed"), task_id, e))
 
                             def _delete_task(self, state_file):
                                 task_dir = os.path.dirname(state_file) if state_file else None
@@ -2167,7 +2167,7 @@ try:
                                         mdir = os.path.dirname(dest)
                                         if os.path.isdir(mdir):
                                             shutil.rmtree(mdir, ignore_errors=True)
-                                        self.root.logger.info(t(self.root.langer.get("log.info.dlMdtDeleteCleaned"),
+                                        self.root.logger.info(t(self.root.langer.get("core.log.info.dlMdtDeleteCleaned"),
                                                                 os.path.basename(mdir) or mdir))
                                 except Exception:
                                     pass
@@ -2281,16 +2281,16 @@ try:
                                     # 状态文本与按钮语义
                                     if task_info.get("kind") == "active":
                                         if task_info.get("paused"):
-                                            self.status_label.setText(self.root.langer.get("wid.pages.downloadList.paused"))
-                                            self.btn_primary.setText(self.root.langer.get("wid.pages.downloadList.resume"))
+                                            self.status_label.setText(self.root.langer.get("core.wid.pages.downloadList.paused"))
+                                            self.btn_primary.setText(self.root.langer.get("core.wid.pages.downloadList.resume"))
                                         else:
-                                            self.status_label.setText(self.root.langer.get("wid.pages.downloadList.active"))
-                                            self.btn_primary.setText(self.root.langer.get("wid.pages.downloadList.pause"))
-                                        self.btn_secondary.setText(self.root.langer.get("wid.pages.downloadList.cancel"))
+                                            self.status_label.setText(self.root.langer.get("core.wid.pages.downloadList.active"))
+                                            self.btn_primary.setText(self.root.langer.get("core.wid.pages.downloadList.pause"))
+                                        self.btn_secondary.setText(self.root.langer.get("core.wid.pages.downloadList.cancel"))
                                     else:
-                                        self.status_label.setText(self.root.langer.get("wid.pages.downloadList.pending"))
-                                        self.btn_primary.setText(self.root.langer.get("wid.pages.downloadList.continue"))
-                                        self.btn_secondary.setText(self.root.langer.get("wid.pages.downloadList.delete"))
+                                        self.status_label.setText(self.root.langer.get("core.wid.pages.downloadList.pending"))
+                                        self.btn_primary.setText(self.root.langer.get("core.wid.pages.downloadList.continue"))
+                                        self.btn_secondary.setText(self.root.langer.get("core.wid.pages.downloadList.delete"))
                                     self._update_buttons()
 
                                 def _connect_task_signals(self):
@@ -2365,12 +2365,12 @@ try:
                                         os.makedirs(os.path.dirname(dfile), exist_ok=True)
                                         with open(dfile, "w", encoding="utf-8") as f:
                                             json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
-                                        _state = self.root.langer.get("log.info.javaPausedState" if paused else "log.info.javaResumedState")
-                                        self.root.logger.info(t(self.root.langer.get("log.info.dlMdtPausedState"),
+                                        _state = self.root.langer.get("core.log.info.javaPausedState" if paused else "core.log.info.javaResumedState")
+                                        self.root.logger.info(t(self.root.langer.get("core.log.info.dlMdtPausedState"),
                                                                 _state,
                                                                 os.path.basename(os.path.dirname(dest)) or ""))
                                     except Exception as e:
-                                        self.root.logger.warning(t(self.root.langer.get("log.warning.dlMdtPausedError"), repr(e)))
+                                        self.root.logger.warning(t(self.root.langer.get("core.log.warning.dlMdtPausedError"), repr(e)))
 
                                 def _on_secondary_clicked(self):
                                     # 运行中：取消（子线程执行阻塞式取消，取消后删除 mdt 目标文件夹）；
@@ -2387,7 +2387,7 @@ try:
                                                         try:
                                                             if os.path.isdir(mdir):
                                                                 shutil.rmtree(mdir, ignore_errors=True)
-                                                            self.root.logger.info(t(self.root.langer.get("log.info.dlMdtCancelCleaned"),
+                                                            self.root.logger.info(t(self.root.langer.get("core.log.info.dlMdtCancelCleaned"),
                                                                                     os.path.basename(mdir) or mdir))
                                                         except Exception:
                                                             pass
@@ -2523,7 +2523,7 @@ try:
                 self.init_wid()
                 bus.bind(self)
                 self.activated.connect(self.on_tray_activated)
-                self.root.logger.info(self.root.langer.get("log.info.trayLoad"))
+                self.root.logger.info(self.root.langer.get("core.log.info.trayLoad"))
 
             def on_tray_activated(self, reason):
                 if reason == QSystemTrayIcon.ActivationReason.Trigger:
@@ -2552,7 +2552,7 @@ try:
                 self.setContextMenu(self.menu)
 
             def langing(self):
-                self.menu_close.setText(self.root.langer.get("tray.menu.close"))
+                self.menu_close.setText(self.root.langer.get("core.tray.menu.close"))
 
             def setIcon_(self):
                 """根据系统主题设置托盘图标"""
@@ -2563,11 +2563,11 @@ try:
 
                     # 检查文件是否存在，防止路径错误导致无图标
                     if not os.path.exists(icon_path):
-                        self.root.logger.warning(t(self.root.langer.get("log.warning.trayIconPath"), icon_path))
+                        self.root.logger.warning(t(self.root.langer.get("core.log.warning.trayIconPath"), icon_path))
 
                     icon = QIcon(icon_path)
                     self.setIcon(icon)
-                    self.root.logger.info(t(self.root.langer.get("log.info.trayTheme"), "light" if theme == "light" else "dark"))
+                    self.root.logger.info(t(self.root.langer.get("core.log.info.trayTheme"), "light" if theme == "light" else "dark"))
 
         class Logger():
             # 命令行 `--log=<级别>`（只认 `=`，级别取 LEVELS 的键，默认 info）
@@ -2684,7 +2684,7 @@ try:
                     try:
                         os.remove(os.path.join(self.log_dir, oldest))
                         # 清理日志时使用主 logger 记录
-                        self._loggers[self.base_logger_name].info(t(self.root.langer.get("log.info.cleanOldLogs"), oldest))
+                        self._loggers[self.base_logger_name].info(t(self.root.langer.get("core.log.info.cleanOldLogs"), oldest))
                     except Exception as e:
                         pass
 
@@ -2769,7 +2769,7 @@ try:
                 # 广播语言变化：各控件的 langing 已自行接在总线上，
                 # 延到事件循环里统一刷新，避免阻塞本次语言文件的加载
                 QTimer.singleShot(0, bus.set_lang)
-                self.root.logger.info(self.get("init.load"))
+                self.root.logger.info(self.get("core.init.load"))
 
             def get(self, key):
                 """
@@ -2777,11 +2777,18 @@ try:
                 1. 当前语言 (zh-CN)
                 2. 默认语言 (en-US)
                 3. 原键名
+
+                键带命名空间：内置一律 core.*，插件用 <插件id>.* —— 这样插件
+                语言包里的某条键能精确对上要盖的内置文案，而不是靠猜。
+                另外认一次没有前缀的老键：迁移期漏改的地方会去掉 core. 再找，
+                不至于把键名直接显示给用户。
                 """
-                if key in self.langs:
-                    return self.langs[key]
-                if key in self.default_langs:
-                    return self.default_langs[key]
+                candidates = (key, key[5:] if key.startswith("core.") else "core." + key)
+                for k in candidates:
+                    if k in self.langs:
+                        return self.langs[k]
+                    if k in self.default_langs:
+                        return self.default_langs[k]
                 return key
 
             def get_langs(self):

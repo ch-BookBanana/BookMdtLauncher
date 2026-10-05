@@ -204,7 +204,7 @@ def simple(cls, **extra):
     这只是**注册方**替自己省事 —— 注册方知道自己的类长什么样；
     装配方不必知道，它只管调 init。
     """
-    return lambda b: cls(b.parent, b.root, b.title, **extra)
+    return lambda b: cls(b.parent, b.title, **extra)
 
 
 class Registry:

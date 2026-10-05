@@ -51,4 +51,4 @@ class Game(Page):
 registry.add("core.pages", "core.game",
              init=lambda b: Game(b.parent, b.root, b.title, b.icon, btn=b.btn),
              order=30,
-             title="wid.pages.game", icon=BTN_GAME)
+             title="core.wid.pages.game", icon=BTN_GAME)

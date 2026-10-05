@@ -54,7 +54,7 @@ class Setting(Page):
             self.layout.setContentsMargins(0, 0, 0, 0)
             self.layout.setSpacing(0)
 
-            self.scroll = Scroll(self, self.root)
+            self.scroll = Scroll(self)
             self.layout.addWidget(self.scroll)
 
             self.bthGroup = QButtonGroup(self)
@@ -161,7 +161,7 @@ class Setting(Page):
             registry.add("core.setting.pages", "core.setting.launcher",
                          init=lambda b: self.Launcher(b.parent, b.root, b.title, b.icon),
                          order=10,
-                         title="wid.pages.setting.launcher", icon=ACT_UNITS)
+                         title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
 
             for e in registry.entries("core.setting.pages"):
                 self.add_page(e)
@@ -194,7 +194,7 @@ class Setting(Page):
                 self.layout.setSpacing(0)
                 self.layout.setAlignment(Qt.AlignHCenter)
 
-                self.scroll = Scroll(self, self.root, margins=(30, 0, 30, 0))
+                self.scroll = Scroll(self, margins=(30, 0, 30, 0))
                 self.scroll.setStyleSheet("max-width: 600px;")
                 self.layout.addWidget(self.scroll)
 
@@ -226,24 +226,24 @@ class Setting(Page):
                 registry.add("core.setting.items", "core.setting.preferences",
                              init=simple(Title), group="launcher", order=10, spacing=30,
                              attr="_title1",
-                             title="wid.pages.setting.launcher.preferences")
+                             title="core.wid.pages.setting.launcher.preferences")
                 registry.add("core.setting.items", "core.setting.theme",
                              init=simple(Bool), group="launcher", order=20, attr="_t1_theme",
-                             title="wid.pages.setting.launcher.preferences.theme")
+                             title="core.wid.pages.setting.launcher.preferences.theme")
                 registry.add("core.setting.items", "core.setting.lang",
                              init=simple(Combo), group="launcher", order=30, attr="_t1_lang",
-                             title="wid.pages.setting.launcher.preferences.lang")
+                             title="core.wid.pages.setting.launcher.preferences.lang")
                 registry.add("core.setting.items", "core.setting.general",
                              init=simple(Title), group="launcher", order=40, spacing=30,
                              attr="_title2",
-                             title="wid.pages.setting.launcher.general")
+                             title="core.wid.pages.setting.launcher.general")
                 registry.add("core.setting.items", "core.setting.java",
                              init=simple(Title), group="launcher", order=50, spacing=30,
                              attr="_title3",
-                             title="wid.pages.setting.launcher.java")
+                             title="core.wid.pages.setting.launcher.java")
                 registry.add("core.setting.items", "core.setting.java.select",
                              init=simple(Combo), group="launcher", order=60, attr="_t3_select",
-                             title="wid.pages.setting.launcher.java.select")
+                             title="core.wid.pages.setting.launcher.java.select")
 
                 for e in registry.entries("core.setting.items", where={"group": "launcher"}):
                     wid = e.init(Box(parent=self, root=self.root, entry=e))
@@ -258,7 +258,7 @@ class Setting(Page):
                 plugin_items = registry.entries("core.setting.items",
                                                 where={"group": "plugins"})
                 if plugin_items:
-                    self.add(Title(self, self.root, "wid.pages.setting.plugins"), 30)
+                    self.add(Title(self, "core.wid.pages.setting.plugins"), 30)
                     for e in plugin_items:
                         wid = e.init(Box(parent=self, root=self.root, entry=e))
                         self.add(wid, e.get("spacing", 0))
@@ -288,7 +288,7 @@ class Setting(Page):
                 self._t3_add_row_layout.addSpacing(28)
                 self._t3_add = QPushButton(self._t3_add_row)
                 self._t3_add.setProperty("wid","btn")
-                self._t3_add.setProperty("lang","wid.pages.setting.launcher.java.add")
+                self._t3_add.setProperty("lang","core.wid.pages.setting.launcher.java.add")
                 self._t3_add.setFixedSize(122,40)
                 self._t3_add.setIconSize(QSize(16,16))
                 self._t3_add_row_layout.addWidget(self._t3_add,0)
@@ -305,10 +305,10 @@ class Setting(Page):
                     combo.clear()
                     if not show:
                         self._t3_select_hasjava = False
-                        combo.addItem(events.lang.get("wid.pages.setting.launcher.java.select.none"),"nojava")
+                        combo.addItem(events.lang.get("core.wid.pages.setting.launcher.java.select.none"),"nojava")
                         return
                     self._t3_select_hasjava = True
-                    combo.addItem(events.lang.get("wid.pages.setting.launcher.java.select.auto"),"auto")
+                    combo.addItem(events.lang.get("core.wid.pages.setting.launcher.java.select.auto"),"auto")
                     for java in show:
                         combo.addItem(f"v{java[1]}",java[0])
                         combo.setItemData(combo.count()-1,java[0],Qt.ToolTipRole)
@@ -340,13 +340,13 @@ class Setting(Page):
 
                 def _t3_add_clicked():
                     # 先选目录：认得出 <目录>/bin/java.exe 才往下走，认不出弹浮层说明原因
-                    folder = QFileDialog.getExistingDirectory(self,events.lang.get("wid.pages.setting.launcher.java.add"))
+                    folder = QFileDialog.getExistingDirectory(self,events.lang.get("core.wid.pages.setting.launcher.java.add"))
                     if not folder:
                         return
                     java = os.path.join(folder,"bin","java.exe")
                     error = None
                     if not javaManager.isJava(java):
-                        error = t(events.lang.get("log.warning.javaAddInvalid"),folder)
+                        error = t(events.lang.get("core.log.warning.javaAddInvalid"),folder)
                         events.logger.warning(error,name="Java")
                     events.emit(
                         "overlayRequested",
@@ -452,17 +452,17 @@ class Setting(Page):
 
                 # ---------- 文案 / 主题 ----------
                 def langing(self):
-                    self.title.setText(events.lang.get("wid.pages.setting.launcher.java.add"))
+                    self.title.setText(events.lang.get("core.wid.pages.setting.launcher.java.add"))
                     self.dir.setText(self.folder)
-                    self.btn_ok.setText(events.lang.get("text.yes"))
-                    self.btn_close.setToolTip(events.lang.get("wid.top.close"))
+                    self.btn_ok.setText(events.lang.get("core.text.yes"))
+                    self.btn_close.setToolTip(events.lang.get("core.wid.top.close"))
                     if self.error is not None:
                         # 错误态：目录不可用，提示行只说原因
                         self.msg.setStyleSheet("font-size: 13px; color: #e06c6c;")
                         self.msg.setText(self.error)
                         return
                     self.msg.setStyleSheet("font-size: 13px; color: #f0b731;")
-                    self.msg.setText(t(events.lang.get("wid.pages.setting.launcher.java.add.ok"),
+                    self.msg.setText(t(events.lang.get("core.wid.pages.setting.launcher.java.add.ok"),
                                        javaManager.getJavaVersion(self.java)))
 
                 def lighting(self, light: bool):
@@ -504,11 +504,11 @@ class Setting(Page):
             def langing(self):
                 super().langing()
                 try:
-                    self._t3_add.setText(events.lang.get("wid.pages.setting.launcher.java.add"))
+                    self._t3_add.setText(events.lang.get("core.wid.pages.setting.launcher.java.add"))
                     t3SelecIndex1 = self._t3_select.combo.findData("nojava")
                     t3SelecIndex2 = self._t3_select.combo.findData("auto")
-                    if t3SelecIndex1 >= 0:self._t3_select.combo.setItemText(t3SelecIndex1,events.lang.get("wid.pages.setting.launcher.java.select.none"))
-                    if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,events.lang.get("wid.pages.setting.launcher.java.select.auto"))
+                    if t3SelecIndex1 >= 0:self._t3_select.combo.setItemText(t3SelecIndex1,events.lang.get("core.wid.pages.setting.launcher.java.select.none"))
+                    if t3SelecIndex2 >= 0:self._t3_select.combo.setItemText(t3SelecIndex2,events.lang.get("core.wid.pages.setting.launcher.java.select.auto"))
                 except : pass
 
 
@@ -516,4 +516,4 @@ class Setting(Page):
 registry.add("core.pages", "core.setting",
              init=lambda b: Setting(b.parent, b.root, b.title, b.icon, btn=b.btn),
              order=40,
-             title="wid.pages.setting", icon=BTN_SETTING)
+             title="core.wid.pages.setting", icon=BTN_SETTING)
