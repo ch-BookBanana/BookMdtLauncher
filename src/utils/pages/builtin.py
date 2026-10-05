@@ -60,6 +60,20 @@ registry.declare("core.setting.pages", registrant="core.setting",
                  required=("init", "title", "icon"),
                  doc="设置页左栏的子页")
 
+registry.declare("core.qss", registrant="core",
+                 fields=("qss", "theme", "order"),
+                 required=("qss",),
+                 doc="追加到全局样式表末尾的 css 片段。theme: None = 两套主题都加，"
+                     "False = 只在深色，True = 只在浅色。片段排在主题文件之后，"
+                     "同名选择器以它为准 —— 扩展能盖内置样式，不必改主题文件；"
+                     "换主题时会重新收一遍，不用自己监听。")
+
+registry.declare("core.tray.menu", registrant="core",
+                 fields=("init", "title", "order"),
+                 required=("init", "title"),
+                 doc="系统托盘右键菜单里的一项：init(Box) 返回 QAction。"
+                     "title 是语言键，语言切换时托盘会照它重设文案。")
+
 registry.declare("core.setting.items", registrant="core.setting",
                  fields=("init", "group", "order", "title", "spacing", "attr"),
                  required=("init", "group", "title"),

@@ -463,6 +463,15 @@ try:
                 with open(getPath(f"src/resources/styles/{theme_file}"), "r", encoding="utf-8") as f:
                     qss = f.read()
 
+                # 扩展加的样式片段（core.qss）：接在主题文件**后面**，同名选择器
+                # 以靠后的为准 —— 插件能盖内置样式，而不必去改主题文件。
+                # theme 为 None 表示两套主题都加，否则按当前是不是浅色筛。
+                extra = [e.qss for e in registry.entries("core.qss")
+                         if e.get("theme") is None
+                         or bool(e.get("theme")) == is_light]
+                if extra:
+                    qss = qss.rstrip() + "\n\n" + "\n\n".join(x.strip() for x in extra) + "\n"
+
                 app = QApplication.instance()
                 if app:
                     app.setStyleSheet(qss)
@@ -1375,6 +1384,11 @@ try:
                             # NavBtn 本来就接受 None。
                             btn = self.nav.add_btn(e.title, e.get("icon"))
                             page = e.init(Box(parent=self, entry=e, btn=btn))
+                            # 这两张表归装配方维护，不由页面自己追加 ——
+                            # 插件页面不走内置的 Page 基类，靠自己就会漏。
+                            # btns 装的是左栏按钮（pages[i].btn is btns[i]）。
+                            self.pages.append(page)
+                            self.btns.append(btn)
                             btn.clicked.connect(page.changePage)
                             setattr(self, e.name, page)
                             # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到
@@ -1432,6 +1446,16 @@ try:
 
                 self.menu.addSeparator()  # 添加分隔线
 
+                # 扩展项（core.tray.menu）：插件自己给 QAction，托盘只负责摆位置。
+                # 文案由托盘在 langing() 里按条目的 title 重设，语言切换跟着走。
+                self._plugin_actions = []
+                for e in registry.entries("core.tray.menu"):
+                    act = e.init(Box(parent=self, entry=e))
+                    self.menu.addAction(act)
+                    self._plugin_actions.append((act, e))
+                if self._plugin_actions:
+                    self.menu.addSeparator()
+
                 self.menu_close = QAction("", self)
                 self.menu_close.triggered.connect(QApplication.quit)
                 self.menu.addAction(self.menu_close)
@@ -1441,6 +1465,8 @@ try:
 
             def langing(self):
                 self.menu_close.setText(self.root.langer.get("core.tray.menu.close"))
+                for act, e in getattr(self, "_plugin_actions", ()):
+                    act.setText(self.root.langer.get(e.title))
 
             def setIcon_(self):
                 """根据系统主题设置托盘图标"""

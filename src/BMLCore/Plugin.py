@@ -97,6 +97,33 @@ class Plugin:
         return self.add("core.setting.items", name, init=simple(cls),
                         group=group, order=order, title=title, **fields)
 
+    def add_qss(self, css, *, theme=None, order=100):
+        """往全局样式表末尾追加一段 css。
+
+            self.add_qss("QLabel#myTitle { color: #7aa2f7; }")
+
+        theme：None = 两套主题都加，False = 只在深色，True = 只在浅色。
+        片段排在主题文件之后，所以同名选择器以它为准 —— 能盖内置样式，
+        但不必去改主题文件。换主题时会重新收一遍，不用自己监听。
+        """
+        return self.add("core.qss", "qss", qss=css, theme=theme, order=order)
+
+    def add_tray(self, name, *, title, callback, order=100):
+        """往系统托盘右键菜单里加一项，点了调 callback()。
+
+            self.add_tray("about", title="hello.about", callback=self._about)
+
+        title 是语言键：语言切换时托盘会照它重设文案，插件不用自己管。
+        """
+        from PySide6.QtGui import QAction
+
+        def _init(b):
+            act = QAction(b.title, b.parent)
+            act.triggered.connect(lambda *_: callback())
+            return act
+
+        return self.add("core.tray.menu", name, init=_init, title=title, order=order)
+
     def on(self, event, callback):
         """订阅事件。名字原样传 —— 宿主的事件和别的插件的事件都这么订。"""
         return events.on(event, callback)

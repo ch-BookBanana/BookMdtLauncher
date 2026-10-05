@@ -46,6 +46,14 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
     registry     扩展点登记（一般用 Plugin.add 就够了，需要直连时再用）
     simple       把「签名是 (parent, root, title) 的控件类」变成 init 工厂
     getPath      取自己的资源（${plugin}/…），换 id、换安装位置都不用改代码
+    Signal       PySide6 的 Signal，转一道手：插件自定义信号不必自己 import Qt
+                 （将来换掉 Qt 绑定，这一层的名字也还在）
+
+另外三个「往宿主界面里伸」的动作挂在插件实例上，不占门面的名字：
+
+    self.add_setting(...)   设置页加一项
+    self.add_qss(...)       往全局样式表末尾追加 css（可只对某套主题生效）
+    self.add_tray(...)      往系统托盘右键菜单加一项
 
 插件设置不用单独记一个名字：它挂在插件实例上 —— self.settings["key"]，
 存进宿主 settings.json 的 "plugins" 里自己那一格（见 utils/pluginSettings.py）。
@@ -57,6 +65,8 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
 硬做请求-响应会让调用方挂在一个永远不返回的 emit 上。
 """
 
+from PySide6.QtCore import Signal
+
 from . import Widgets
 from .Plugin import API_VERSION, Plugin
 from ..utils.events import events
@@ -64,4 +74,4 @@ from ..utils.path_utils import getPath
 from ..utils.registry import registry, simple
 
 __all__ = ["API_VERSION", "Plugin", "Widgets", "events", "registry", "simple",
-           "getPath"]
+           "getPath", "Signal"]

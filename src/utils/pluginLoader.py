@@ -184,7 +184,12 @@ def _read_manifest(folder):
         deps = [deps]                      # 只依赖一个时写字符串也认
     if not isinstance(deps, list):
         raise PluginLoadError("plugin.json 的 dependencies 必须是数组")
-    deps = tuple(str(d).strip() for d in deps if str(d).strip())
+    bad = [d for d in deps if not isinstance(d, str)]
+    if bad:
+        # 不能 str() 了事：null 会变成 "None"、数字会变成 "123"，
+        # 而它们都是「查不到的依赖名」—— 失败会发生在很远的地方
+        raise PluginLoadError(f"plugin.json 的 dependencies 里只能是字符串，收到 {bad!r}")
+    deps = tuple(dict.fromkeys(d.strip() for d in deps if d.strip()))
     if pid in deps:
         raise PluginLoadError(f"依赖了自己：{pid}")
 
