@@ -139,6 +139,9 @@ from .fOverlay import githubSetting    # noqa: E402,F401
 from .fStack import dlList             # noqa: E402,F401
 from .downloads import game as _download_sources   # noqa: E402,F401
 from .fStack import gameManager    # noqa: E402,F401
+# 关闭询问浮层住在基层（settings.py）—— 它问的就是基层那个字段，控件跟着字段
+# 走；登记仍然由这里统一叫（register 见那个文件的第二级）。
+from ..settings import register as _register_close_ask    # noqa: E402,F401
 
 start.register()                   # core.start.bottom（底部按钮页）
 download.register()                # core.download.tabs（左栏页签）
@@ -147,4 +150,5 @@ githubSetting.register()           # core.overlays：GitHub 设置页（叠加�
 dlList.register()                  # core.overlays：下载列表（浮层栈）
 _download_sources.register()       # core.download.sources（三个下载源）
 gameManager.register()             # core.overlays + 管理浮层的功能页与区块
+_register_close_ask()              # core.overlays：关闭询问（叠加层）
 

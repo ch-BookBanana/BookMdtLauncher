@@ -68,7 +68,7 @@ try:
     from src.utils.logger import Logger
     from src.utils.path_utils import getPath
     from src.utils.pages._init import open_overlay
-    from src.utils.settings import Settings, ask_close
+    from src.utils.settings import Settings
     from src.utils.mdtManager import mdtManager
     from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
     from src.utils.QThTimer import QThTimer
@@ -407,10 +407,11 @@ try:
         def ask_close(self):
             """弹一层「隐藏到托盘 / 退出启动器」。
 
-            控件由设置层给（它在那儿，因为要问的就是它的 closeByTray），
-            挂到哪一层归窗口管：这里只发请求，窗口自己知道浮层装在哪。
+            走 key 不 import 控件：这条是 core.overlays 里的条目（core.closeAsk，
+            见 settings.py 的 register），谁都能拿同名条目盖掉它，换成别的问法
+            或别的样式；挂到哪一层也由那条条目自己声明，这里不必记。
             """
-            self.signals.emit("overlayRequested", ask_close(self.window))
+            open_overlay("core.closeAsk", self.window)
 
         def _on_plugins_changed(self):
             """插件集合变了：把它盖过的三样收回来。

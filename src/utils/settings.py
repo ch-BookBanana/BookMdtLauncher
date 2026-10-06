@@ -46,10 +46,12 @@ dict**，那些写法一行都不用改。子对象也一样：`_Section` 继承
     第二级（文件末尾那一段）    要 Qt 的东西：当前只有一个关闭询问浮层
                                 （点窗口 × 时问「藏到托盘还是退出」）。
 
-浮层放这儿是因为它没有复用价值：就这一处用，不值得占一个 core.overlays 条目
-（那等于给别人开一个能替换 / 扩展它的口子），而它问的恰好是第一级那个字段
-closeByTray。QWidget 是类体上的基类，没法「用到才拉 Qt」，所以第二级的
-Qt import 就摆在第二级开头 —— 界面上仍然是「先基础、后浮层」。
+浮层放这儿，是因为它问的恰好是第一级那个字段 closeByTray（一个字段配一层
+问法，摆在一起看得清）；它同时**登记进 core.overlays**（见本文件末尾的
+register），于是想换问法 / 换样式的人可以拿一条同名条目把它盖掉 —— 控件写
+在这儿，口子开在注册表，两件事不冲突。QWidget 是类体上的基类，没法「用到才
+拉 Qt」，所以第二级的 Qt import 就摆在第二级开头 —— 界面上仍然是「先基础、
+后浮层」。
 """
 
 import copy
@@ -473,6 +475,7 @@ from .bus import bus                                               # noqa: E402
 from .events import events                                         # noqa: E402
 from .options.items import Bool                                    # noqa: E402
 from .options.scrolls import Scroll                                # noqa: E402
+from .registry import registry                                     # noqa: E402
 from .resources import TBT_CLOSE                                   # noqa: E402
 from .utils import change_color                                    # noqa: E402
 
@@ -670,6 +673,14 @@ class AskClose(QWidget):
             self.parent.close_()
 
 
-def ask_close(parent=None):
-    """建一个关闭询问浮层并返回 —— 挂到哪一层由调用方发 overlayRequested。"""
-    return AskClose(parent)
+def register():
+    """把关闭询问浮层登记进 core.overlays（由 pages/builtin.py 调用一次）。
+
+    用 set 不用 add：这个位子是留出来给人顶掉的 —— 谁想换个问法、换套样式，
+    按同名条目 set 一下就把宿主这条盖了（打开它的地方只认 key，见 main.py 的
+    close_()），不必改这个文件；将来谁把它换成整页（layer='stack'），
+    调用处也一行都不用动。
+    """
+    registry.set("core.overlays", "core.closeAsk",
+                 init=lambda b: AskClose(b.parent),
+                 order=30, title="core.wid.closeAsk.title", layer="overlay")

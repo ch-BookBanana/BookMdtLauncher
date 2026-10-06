@@ -293,9 +293,10 @@ class Registry:
             for key, fields in block.items():
                 if key in self.RESERVED:
                     continue
-                self.add(point, key, **{k: v for k, v in fields.items() if k != _BUILT})
-                if _BUILT in fields:
-                    self.bind(point, key, **fields[_BUILT])
+                # 直接写进正表，不走 add()：会话里 set 过的可能正是正表已有的
+                # 同名条目，add 会撞「已存在条目」—— 而 set 的语义就是顶掉它。
+                # 产物（__built__）就在 fields 里，整条照抄即可。
+                self.data.setdefault(point, {})[key] = dict(fields)
                 n += 1
         return n
 
@@ -417,18 +418,49 @@ class Registry:
 
         未声明就先报错，而不是顺手新建一个 —— 那样会把「扩展点名拼错」
         变成「多出一个没人读的空扩展点」，最难查。
+
+        撞上同名 key 直接报错（不允许静默覆盖）：要顶掉已有那条，用 set()。
         """
         block = self._block(point)
+        self._check_key(point, key)
+        # 查重要看两张表：正表里已有的、以及本次会话里刚加的
+        if self._find_entry(point, key) is not None:
+            raise RegistryError(f"{point} 里已存在条目 {key!r}（要顶掉它用 set）")
+        self._check_fields(point, key, block, fields)
+        self._write_block(point)[key] = dict(fields)
+        return Entry(point, key, block["__registrant__"], dict(fields),
+                     block.get("__built_fields__", ()))
 
+    def set(self, point, key, **fields):
+        """写一条条目：已有就**顶掉**，没有就新建。返回 Entry。
+
+        与 add() 的分工：add 是「登记」（撞名报错，防手滑、也防两条内置条目
+        悄悄互相顶掉），set 是「就这么定」（同名一律顶掉）。它的用处是留出
+        **可替换的位子**：想换掉内置的某一条（比如关闭询问 core.closeAsk），
+        按同名 set 一下就行 —— 打开它的地方只认 key，一行都不用改。
+
+        会话里（插件加载期）同样成立：写进暂存区把正表那条盖住，abort 就什么
+        都没发生，commit 才真落到正表。
+
+        谁 set 谁负责：插件顶掉宿主的内置条目之后，卸载时要把宿主那条 set 回来
+        （卸载按命名空间摘，而 `core.*` 这种 key 挂不到插件名下）。
+        """
+        block = self._block(point)
+        self._check_key(point, key)
+        self._check_fields(point, key, block, fields)
+        self._write_block(point)[key] = dict(fields)
+        return Entry(point, key, block["__registrant__"], dict(fields),
+                     block.get("__built_fields__", ()))
+
+    def _check_key(self, point, key):
         if not _is_entry_key(key):
             raise RegistryError(
                 f"{point}: 条目 key {key!r} 不合法，必须是 <namespace>.<name>"
                 f"（如 core.start / com.example.hello.main）"
             )
-        # 查重要看两张表：正表里已有的、以及本次会话里刚加的
-        if self._find_entry(point, key) is not None:
-            raise RegistryError(f"{point} 里已存在条目 {key!r}（不允许静默覆盖）")
 
+    def _check_fields(self, point, key, block, fields):
+        """字段校验（add 与 set 共用）：认得的字段、必填的字段。"""
         allowed = set(block["__fields__"])
         unknown = sorted(set(fields) - allowed)
         if unknown:
@@ -438,10 +470,6 @@ class Registry:
         missing = sorted(set(block["__required__"]) - set(fields))
         if missing:
             raise RegistryError(f"{point}.{key}: 缺必填字段 {missing}")
-
-        self._write_block(point)[key] = dict(fields)
-        return Entry(point, key, block["__registrant__"], dict(fields),
-                     block.get("__built_fields__", ()))
 
     def provide(self, point, key, obj, **meta):
         """登记一个**已经存在**的对象，登记完立刻可查。
@@ -509,8 +537,9 @@ class Registry:
         block = self._block(point)
         out = []
         seen = set()
-        # 正表 + 暂存区：会话中插件刚加的条目也得看得见
-        for src in self._blocks_of(point):
+        # 暂存区在前、正表在后：会话里 set 过的以暂存区为准（同 key 只出面一次，
+        # 出的就是新那份）。
+        for src in reversed(self._blocks_of(point)):
             for key, fields in src.items():
                 if key in self.RESERVED or key in seen:
                     continue
