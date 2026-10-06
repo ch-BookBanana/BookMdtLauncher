@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from ..utils.options.items import Bool, Combo, Slider
 from ..utils.options.scrolls import Scroll
+from ..utils.options.sections import Section
 from ..utils.options.texts import Line, Title
 
-__all__ = ["Bool", "Combo", "Slider", "Scroll", "Title", "Line"]
+__all__ = ["Bool", "Combo", "Slider", "Scroll", "Section", "Title", "Line"]

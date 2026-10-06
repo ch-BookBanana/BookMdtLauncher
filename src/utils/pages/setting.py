@@ -28,7 +28,7 @@ from ..javaManager import javaManager
 from ..options.navBtn import NavBtn
 from ..options.items import Bool, Combo
 from ..options.scrolls import Scroll
-from ..options.texts import Title
+from ..options.sections import Section
 
 from ..path_utils import getPath
 from ..utils import change_color, t
@@ -152,24 +152,19 @@ class Setting(Page):
                 self.init_wid()
 
             def init_wid(self):
-                # 标准条目从注册表取：本模块的 register() 登记一次（由 builtin.py 调）。
-                for e in registry.entries("core.setting.items", where={"group": "launcher"}):
-                    wid = e.init(Box(parent=self, entry=e))
-                    self.add(wid, e.get("spacing", 0))
-                    attr = e.get("attr")          # 可选：只有内置条目要绑回老名字
+                # 分组容器从注册表取，每个容器再取自己那几项（条目用 section 指着
+                # 容器 key）：加一组 = 登记一条容器 + 条目写它的 key，本页一行都不用改。
+                # 空容器不摆 —— 插件的组在没装插件时就是空的，那块标题也就不出现。
+                for sec in registry.entries("core.setting.sections"):
+                    items = registry.entries("core.setting.items",
+                                             where={"section": sec.key})
+                    if not items:
+                        continue
+                    wid = sec.init(Box(parent=self, entry=sec, items=items))
+                    attr = sec.get("attr")     # 可选：页面要往这一组里补控件时取它
                     if attr:
                         setattr(self, attr, wid)
-
-                # 插件登记进来的设置项：单独归到末尾，不和内置项混排。
-                # 分组名固定 'plugins'（Plugin.add_setting 的默认值）；卸载插件时
-                # 它按命名空间摘条目，这一段自然就空了。
-                plugin_items = registry.entries("core.setting.items",
-                                                where={"group": "plugins"})
-                if plugin_items:
-                    self.add(Title(self, "core.wid.pages.setting.plugins"), 30)
-                    for e in plugin_items:
-                        wid = e.init(Box(parent=self, entry=e))
-                        self.add(wid, e.get("spacing", 0))
+                    self.add(wid, sec.get("spacing", 0))
 
                 # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
                 self._t1_theme.btn.setChecked(events.settings["theme"])
@@ -186,9 +181,10 @@ class Setting(Page):
                 self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
                 self._t1_lang.combo.activated.connect(lambda: events.lang.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == events.settings["language"] else None)
 
-                # 添加 Java：挂在选择框下面（尺寸跟游戏管理那排按钮一致）
-                # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写
-                self._t3_add_row = self.add(QWidget(),20)
+                # 添加 Java：挂在 Java 那一组的末尾（尺寸跟游戏管理那排按钮一致）。
+                # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写 ——
+                # 但挂进容器（sec_java），不再往页面上平铺。
+                self._t3_add_row = self.sec_java.add_wid(QWidget(), 20)
                 self._t3_add_row_layout = QHBoxLayout(self._t3_add_row)
                 self._t3_add_row_layout.setContentsMargins(0,0,0,0)
                 self._t3_add_row_layout.setSpacing(8)
@@ -430,26 +426,37 @@ def register():
                  init=lambda b: b.parent.Launcher(b.parent, b.title, b.icon),
                  order=10,
                  title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
-    # 标准条目（分组标题 / Bool / Combo）：attr 是绑回 Launcher 的老名字，
-    # 下面的行为绑定代码仍按这些名字引用控件。group='plugins' 的归到末尾。
-    registry.add("core.setting.items", "core.setting.preferences",
-                 init=simple(Title), group="launcher", order=10, spacing=30,
-                 attr="_title1",
+    # 分组容器：条目用 section 字段指向它。空容器设置页不摆（插件的组没装插件时
+    # 就是空的，那块标题也就不出现）。spacing 是加在容器上方的空隙。
+    registry.add("core.setting.sections", "core.setting.preferences",
+                 init=lambda b: Section(b.parent, b.title, b.items),
+                 order=10, spacing=30,
                  title="core.wid.pages.setting.launcher.preferences")
+    registry.add("core.setting.sections", "core.setting.general",
+                 init=lambda b: Section(b.parent, b.title, b.items),
+                 order=40, spacing=30,
+                 title="core.wid.pages.setting.launcher.general")
+    registry.add("core.setting.sections", "core.setting.java",
+                 init=lambda b: Section(b.parent, b.title, b.items),
+                 order=50, spacing=30, attr="sec_java",
+                 title="core.wid.pages.setting.launcher.java")
+    # 插件那些设置项的落脚处（Plugin.add_setting 的默认 section）。插件想自己开
+    # 一组就照上面这样再登记一条容器。
+    registry.add("core.setting.sections", "core.setting.plugins",
+                 init=lambda b: Section(b.parent, b.title, b.items),
+                 order=900, spacing=30,
+                 title="core.wid.pages.setting.plugins")
+    # 标准条目：attr 是绑回 Launcher 的老名字，下面的行为绑定代码仍按这些名字
+    # 引用控件；section 指着上面那几个容器。
     registry.add("core.setting.items", "core.setting.theme",
-                 init=simple(Bool), group="launcher", order=20, attr="_t1_theme",
+                 init=simple(Bool), section="core.setting.preferences", order=20,
+                 attr="_t1_theme",
                  title="core.wid.pages.setting.launcher.preferences.theme")
     registry.add("core.setting.items", "core.setting.lang",
-                 init=simple(Combo), group="launcher", order=30, attr="_t1_lang",
+                 init=simple(Combo), section="core.setting.preferences", order=30,
+                 attr="_t1_lang",
                  title="core.wid.pages.setting.launcher.preferences.lang")
-    registry.add("core.setting.items", "core.setting.general",
-                 init=simple(Title), group="launcher", order=40, spacing=30,
-                 attr="_title2",
-                 title="core.wid.pages.setting.launcher.general")
-    registry.add("core.setting.items", "core.setting.java",
-                 init=simple(Title), group="launcher", order=50, spacing=30,
-                 attr="_title3",
-                 title="core.wid.pages.setting.launcher.java")
     registry.add("core.setting.items", "core.setting.java.select",
-                 init=simple(Combo), group="launcher", order=60, attr="_t3_select",
+                 init=simple(Combo), section="core.setting.java", order=60,
+                 attr="_t3_select",
                  title="core.wid.pages.setting.launcher.java.select")

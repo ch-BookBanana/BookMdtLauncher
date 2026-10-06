@@ -25,7 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         name = "Hello"
 
         def setup(self):
-            self.add("core.setting.items", "greet", init=..., group=..., title=...)
+            self.add("core.setting.items", "greet", init=..., section=..., title=...)
 
 为什么中间要有这一层
 --------------------

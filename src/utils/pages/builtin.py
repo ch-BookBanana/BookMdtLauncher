@@ -74,12 +74,20 @@ registry.declare("core.tray.menu", registrant="core",
                  doc="系统托盘右键菜单里的一项：init(Box) 返回 QAction。"
                      "title 是语言键，语言切换时托盘会照它重设文案。")
 
+registry.declare("core.setting.sections", registrant="core.setting",
+                 fields=("init", "title", "order", "spacing", "attr"),
+                 required=("init", "title"),
+                 doc="设置子页里的分组容器（标题 + 它容纳的条目）。"
+                     "容器由 init 建（Box 的本次上下文里带 items：这一组的条目表），"
+                     "所以「分组长什么样」也是可换的。"
+                     "attr 可选：设置页要往这一组里补控件时，用它在页面上取容器。")
+
 registry.declare("core.setting.items", registrant="core.setting",
-                 fields=("init", "group", "order", "title", "spacing", "attr"),
-                 required=("init", "group", "title"),
-                 doc="设置子页里的条目（Title 分组标题 / Bool / Combo …）。"
-                     "attr 可选：内置条目靠它绑回 self 上的老名字，插件用不着。"
-                     "group='plugins' 的条目会被设置页单独归到末尾")
+                 fields=("init", "section", "order", "title", "spacing", "attr"),
+                 required=("init", "section", "title"),
+                 doc="设置子页里的条目（Bool / Combo / 插件自绘的控件…），"
+                     "section 指向它所属的容器 key（core.setting.sections 里的条目）。"
+                     "attr 可选：内置条目靠它绑回页面上的老名字，插件用不着。")
 
 registry.declare("core.start.bottom", registrant="core.start",
                  fields=("init", "attr", "order"),

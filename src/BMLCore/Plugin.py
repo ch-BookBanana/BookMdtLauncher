@@ -41,8 +41,8 @@ class Plugin:
             name = "Hello"
 
             def setup(self):
-                self.add("core.setting.items", "greet", init=make_item, group="plugins",
-                         title="hello.greet")
+                self.add("core.setting.items", "greet", init=make_item,
+                         section="core.setting.plugins", title="hello.greet")
     """
 
     # ── 元信息：子类覆盖 ──
@@ -72,7 +72,7 @@ class Plugin:
     def add(self, point, name, **fields):
         """往扩展点登记一项，key 自动加本插件前缀。
 
-            self.add("core.setting.items", "greet", init=..., group=..., title=...)
+            self.add("core.setting.items", "greet", init=..., section=..., title=...)
             # → registry.add("core.setting.items", "com.example.hello.greet", ...)
 
         前缀不只是防重名：卸载时按 'com.example.hello' 一趟前缀扫描就能把
@@ -80,7 +80,8 @@ class Plugin:
         """
         return registry.add(point, f"{self.id}.{name}", **fields)
 
-    def add_setting(self, name, cls, *, title, group="plugins", order=900, **fields):
+    def add_setting(self, name, cls, *, title, section="core.setting.plugins",
+                    order=900, **fields):
         """往设置页加一项：给控件类就行，构造参数由宿主拼。
 
             from BMLCore import Plugin, Widgets
@@ -90,12 +91,20 @@ class Plugin:
                 def setup(self):
                     self.add_setting("greet", Widgets.Bool, title="hello.greet")
 
-        group 默认 'plugins'：设置页会把它单独归到末尾，不和内置项混排。
+        section 默认 'core.setting.plugins'：设置页那个「插件」分组（装了插件就往
+        那组里放）。想自己开一组，先登记一条容器再让条目指过去：
+
+            self.add("core.setting.sections", "mine",
+                     init=lambda b: Widgets.Section(b.parent, b.title, b.items),
+                     order=200, title="hello.section")
+            self.add_setting("greet", Widgets.Bool,
+                             section="com.example.hello.mine", title="hello.greet")
+
         要更自由的构造（复合控件、带初值/信号绑定）就用 self.add(...) 自己给 init。
         """
         from ..utils.registry import simple
         return self.add("core.setting.items", name, init=simple(cls),
-                        group=group, order=order, title=title, **fields)
+                        section=section, order=order, title=title, **fields)
 
     def add_qss(self, css, *, theme=None, order=100):
         """往全局样式表末尾追加一段 css。
