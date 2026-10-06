@@ -181,6 +181,32 @@ class Setting(Page):
                 self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
                 self._t1_lang.combo.activated.connect(lambda: events.lang.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == events.settings["language"] else None)
 
+                # 关闭窗口时：未设置（= 每次点 × 都弹一层问，见 main.py 的 close_()）
+                # / 隐藏到托盘 / 退出启动器。写的就是那个 closeByTray（浮层里那条
+                # 「保存到设置」写的是同一个键，两处看到的是同一件事）。
+                # 「未设置」只在当前真的是 None 时露面：一旦选定了做法，这个选项就
+                # 不再出现（想回到「每次都问」得手改 settings.json —— 这是有意的，
+                # 不然那个选项会变成一个随时能把用户的选择抹掉的按钮）。
+                def _t2_close_fill():
+                    combo = self._t2_close.combo
+                    value = events.settings["closeByTray"]
+                    combo.clear()
+                    if value is None:
+                        combo.addItem(events.lang.get("core.wid.closeAsk.unset"), "unset")
+                    combo.addItem(events.lang.get("core.wid.closeAsk.tray"), "tray")
+                    combo.addItem(events.lang.get("core.wid.closeAsk.quit"), "quit")
+                    combo.setCurrentIndex(combo.findData(
+                        "unset" if value is None else ("tray" if value else "quit")))
+
+                def _t2_close_pick(data):
+                    events.settings["closeByTray"] = None if data == "unset" else (data == "tray")
+
+                _t2_close_fill()
+                # 每次展开前重填：选项集本身会随当前值变（未设置那条的来去）
+                self._t2_close.combo.popupAboutToShow.connect(_t2_close_fill)
+                self._t2_close.combo.activated.connect(
+                    lambda: _t2_close_pick(self._t2_close.combo.currentData()))
+
                 # 添加 Java：挂在 Java 那一组的末尾（尺寸跟游戏管理那排按钮一致）。
                 # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写 ——
                 # 但挂进容器（sec_java），不再往页面上平铺。
@@ -456,6 +482,11 @@ def register():
                  init=simple(Combo), section="core.setting.preferences", order=30,
                  attr="_t1_lang",
                  title="core.wid.pages.setting.launcher.preferences.lang")
+    # 通用：关闭窗口时怎么办（和点 × 弹的那一层是同一个设置）
+    registry.add("core.setting.items", "core.setting.close",
+                 init=simple(Combo), section="core.setting.general", order=10,
+                 attr="_t2_close",
+                 title="core.wid.pages.setting.launcher.general.close")
     registry.add("core.setting.items", "core.setting.java.select",
                  init=simple(Combo), section="core.setting.java", order=60,
                  attr="_t3_select",

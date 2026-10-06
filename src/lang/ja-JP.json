@@ -79,6 +79,7 @@
     "core.wid.closeAsk.tray": "トレイに隠す",
     "core.wid.closeAsk.quit": "ランチャーを終了",
     "core.wid.closeAsk.save": "設定に保存",
+    "core.wid.closeAsk.unset": "未設定",
     "core.wid.top.minimize": "最小化",
     "core.wid.top.maxmize": "最大化",
     "core.wid.top.restore": "元に戻す",
@@ -155,6 +156,7 @@
     "core.wid.pages.setting.launcher.preferences.lang": "言語選択",
 
     "core.wid.pages.setting.launcher.general": "一般",
+    "core.wid.pages.setting.launcher.general.close": "ウィンドウを閉じるとき",
 
     "core.wid.pages.setting.launcher.java": "グローバルJava",
     "core.wid.pages.setting.launcher.java.select": "Javaを選択",

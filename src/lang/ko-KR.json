@@ -79,6 +79,7 @@
     "core.wid.closeAsk.tray": "트레이로 숨기기",
     "core.wid.closeAsk.quit": "런처 종료",
     "core.wid.closeAsk.save": "설정에 저장",
+    "core.wid.closeAsk.unset": "설정 안 함",
     "core.wid.top.minimize": "최소화",
     "core.wid.top.maxmize": "최대화",
     "core.wid.top.restore": "복원",
@@ -155,6 +156,7 @@
     "core.wid.pages.setting.launcher.preferences.lang": "언어 선택",
 
     "core.wid.pages.setting.launcher.general": "일반",
+    "core.wid.pages.setting.launcher.general.close": "창을 닫을 때",
 
     "core.wid.pages.setting.launcher.java": "전역 Java",
     "core.wid.pages.setting.launcher.java.select": "Java 선택",

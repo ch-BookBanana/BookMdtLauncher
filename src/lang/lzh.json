@@ -79,6 +79,7 @@
     "core.wid.closeAsk.tray": "隱於托盤",
     "core.wid.closeAsk.quit": "退啟動器",
     "core.wid.closeAsk.save": "存於設置",
+    "core.wid.closeAsk.unset": "未設",
     "core.wid.top.minimize": "收攝",
     "core.wid.top.maxmize": "張滿",
     "core.wid.top.restore": "復舊",
@@ -155,6 +156,7 @@
     "core.wid.pages.setting.launcher.preferences.lang": "擇言",
 
     "core.wid.pages.setting.launcher.general": "常務",
+    "core.wid.pages.setting.launcher.general.close": "閉窗時",
 
     "core.wid.pages.setting.launcher.java": "通域爪哇",
     "core.wid.pages.setting.launcher.java.select": "擇爪哇",

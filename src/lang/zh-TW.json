@@ -79,6 +79,7 @@
     "core.wid.closeAsk.tray": "隱藏到系統匣",
     "core.wid.closeAsk.quit": "結束啟動器",
     "core.wid.closeAsk.save": "儲存到設定",
+    "core.wid.closeAsk.unset": "未設定",
     "core.wid.top.minimize": "最小化",
     "core.wid.top.maxmize": "最大化",
     "core.wid.top.restore": "還原",
@@ -155,6 +156,7 @@
     "core.wid.pages.setting.launcher.preferences.lang": "選擇語言",
 
     "core.wid.pages.setting.launcher.general": "一般",
+    "core.wid.pages.setting.launcher.general.close": "關閉視窗時",
 
     "core.wid.pages.setting.launcher.java": "全域 Java",
     "core.wid.pages.setting.launcher.java.select": "選擇 Java",

@@ -79,6 +79,7 @@
     "core.wid.closeAsk.tray": "Hide to tray",
     "core.wid.closeAsk.quit": "Quit launcher",
     "core.wid.closeAsk.save": "Save to settings",
+    "core.wid.closeAsk.unset": "Not set",
     "core.wid.top.minimize": "Minimize",
     "core.wid.top.maxmize": "Maximize",
     "core.wid.top.restore": "Restore",
@@ -155,6 +156,7 @@
     "core.wid.pages.setting.launcher.preferences.lang": "Select Language",
 
     "core.wid.pages.setting.launcher.general": "General",
+    "core.wid.pages.setting.launcher.general.close": "On closing the window",
 
     "core.wid.pages.setting.launcher.java": "Global Java",
     "core.wid.pages.setting.launcher.java.select": "Select Java",
