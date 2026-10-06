@@ -74,6 +74,11 @@
 
 
     "core.wid.top.close": "关闭",
+    "core.wid.closeAsk.title": "关闭启动器",
+    "core.wid.closeAsk.tip": "要隐藏到托盘，还是直接退出启动器？勾上下面的「保存到设置」，以后就不问了。",
+    "core.wid.closeAsk.tray": "隐藏到托盘",
+    "core.wid.closeAsk.quit": "退出启动器",
+    "core.wid.closeAsk.save": "保存到设置",
     "core.wid.top.minimize": "最小化",
     "core.wid.top.maxmize": "最大化",
     "core.wid.top.restore": "还原",

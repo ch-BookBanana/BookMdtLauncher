@@ -74,6 +74,11 @@
 
 
     "core.wid.top.close": "闔",
+    "core.wid.closeAsk.title": "閉啟動器",
+    "core.wid.closeAsk.tip": "欲隱於托盤，抑或逕退？勾其下「存於設置」，後不復問。",
+    "core.wid.closeAsk.tray": "隱於托盤",
+    "core.wid.closeAsk.quit": "退啟動器",
+    "core.wid.closeAsk.save": "存於設置",
     "core.wid.top.minimize": "收攝",
     "core.wid.top.maxmize": "張滿",
     "core.wid.top.restore": "復舊",

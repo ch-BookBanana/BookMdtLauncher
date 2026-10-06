@@ -68,7 +68,7 @@ try:
     from src.utils.logger import Logger
     from src.utils.path_utils import getPath
     from src.utils.pages._init import open_overlay
-    from src.utils.settings import Settings
+    from src.utils.settings import Settings, ask_close
     from src.utils.mdtManager import mdtManager
     from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
     from src.utils.QThTimer import QThTimer
@@ -204,6 +204,10 @@ try:
             # 必须赶在 load_all() 之前注册 —— 加载期就有插件可能失败并发这条。
             self.signals.register("plugins_changed", Signal())
             self.signals.on("plugins_changed", self._on_plugins_changed)
+            # 关闭询问浮层的答复是**命令**：藏到托盘 / 退出。浮层只发请求，
+            # 真正动手的是窗口自己 —— 浮层不该知道窗口能被藏起来。
+            self.signals.register("closeRequested", Signal(str))
+            self.signals.on("closeRequested", self._on_close_requested)
 
             # 加载插件。位置有讲究：必须早于建窗口 —— 插件在 setup() 里往扩展点
             # 登记，而界面要到构建时才去读那些条目；同时又必须晚于 events.bind()
@@ -388,6 +392,25 @@ try:
                 self.logger.error("重载插件失败：\n" + traceback.format_exc(limit=6),
                                   name="Plugin")
                 return []
+
+        def _on_close_requested(self, mode):
+            """关闭询问浮层的答复：藏到托盘 / 退出启动器。
+
+            设置存不存由浮层自己决定（它那儿有「保存到设置」那个勾），
+            这里只管动手 —— 一处执行，两条路（直接点 × 与浮层选择）行为一致。
+            """
+            if mode == "tray":
+                self.window.hide()
+            else:
+                self.window.close()
+
+        def ask_close(self):
+            """弹一层「隐藏到托盘 / 退出启动器」。
+
+            控件由设置层给（它在那儿，因为要问的就是它的 closeByTray），
+            挂到哪一层归窗口管：这里只发请求，窗口自己知道浮层装在哪。
+            """
+            self.signals.emit("overlayRequested", ask_close(self.window))
 
         def _on_plugins_changed(self):
             """插件集合变了：把它盖过的三样收回来。
@@ -1105,7 +1128,16 @@ try:
                             self.root.window.showMaximized()
 
                     def close_(self):
-                        if self.root.settings["closeByTray"]:
+                        """右上角那个 ×：藏到托盘、退出，或者先问一句。
+
+                        closeByTray 三态（见 settings.DEFAULT_SCHEMA）：
+                        True 直接藏、False 直接退、None（默认）弹一层问 ——
+                        问了才定下来的那种，是用户在浮层里勾了「保存到设置」。
+                        """
+                        mode = self.root.settings["closeByTray"]
+                        if mode is None:
+                            self.root.ask_close()
+                        elif mode:
                             self.root.window.hide()
                         else:
                             self.root.window.close()

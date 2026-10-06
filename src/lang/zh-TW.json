@@ -74,6 +74,11 @@
 
 
     "core.wid.top.close": "關閉",
+    "core.wid.closeAsk.title": "關閉啟動器",
+    "core.wid.closeAsk.tip": "要隱藏到系統匣，還是直接結束啟動器？勾選下面的「儲存到設定」，之後就不再詢問。",
+    "core.wid.closeAsk.tray": "隱藏到系統匣",
+    "core.wid.closeAsk.quit": "結束啟動器",
+    "core.wid.closeAsk.save": "儲存到設定",
     "core.wid.top.minimize": "最小化",
     "core.wid.top.maxmize": "最大化",
     "core.wid.top.restore": "還原",

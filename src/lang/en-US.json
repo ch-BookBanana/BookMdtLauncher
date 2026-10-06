@@ -74,6 +74,11 @@
 
 
     "core.wid.top.close": "Close",
+    "core.wid.closeAsk.title": "Close launcher",
+    "core.wid.closeAsk.tip": "Hide it to the tray, or quit the launcher? Tick “Save to settings” below to stop asking.",
+    "core.wid.closeAsk.tray": "Hide to tray",
+    "core.wid.closeAsk.quit": "Quit launcher",
+    "core.wid.closeAsk.save": "Save to settings",
     "core.wid.top.minimize": "Minimize",
     "core.wid.top.maxmize": "Maximize",
     "core.wid.top.restore": "Restore",

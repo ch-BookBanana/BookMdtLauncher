@@ -74,6 +74,11 @@
 
 
     "core.wid.top.close": "닫기",
+    "core.wid.closeAsk.title": "런처 닫기",
+    "core.wid.closeAsk.tip": "트레이로 숨길까요, 아니면 런처를 종료할까요? 아래의 “설정에 저장”을 체크하면 다시 묻지 않습니다.",
+    "core.wid.closeAsk.tray": "트레이로 숨기기",
+    "core.wid.closeAsk.quit": "런처 종료",
+    "core.wid.closeAsk.save": "설정에 저장",
     "core.wid.top.minimize": "최소화",
     "core.wid.top.maxmize": "최대화",
     "core.wid.top.restore": "복원",

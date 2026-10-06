@@ -74,6 +74,11 @@
 
 
     "core.wid.top.close": "閉じる",
+    "core.wid.closeAsk.title": "ランチャーを閉じる",
+    "core.wid.closeAsk.tip": "トレイに隠しますか、それとも終了しますか？下の「設定に保存」にチェックすると次回から確認しません。",
+    "core.wid.closeAsk.tray": "トレイに隠す",
+    "core.wid.closeAsk.quit": "ランチャーを終了",
+    "core.wid.closeAsk.save": "設定に保存",
     "core.wid.top.minimize": "最小化",
     "core.wid.top.maxmize": "最大化",
     "core.wid.top.restore": "元に戻す",

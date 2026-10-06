@@ -36,6 +36,20 @@ dict**，那些写法一行都不用改。子对象也一样：`_Section` 继承
 ----------
 基层不往上依赖：日志与翻译都是**注入**进来的（logger / tr），拿不到就退化成
 标准库打印与原文。所以这个模块可以直接单测，不用起 Qt、不用起宿主。
+
+两级：基础 + 浮层
+----------------
+文件按两级摆：
+
+    第一级（文件上面那一大段）  L0 基础：schema、读文件、合并、通知、写盘，
+                                一行 Qt 都不碰 —— 上面那句「不用起 Qt」说的是它；
+    第二级（文件末尾那一段）    要 Qt 的东西：当前只有一个关闭询问浮层
+                                （点窗口 × 时问「藏到托盘还是退出」）。
+
+浮层放这儿是因为它没有复用价值：就这一处用，不值得占一个 core.overlays 条目
+（那等于给别人开一个能替换 / 扩展它的口子），而它问的恰好是第一级那个字段
+closeByTray。QWidget 是类体上的基类，没法「用到才拉 Qt」，所以第二级的
+Qt import 就摆在第二级开头 —— 界面上仍然是「先基础、后浮层」。
 """
 
 import copy
@@ -60,7 +74,9 @@ DEFAULT_SCHEMA = {
     "language": None,
     "theme": 0,
     "maxLogNum": 50,
-    "closeByTray": True,
+    # 点右上角 × 时怎么办：True = 隐藏到托盘，False = 退出启动器，
+    # None（默认）= 每次弹一层问，用户勾「保存到设置」才定下来
+    "closeByTray": None,
     "defaultGame": None,
     "javaPath": None,
     "github": {
@@ -440,3 +456,220 @@ class Settings(MutableMapping):
                 os.remove(os.path.join(folder, name))
         except Exception:
             pass
+
+
+# ═══════════════════════ 第二级：浮层（要 Qt）═══════════════════════
+#
+# 见模块说明「两级：基础 + 浮层」。上面是第一级（一行 Qt 都不碰），
+# 从这里往下是第二级。QWidget 是类体上的基类，躲不掉 —— 所以 Qt 的 import
+# 就摆在这儿，而不装成「用到才拉」。
+
+from PySide6.QtCore import Qt                                     # noqa: E402
+from PySide6.QtGui import QColor, QIcon                            # noqa: E402
+from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel,   # noqa: E402
+                               QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+
+from .bus import bus                                               # noqa: E402
+from .events import events                                         # noqa: E402
+from .options.items import Bool                                    # noqa: E402
+from .options.scrolls import Scroll                                # noqa: E402
+from .resources import TBT_CLOSE                                   # noqa: E402
+from .utils import change_color                                    # noqa: E402
+
+# 关闭询问的两个选项：值 → 文案键。第一个是默认勾上的那个。
+# closeByTray 是三态（见 DEFAULT_SCHEMA）：True = 藏到托盘，False = 退出，
+# None = 每次问 —— 这一层就是为 None 准备的，谁来弹见 main.py 的 close_()。
+CLOSE_CHOICES = (("tray", "core.wid.closeAsk.tray"),
+                 ("quit", "core.wid.closeAsk.quit"))
+
+
+class AskClose(QWidget):
+    """关闭询问浮层：点窗口右上角那个 × 时问一句「藏到托盘，还是退出」。
+
+    样式照 gameManager 的「更改分组」弹层：同一套面板底板（标题栏 + 分割线 +
+    内容区）、同一个滚动列表（Bool 塞进一个 QButtonGroup 当互斥单选）+ 底部
+    确定。滚动区**下面**多一项「保存到设置」：勾上才把这次的选择写回 settings
+    （写完立刻落盘），不勾就只做这一次 —— 下次点 × 还会问。
+
+    遮罩与居中由 FloatingOverlay 提供，这里只画面板。答复走事件
+    （closeRequested）：藏还是退由窗口自己动手，浮层不该知道窗口能被藏起来。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setProperty("wid_", "_window.closeAsk")
+
+        self.l = QHBoxLayout(self)
+        self.l.setContentsMargins(0, 0, 0, 0)
+        self.l.setSpacing(0)
+        self.l.setAlignment(Qt.AlignCenter)
+
+        self.panel = self.Panel(self)
+        self.l.addWidget(self.panel, 0)
+        self.hide()
+
+    def showEvent(self, event):
+        # 显示时提层，盖过 floatingStack 等覆盖控件
+        super().showEvent(event)
+        self.raise_()
+
+    def close_(self):
+        """关闭自身：从叠加浮层出叠（每次打开都是现建的，不留旧实例）。"""
+        events.emit("overlayClosed", self, True)
+
+    class Panel(QWidget):
+        """面板：标题栏（标题 + ×）+ 分割线 + 内容区。"""
+
+        WIDTH = 320
+        # 提示 + 两项互斥选择（各 40 高）+ 保存到设置（40）+ 底部按钮
+        HEIGHT = 260
+        TITLE_KEY = "core.wid.closeAsk.title"
+        TIP_KEY = "core.wid.closeAsk.tip"
+        SAVE_KEY = "core.wid.closeAsk.save"
+
+        def __init__(self, parent=None):
+            super().__init__()
+            self.parent = parent
+            self._choice = CLOSE_CHOICES[0][0]      # 默认「隐藏到托盘」
+            self._items = {}
+            self.init_wid()
+            self.langing()
+            self.lighting(bool(events.settings.get("theme")))
+            # 接总线必须在控件建好之后：bus.bind 会立刻补一次 lighting，
+            # 那时 btn_close 还不存在，直接炸 AttributeError。
+            bus.bind(self)
+
+        def init_wid(self):
+            self.setFixedSize(self.WIDTH, self.HEIGHT)
+            self.layout = QVBoxLayout(self)
+            self.layout.setSpacing(0)
+            self.layout.setContentsMargins(0, 0, 0, 0)
+            self.layout.setAlignment(Qt.AlignTop)
+
+            self.top = QWidget()
+            self.top.setFixedHeight(30)
+            self.layout.addWidget(self.top, 0)
+            self.top_l = QHBoxLayout(self.top)
+            self.top_l.setContentsMargins(15, 0, 3, 0)
+            self.top_l.setSpacing(0)
+
+            self.title = QLabel()
+            self.title.setProperty("wid", "title")
+            self.title.setStyleSheet("font-size: 16px;")
+            self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            self.top_l.addWidget(self.title, 1)
+
+            self.btn_close = QPushButton()
+            self.btn_close.setFixedSize(24, 24)
+            self.btn_close.setProperty("wid", "tbtn")
+            # × = 这次什么都不做（既没藏也没退），浮层自己收起来
+            self.btn_close.clicked.connect(self.parent.close_)
+            self.top_l.addWidget(self.btn_close, 0)
+
+            self.line = QWidget()
+            self.line.setFixedHeight(1)
+            self.line.setProperty("wid", "line")
+            self.layout.addWidget(self.line, 0)
+
+            self.body = QWidget()
+            self.layout.addWidget(self.body, 1)
+            self.body_l = QVBoxLayout(self.body)
+            self.body_l.setContentsMargins(15, 0, 15, 15)
+            self.body_l.setSpacing(0)
+            self.body_l.setAlignment(Qt.AlignTop)
+
+            self.body_l.addSpacing(10)
+            self.tip = QLabel()
+            self.tip.setProperty("wid", "text")
+            self.tip.setStyleSheet("font-size: 14px;")
+            self.tip.setWordWrap(True)
+            self.tip.setFixedHeight(34)
+            self.body_l.addWidget(self.tip, 0)
+            self.body_l.addSpacing(10)
+
+            # 选项底：和分组弹层一样用 color2 —— 滚动区自己只画 viewport，
+            # 颜色得由装在它里面的容器给，滚起来才是一整块。
+            self.box = QWidget()
+            self.box.setProperty("wid", "color2")
+            self.box.setAttribute(Qt.WA_StyledBackground, True)
+            self.scroll = Scroll(self, content=self.box, margins=(10, 5, 10, 5))
+            self.body_l.addWidget(self.scroll, 1)
+
+            # 滚动区**下面**：勾上才把这次的选择写回设置
+            self.save = Bool(self, self.SAVE_KEY)
+            self.save.setStyleSheet("background: transparent;")
+            self.body_l.addWidget(self.save, 0)
+            self.body_l.addSpacing(10)
+
+            self.bottom = QWidget()
+            self.bottom.setStyleSheet("background: transparent;")
+            self.body_l.addWidget(self.bottom, 0)
+            self.bottom_l = QHBoxLayout(self.bottom)
+            self.bottom_l.setContentsMargins(0, 0, 0, 0)
+            self.bottom_l.setSpacing(8)
+            self.bottom_l.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+            self.btn_ok = QPushButton()
+            self.btn_ok.setProperty("wid", "btn")
+            self.btn_ok.setFixedSize(80, 30)
+            self.btn_ok.clicked.connect(self._on_ok)
+            self.bottom_l.addWidget(self.btn_ok, 0)
+
+            # 互斥靠这一个组：两项只管往里加按钮，选中态由 Qt 自己管
+            self.choices = QButtonGroup(self)
+            self.choices.setExclusive(True)
+            self._build()
+
+        def _build(self):
+            """两项互斥单选，勾上默认那个（隐藏到托盘）。"""
+            for value, key in CLOSE_CHOICES:
+                item = Bool(self.scroll, key)
+                item.setStyleSheet("background: transparent;")
+                self.choices.addButton(item.btn)
+                # 只认被勾上的那个；老项被组里自动取消时也会回调，忽略掉
+                item.btn.toggled.connect(
+                    lambda checked, value=value: self._pick(value) if checked else None)
+                self.scroll.add(item)
+                self._items[value] = item
+            self._items[self._choice].btn.setChecked(True)
+
+        def _pick(self, value):
+            self._choice = value
+
+        def langing(self):
+            # 两项的文案由 Bool 自己管（它自己的 langing 会在切语言时重设）
+            self.title.setText(events.lang.get(self.TITLE_KEY))
+            self.tip.setText(events.lang.get(self.TIP_KEY))
+            self.btn_ok.setText(events.lang.get("core.text.yes"))
+            self.btn_close.setToolTip(events.lang.get("core.wid.top.close"))
+
+        def lighting(self, light):
+            # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
+            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+            icon = change_color(TBT_CLOSE, color)
+            self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
+
+        def _on_ok(self):
+            """照选择动手，顺手把「以后也这么做」写进设置（如果勾了）。
+
+            勾了才写：写的就是本模块那个 closeByTray（True = 藏到托盘，
+            False = 退出），写完立刻落盘 —— 这次选择很可能紧跟着就是退出
+            启动器，等宿主那套防抖存盘（500ms）是等不到的。
+            """
+            want_tray = self._choice == "tray"
+            if self.save.btn.isChecked():
+                events.settings["closeByTray"] = want_tray
+                try:
+                    events.saveSettings()
+                except Exception:
+                    # 存不下也不拦着用户关窗：退出前宿主还会整体存一次
+                    pass
+            events.emit("closeRequested", "tray" if want_tray else "quit")
+            self.parent.close_()
+
+
+def ask_close(parent=None):
+    """建一个关闭询问浮层并返回 —— 挂到哪一层由调用方发 overlayRequested。"""
+    return AskClose(parent)
