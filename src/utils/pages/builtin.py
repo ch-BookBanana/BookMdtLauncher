@@ -160,3 +160,17 @@ _download_sources.register()       # core.download.sources（三个下载源）
 gameManager.register()             # core.overlays + 管理浮层的功能页与区块
 _register_close_ask()              # core.overlays：关闭询问（叠加层）
 
+
+def install():
+    """声明契约 + 登记内置条目 —— 模块级那两段干的就是这事，import 本模块即完成。
+
+    留这个函数是**为了让它别被当成无用 import 删掉**：main.py 那边改成显式
+    调 `builtin.install()`（调用是「用」，纯副作用的 import 不是）。之前被
+    「清理未引用 import」的工具删过一次，后果是启动时「已声明：（尚未声明任何
+    扩展点）」，托盘一读 core.tray.menu 就炸。
+
+    幂等性：契约声明幂等，条目登记不是 —— 所以它和 import 一样，全进程只该走
+    一次（宿主启动时那次）。
+    """
+    return registry
+

@@ -22,20 +22,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 init = {
-    "version": "26-T1002",
-    "BuildCode": "10000.03"
+    "version": "26-T1006",
+    "BuildCode": "10000.04"
 }
 
 from PySide6.QtCore import Qt, QObject, QEvent, QTimer, QSize, QByteArray, Signal
 from PySide6.QtGui import (
-    QColor, QPixmap, QPainter, QIcon, QFont, QFontMetrics, QPainterPath, QCursor, QAction
+    QColor, QPixmap, QIcon, QFont, QCursor, QAction
 )
 from PySide6.QtWidgets import (
-    QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QLineEdit, QPushButton, QLabel,
-    QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit, QProgressBar
+    QWidget, QScrollBar, QApplication, QHBoxLayout, QVBoxLayout, QStackedWidget, QPushButton, QLabel,
+    QButtonGroup,QSystemTrayIcon, QMenu, QDialog, QTextEdit
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-import sys, os, json, copy, winreg, logging, locale, time, shutil, traceback, webbrowser
+import sys, os, winreg, logging, locale, shutil, traceback, webbrowser
 from datetime import datetime
 import ctypes
 import ctypes.wintypes
@@ -77,23 +77,20 @@ try:
     from src.utils.javaManager import javaManager
     from src.utils import javaDownload
     from src.utils.QDownloader import QDownloader, shutdown_all as _qd_shutdown_all
-    from src.utils.utils import _is_mdt_download, change_color, t
-    from src.utils.options.scrolls import Scroll
+    from src.utils.utils import  change_color, t
     from src.utils.bus import bus
     from src.utils.events import events
-    from src.utils.resources import (ACT_DL_LIST, ACT_TIPS, BRAND_GITHUB, ICON_APP_DARK,
-                                     ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,
-                                     TBT_MINIMIZE, app_icon)
+    from src.utils.resources import (ACT_DL_LIST, BRAND_GITHUB, ICON_APP_DARK,
+        ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,TBT_MINIMIZE,
+        app_icon)
     from src.utils.on_start import startup
     from src.utils.on_start.java import attach as _attach_java_ui
     from src.utils.registry import Box, registry
     from src.utils import pluginLoader
     from src.utils.pages.fOverlay._init import FloatingOverlay
     from src.utils.pages.fStack._init import FloatingStack
-    # import 内置页面包即完成登记：各页面模块在自己末尾往 core.pages 登记条目
-    # （契约声明与那些 import 都收在 pages/builtin.py 里）。main.py 因此不必
-    # 认识任何一个页面类 —— 加页面只改那个包，不动这里。
-    from src.utils.pages import builtin as _builtin_pages    # noqa: F401
+    from src.utils.pages import builtin as _builtin_pages
+    _builtin_pages.install()    # 契约声明 + 内置条目登记都在这儿，删了启动就崩
 
 
 
@@ -109,25 +106,10 @@ try:
                     return super().eventFilter(obj, event)
             self._scroll_bar_filter = _ScrollBarFilter()
             self.app.installEventFilter(self._scroll_bar_filter)
-
-            # 只建 BML 这个根。它下面的目录各有归属方，各自建自己的：
-            #   BML/logs        → Logger.__init__（它要用的时候自己 makedirs）
-            #   BML/badSettings → Settings 的损坏备份（真出损坏才需要，见 utils/settings.py）
-            #   BML/.Mindustrys → mdtManager.ensure_dirs()
-            #   BML/plugins     → pluginLoader.ensure_dirs()
-            # 原先这里把它们连路径一起抄了一遍 —— 而「插件装在哪」是
-            # pluginLoader.PLUGIN_DIR 的事。抄错的代价是静默的：目录没建出来，
-            # discover 只是返回空表，插件全不加载、没有报错也没有日志。
             os.makedirs(getPath("BML"), exist_ok=True)
             mdtManager.ensure_dirs()
             pluginLoader.ensure_dirs()
-            # 事件总线：模块级单例，宿主与插件共用（见 src/utils/events.py）。
-            # 原先它是 Main 里的一个嵌套类、挂在 self.signals 上，插件想发事件
-            # 就得先拿到 Main —— 那等于把这一堆隐式属性一起递出去。
             self.signals = events
-            # 宿主工具挂到全局单例上：组件与插件从 events.logger / .settings /
-            # .lang / .shell 取，不必攥着 Main。property 转发，宿主换掉
-            # self.settings 时这里跟着走。
             events.bind(self)
             self.winreg = self.Winreg(self, self)
             self.logger = Logger()
@@ -137,31 +119,16 @@ try:
                             f"\n-BuildVersion: {init['BuildCode']}"
                             f"\n-logLevel: {logging.getLevelName(self.logger.level)}"
                             "\n-----------------------------------------")
-            # ── L0 基层：设置 ──
-            # schema（键与默认值）在 src/utils/settings.py 的 DEFAULT_SCHEMA 里，
-            # 原来它是这里的一段字面量。那个类不依赖宿主：日志与翻译都是注入的，
-            # 所以它能单独测（scripts/test_settings.py）。
             self.settings = Settings(logger=self.logger)
-            # 日志要读 maxLogNum，但它建得比设置早 —— 这边建完回填给它
             self.logger.set_settings(self.settings)
-            # 设置改动的存盘要落在**主线程**：设置会被工作线程写（rate 同步、
-            # 下载收尾…），而 QTimer 不能在别的线程里 start。信号跨线程是排队
-            # 投递的，所以写入方 emit，主线程收到再起防抖计时器。
             self._settings_dirty = self._SettingsSaveTrigger()
             self._settings_dirty.fired.connect(self._schedule_settings_save)
             app.aboutToQuit.connect(self.saveSettings)
             self.loadSettings()
-
-            # L1：翻译。插件覆盖项走注入（plugin_langs），于是这里不必 import
-            # 插件层，也就不存在「次基层 ← 插件层」那条反依赖。
-            # revision 同理注入：插件集合变了没有，只有插件层自己知道，而
-            # 「语言名没变但插件覆盖项变了」正是必须重读的那种情况。
             self.langer = Langer(settings=self.settings, logger=self.logger,
                                  winreg=self.winreg, overrides=pluginLoader.plugin_langs,
                                  revision=pluginLoader.langs_revision)
-            # 翻译也是注入的（基层不 import 上层）
             self.settings.set_tr(self.langer.get)
-            # 从这里起，改设置自动排一次防抖存盘 —— 各处不必再记着调 saveSettings
             self.settings.watch(self._on_settings_changed)
             javaManager.settings = self.settings
             javaDownload.set_tr_func(self.langer.get)
@@ -188,51 +155,27 @@ try:
 
 
             self.signals.register("tokenVerified", Signal(bool, str, object))
-            # 浮层 / 栈走信号：页面不直接点 root.window.floatingOverlay|floatingStack，
-            # 而是发一个请求，挂到哪一层由 Window 自己决定（页面因此不必知道窗口结构）
             self.signals.register("overlayRequested", Signal(object))
             self.signals.register("overlayClosed", Signal(object, bool))
             self.signals.register("stackRequested", Signal(object))
             self.signals.register("stackClosed", Signal(object, bool))
-            # Java 任务状态：下载列表的轮询 → 启动页的进度文字（只改字不切页）
             self.signals.register("java_status", Signal(str, object))
-            # 插件重载是**命令**（有动作、不需要回值）：走事件，谁都能请求。
-            # 不往托盘塞入口 —— 托盘是窗口自己的零件，它该管的是窗口。
             self.signals.register("reload_plugins", Signal())
             self.signals.on("reload_plugins", lambda *_: self.reload_plugins())
-            # 插件集合变了（卸载 / 加载失败回滚）：宿主据此把它盖过的东西收回来。
-            # 必须赶在 load_all() 之前注册 —— 加载期就有插件可能失败并发这条。
             self.signals.register("plugins_changed", Signal())
             self.signals.on("plugins_changed", self._on_plugins_changed)
-            # 关闭询问浮层的答复是**命令**：藏到托盘 / 退出。浮层只发请求，
-            # 真正动手的是窗口自己 —— 浮层不该知道窗口能被藏起来。
             self.signals.register("closeRequested", Signal(str))
             self.signals.on("closeRequested", self._on_close_requested)
-
-            # 加载插件。位置有讲究：必须早于建窗口 —— 插件在 setup() 里往扩展点
-            # 登记，而界面要到构建时才去读那些条目；同时又必须晚于 events.bind()
-            # 与 Langer，插件才用得上 logger / lang。
-            # load_all 逐个隔离：坏插件只记进它自己的 error，绝不往外抛
-            # （外面整个包在一个大 try 里，抛出去就是「启动失败」弹窗）。
             self.plugins = pluginLoader.load_all()
-            # 插件语言包要等插件加载完才进得来（Langer 建得比插件早）。这一步
-            # 通常已经是多余的：load_all 末尾会发 plugins_changed，_on_plugins_changed
-            # 那条路已经按当前语言重读过一次了。留着当保险（那条路万一没走成，
-            # 语言表也不至于停在「没有插件覆盖」的版本）；重复调用 Langer 自己会
-            # 挡掉 —— 语言与插件语言包两样都没变就不会再读一遍、再广播一遍。
             self.langer.load(self.langer.current_lang)
 
             self.tray = self.Tray(self, self)
             self.window = self.Window(self, self)
 
-            # 后台预加载所有游戏数据到缓存，加速后续切换
             QThTimer.task(100, lambda event: self.mdtManager.preload_all())
-            # 图标周期检查与 QPixmaps 引用计数缓存已由 mdtManager 自管理（icon_timer）
 
-            # 退出统一清理：先停下载/后台线程（避免退出挂起与崩溃弹窗）
             app.aboutToQuit.connect(self._cleanup_on_quit)
 
-            # Java 下载流程的 UI 回调/辅助函数由 src/utils/on_start/java.py 挂载（保持 self._java_* 调用点不变）
             _attach_java_ui(self)
 
             startup.register(self)
