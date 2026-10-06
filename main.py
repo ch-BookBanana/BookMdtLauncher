@@ -154,8 +154,11 @@ try:
 
             # L1：翻译。插件覆盖项走注入（plugin_langs），于是这里不必 import
             # 插件层，也就不存在「次基层 ← 插件层」那条反依赖。
+            # revision 同理注入：插件集合变了没有，只有插件层自己知道，而
+            # 「语言名没变但插件覆盖项变了」正是必须重读的那种情况。
             self.langer = Langer(settings=self.settings, logger=self.logger,
-                                 winreg=self.winreg, overrides=pluginLoader.plugin_langs)
+                                 winreg=self.winreg, overrides=pluginLoader.plugin_langs,
+                                 revision=pluginLoader.langs_revision)
             # 翻译也是注入的（基层不 import 上层）
             self.settings.set_tr(self.langer.get)
             # 从这里起，改设置自动排一次防抖存盘 —— 各处不必再记着调 saveSettings
@@ -208,8 +211,11 @@ try:
             # load_all 逐个隔离：坏插件只记进它自己的 error，绝不往外抛
             # （外面整个包在一个大 try 里，抛出去就是「启动失败」弹窗）。
             self.plugins = pluginLoader.load_all()
-            # 插件语言包要等插件加载完才进得来（Langer 建得比插件早），
-            # 所以这里按当前语言重载一次，把插件的覆盖项并进去。
+            # 插件语言包要等插件加载完才进得来（Langer 建得比插件早）。这一步
+            # 通常已经是多余的：load_all 末尾会发 plugins_changed，_on_plugins_changed
+            # 那条路已经按当前语言重读过一次了。留着当保险（那条路万一没走成，
+            # 语言表也不至于停在「没有插件覆盖」的版本）；重复调用 Langer 自己会
+            # 挡掉 —— 语言与插件语言包两样都没变就不会再读一遍、再广播一遍。
             self.langer.load(self.langer.current_lang)
 
             self.tray = self.Tray(self, self)

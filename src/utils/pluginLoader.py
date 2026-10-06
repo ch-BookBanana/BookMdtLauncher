@@ -91,7 +91,8 @@ from .path_utils import getPath
 
 __all__ = ["PluginInfo", "PluginLoadError", "discover", "load_all", "load_one",
            "unload", "loaded", "state", "enable", "disable", "disabled_ids",
-           "ensure_dirs", "plugin_langs", "PLUGIN_DIR", "PLUGIN_CACHE", "MANIFEST"]
+           "langs_revision", "ensure_dirs", "plugin_langs", "PLUGIN_DIR",
+           "PLUGIN_CACHE", "MANIFEST"]
 
 PLUGIN_DIR = "BML/plugins"
 PLUGIN_CACHE = "BML/.tmp/plugins"     # zip 插件的解压落点（跟其他临时文件一个待遇）
@@ -414,6 +415,34 @@ def plugin_langs(lang):
 # 三张表都存 PluginInfo；失败的不进 loaded，失败原因在 info.error 上。
 _STATE = {"pending": [], "loading": [], "loaded": []}
 
+# 一批加载的深度：>0 时 _notify_changed 只记账不发（load_all 自己会在末尾收口）。
+# 一批中间可能失败、回滚好几回，每回都让宿主重读语言、重建样式表纯属白干。
+_BATCH = 0
+
+# 插件语言包相关状态的版本号：已加载集合一变就 +1。Langer 拿它当「要不要重读
+# 语言表」的输入之一 —— 语言没变、插件集合也没变，就不该重读、更不该再广播。
+_LANGS_REV = 0
+
+# 上次通知时「已加载」长什么样：没它就得无条件 +1，于是一个插件都没有的启动
+# 也会被当成「语言包变了」，白读一遍语言。
+_LAST_NOTIFIED_IDS = ()
+
+
+def langs_revision():
+    """插件语言包相关状态的版本号（每次插件集合变化 +1）。"""
+    return _LANGS_REV
+
+
+def _batch_begin():
+    global _BATCH
+    _BATCH += 1
+
+
+def _batch_end():
+    global _BATCH
+    if _BATCH:
+        _BATCH -= 1
+
 
 def ensure_dirs(base=None):
     """建好插件目录。
@@ -651,7 +680,22 @@ def _notify_changed():
 
     宿主没 bind、或没注册这个名字时静默跳过 —— emit 对未注册的名字本来就静默，
     加载器不额外假设宿主长什么样。
+
+    一批加载（_batch_begin/_batch_end 之间）里只记账不发：一批中间可能失败、
+    回滚好几回，每回都让宿主把语言表重读一遍、样式表重建一遍纯属白干；
+    收口在 load_all 末尾那一次。
+
+    版本号只在「已加载集合真的变了」时 +1：Langer 拿它判断「插件语言包这份输入
+    变没变」—— 语言没变、插件集合也没变，就不该把同一份表再读一遍、再广播一遍。
+    一个插件都没装的启动因此只读一次语言（以前会白读第二次）。
     """
+    global _LANGS_REV, _LAST_NOTIFIED_IDS
+    ids = tuple(i.id for i in _STATE["loaded"])
+    if ids != _LAST_NOTIFIED_IDS:
+        _LANGS_REV += 1
+        _LAST_NOTIFIED_IDS = ids
+    if _BATCH:
+        return
     try:
         from .events import events
         events.emit("plugins_changed")
@@ -761,35 +805,40 @@ def load_all(base=None, *, retry_disabled=False):
     """
     from .events import events
 
-    # 先把自己上一轮加载的卸掉 —— load_all 于是可以反复调（「重载插件」就是这么
-    # 用的）。不卸的话第二次会撞「已存在条目」，而且三张表会和正表对不上。
-    for old in list(_STATE["loaded"]):
-        unload(old)
+    _batch_begin()
+    try:
+        # 先把自己上一轮加载的卸掉 —— load_all 于是可以反复调（「重载插件」就是
+        # 这么用的）。不卸的话第二次会撞「已存在条目」，而且三张表会和正表对不上。
+        for old in list(_STATE["loaded"]):
+            unload(old)
 
-    _expose_api()
-    infos = discover(base)
-    by_id = {i.id: i for i in infos}
-    if retry_disabled:
-        # 用户说「我修好了」：先把名单清掉再试；再失败会重新标上
-        _write_disabled([])
-        off = set()
-    else:
-        off = set(disabled_ids())
+        _expose_api()
+        infos = discover(base)
+        by_id = {i.id: i for i in infos}
+        if retry_disabled:
+            # 用户说「我修好了」：先把名单清掉再试；再失败会重新标上
+            _write_disabled([])
+            off = set()
+        else:
+            off = set(disabled_ids())
 
-    # 未加载表：全部已发现的；加载中/已加载清空重来
-    _STATE["pending"] = list(infos)
-    _STATE["loading"] = []
-    _STATE["loaded"] = []
+        # 未加载表：全部已发现的；加载中/已加载清空重来
+        _STATE["pending"] = list(infos)
+        _STATE["loading"] = []
+        _STATE["loaded"] = []
 
-    for info in list(_STATE["pending"]):
-        if info.id in off:
-            info.disabled = True
-            info.reported = True        # 别走到「开始加载」，它这轮就没被加载
-            _drop_pending(info)
-            events.logger.info(f"[{info.id}]已停用，跳过（上次加载失败已标注；"
-                               f"修好后用 enable() 或把手动触发一次重载）", name="Plugin")
-            continue
-        _load_tree(info, by_id)
+        for info in list(_STATE["pending"]):
+            if info.id in off:
+                info.disabled = True
+                info.reported = True    # 别走到「开始加载」，它这轮就没被加载
+                _drop_pending(info)
+                events.logger.info(f"[{info.id}]已停用，跳过（上次加载失败已标注；"
+                                   f"修好后用 enable() 或把手动触发一次重载）",
+                                   name="Plugin")
+                continue
+            _load_tree(info, by_id)
+    finally:
+        _batch_end()
 
     # 加载完也通知一声：谁按注册表建界面（页面 / 托盘 / 样式 / 语言）都得在
     # **集合稳定之后**收口一次。只在卸载/失败时发是不够的 —— 重载这条路最后

@@ -39,15 +39,20 @@ from .path_utils import getPath
 
 class Langer:
     def __init__(self, *, settings=None, logger=None, winreg=None,
-                 overrides=None, default_lang="en-US"):
+                 overrides=None, revision=None, default_lang="en-US"):
         # 全部注入：次基层也不往上依赖，更不 import 插件层。
         # overrides 是「某个语言有哪些插件覆盖项」的来源（宿主把
         # pluginLoader.plugin_langs 递进来），缺省就没有覆盖。
+        # revision 是插件语言包那侧的版本号来源（宿主递 pluginLoader.langs_revision）：
+        # 光看语言名分不出「插件集合变了没有」，而插件语言包是会盖内置键的。
         self._settings = settings
         self._logger = logger
         self._winreg = winreg
         self._overrides = overrides
+        self._revision = revision
         self.default_lang = default_lang
+        # 已经装进 self.langs 的那份输入：语言 + 插件语言包版本（见 load）
+        self._loaded = None
 
         self.current_lang = self.resolve_startup_language()
         self.load(self.current_lang)
@@ -100,8 +105,33 @@ class Langer:
             self._settings["language"] = final_lang
         return final_lang
 
+    def _signature(self, lang):
+        """这次加载的输入指纹：语言 + 插件语言包版本号。"""
+        rev = None
+        if self._revision is not None:
+            try:
+                rev = self._revision()
+            except Exception:
+                rev = None
+        return (lang, rev)
+
     def load(self, lang):
-        """加载语言文件并自动刷新所有支持多语言的控件"""
+        """加载语言文件并自动刷新所有支持多语言的控件。
+
+        **同一份输入不重复干活**：输入指纹是 (语言, 插件语言包版本) 两样。一次
+        启动里「插件进来之后」这条路会被走到两次 —— load_all 末尾的 plugins_changed
+        一次、启动流程的保险一次 —— 不比对一下就是同一份表读两遍，而 load() 末尾
+        那次广播的代价是所有控件各刷一遍（广播也是排进事件循环的，早晚都跑）。
+        插件集合真变了版本号会跟着变，那种时候照样重读 —— 这正是那条保险的用处。
+        """
+        sig = self._signature(lang)
+        if sig == self._loaded and getattr(self, "langs", None):
+            return
+        self._loaded = sig
+        # 记下当前语言：调用方常用 load(self.current_lang) 做「按现在这门语言重读」，
+        # 不更新的话，切到别的语言之后再重载就会被拽回启动时那门语言。
+        self.current_lang = lang
+
         lang_path = getPath(f"src/lang/{lang}.json")
         default_lang_path = getPath(f"src/lang/{self.default_lang}.json")
 
