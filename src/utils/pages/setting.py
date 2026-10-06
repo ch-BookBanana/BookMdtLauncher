@@ -123,7 +123,7 @@ class Setting(Page):
 
             def _init_wid(self):
                 self.layout = QVBoxLayout(self)
-                self.layout.setContentsMargins(0, 0, 0, 0)
+                self.layout.setContentsMargins(0, 10, 0, 10)
                 self.layout.setSpacing(0)
                 self.layout.setAlignment(Qt.AlignHCenter)
 

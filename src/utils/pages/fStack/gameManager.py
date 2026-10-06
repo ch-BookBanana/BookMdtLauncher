@@ -173,7 +173,9 @@ class GameSettings(Scroll):
     MAX_WIDTH = 600     # 内容列最大宽度，与设置页 Page 的 max-width 一致
 
     def __init__(self, game, parent=None):
-        super().__init__(parent, margins=(30, 30, 30, 30), spacing=0,
+        # 上下留 10：和设置页正文那条一致（那边是外层 layout 给的 0,10,0,10；
+        # 这一页整页就是滚动区，所以 10 落在 Scroll 自己的边距上）
+        super().__init__(parent, margins=(30, 10, 30, 10), spacing=0,
                          content_align=Qt.AlignHCenter)
         self.main.setMaximumWidth(self.MAX_WIDTH)
         self.parent = parent
