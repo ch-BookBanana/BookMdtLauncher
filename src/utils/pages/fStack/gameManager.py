@@ -25,7 +25,7 @@ GameManager 是纯容器：左栏功能菜单从 core.gameManager.pages 读，�
     └── …     将来加 Mods、存档之类
 
 加一页 = 写一个模块 + 在自己的 register() 里加一条 registry.add，本文件一行
-都不用动。容器入口也由本文件的 register() 交给 core.overlays。
+都不用动。容器入口也由本文件的 register() 交给 core.stacks（整页浮层栈）。
 """
 
 import os
@@ -47,6 +47,15 @@ from ...path_utils import getPath
 from ...registry import Box, registry
 from ...resources import FILE_FOLDER, TBT_CLOSE
 from ...utils import change_color, openFolder, t
+
+# 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
+_FIELDS = {
+    "core.gameSettings.folders": {'attr': 'folders', 'spacing': 10},
+    "core.gameSettings.java": {'attr': 'java', 'spacing': 20},
+}
+
+
+
 
 
 class GameManager(QWidget):
@@ -197,7 +206,8 @@ class GameSettings(Scroll):
         # 第二次构建会直接撞「已存在条目」。
         for e in registry.entries("core.gameSettings.sections"):
             wid = e.init(Box(parent=self, entry=e))
-            setattr(self, e.attr, self.add(wid, e.get("spacing", 0)))
+            f = _FIELDS.get(e.key, {})
+            setattr(self, f.get("attr", ""), self.add(wid, f.get("spacing", 0)))
 
         # 顶部信息填真实数据（图标/名称/分组/版本），并订阅实例事件：
         # 本页后续的管理项都以 self.game 为操作对象，改名时必须跟着换。
@@ -1007,9 +1017,9 @@ def register():
     不必 import 这个类（start.py 就是这么用的）。
     """
     # 管哪个实例走 Box 上下文：开浮层的人才知道（start.py 传当前显示那个）
-    registry.add("core.overlays", "core.gameManager",
+    registry.add("core.stacks", "core.gameManager",
                  init=lambda b: GameManager(b.game, b.parent),
-                 order=10, title="core.wid.pages.gameManager", layer="stack")
+                 order=10, title="core.wid.pages.gameManager")
 
     # 左栏那个「设置」功能页。它管的是**某个实例**，实例名从 GameManager
     # 现取（b.parent.game）—— 容器里改了名，这里跟着换，不用自己同步。
@@ -1019,8 +1029,6 @@ def register():
 
     # 设置页里的两个区块。本文件定义了它们，所以本文件交出去。
     registry.add("core.gameSettings.sections", "core.gameSettings.folders",
-                 init=lambda b: GameSettings.Folders(b.parent),
-                 attr="folders", order=10, spacing=10)
+                 init=lambda b: GameSettings.Folders(b.parent), order=10)
     registry.add("core.gameSettings.sections", "core.gameSettings.java",
-                 init=lambda b: GameSettings.Java(b.parent),
-                 attr="java", order=20, spacing=20)
+                 init=lambda b: GameSettings.Java(b.parent), order=20)

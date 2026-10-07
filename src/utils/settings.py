@@ -96,10 +96,10 @@ DEFAULT_SCHEMA = {
     },
     "javaPaths": [],
     "gameList": {"<:|default|:>": []},
-    # 插件设置：一格一个插件（com.example.hello: {...}）。
+    # 插件设置：一格一个插件（example_hello: {...}）。
     # 空 dict 是「开放映射」—— 键由插件自己定，宿主没法定 schema，
     # 见 _merge 里对空 dict 默认值的处理。
-    "plugins": {},
+    "pluginSettings": {},
     # 上次加载失败、已被标注停用的插件 id（下次启动不再加载它们）
     "disabledPlugins": []
 }
@@ -152,6 +152,13 @@ class _Section(dict):
     构造时就把下层的 dict 递归包成 _Section（**存进去**，不是每次读时包）：
     dict 子类没法做「视图」，若在 __getitem__ 里现包一份拷贝，写进去就丢了。
     这样 `settings["a"]["b"] = x` 走的是同一份存储，并且会通知到 `a.b`。
+
+    代价是「写进去的」与「赋值给变量拿到的」不是同一个对象：写
+    `d = settings["a"] = {}` 时，`d` 是那个原 dict，存进去的却是包过的副本，
+    之后往 `d` 上写不会生效。给一个不存在的层赋值后要接着用它，就**重新取**：
+
+        settings["a"] = {}
+        d = settings["a"]
     """
 
     def __init__(self, data=None, *, root=None, path=""):
@@ -449,12 +456,18 @@ class Settings(MutableMapping):
             return None
 
     def _prune_backups(self):
-        """只保留最近 keep_backups 份，避免目录堆积（文件名按时间戳排序即时间序）。"""
+        """只保留最近 keep_backups 份，避免目录堆积（文件名按时间戳排序即时间序）。
+
+        keep_backups = 0 时全删 —— `names[:-0]` 是空表（不是「一份不留」），
+        所以这里显式分开写。
+        """
         try:
             folder = getPath(self.backup_dir)
             names = sorted(n for n in os.listdir(folder)
                            if n.startswith("settings.") and n.endswith(".json"))
-            for name in names[:-self.keep_backups]:
+            keep = max(0, int(self.keep_backups))
+            doomed = names if keep == 0 else names[:-keep]
+            for name in doomed:
                 os.remove(os.path.join(folder, name))
         except Exception:
             pass
@@ -683,4 +696,4 @@ def register():
     """
     registry.set("core.overlays", "core.closeAsk",
                  init=lambda b: AskClose(b.parent),
-                 order=30, title="core.wid.closeAsk.title", layer="overlay")
+                 order=30, title="core.wid.closeAsk.title")

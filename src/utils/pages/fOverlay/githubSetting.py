@@ -736,4 +736,4 @@ def register():
     """
     registry.add("core.overlays", "core.githubSetting",
                  init=lambda b: GithubSetting(b.parent),
-                 order=20, title="GitHub", layer="overlay")
+                 order=20, title="GitHub")

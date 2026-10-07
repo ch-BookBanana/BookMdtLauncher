@@ -472,6 +472,6 @@ class DlListPage(QWidget):
 
 def register():
     """把下载列表交给 core.overlays。由 pages/builtin.py 调用一次。"""
-    registry.add("core.overlays", "core.dlList",
+    registry.add("core.stacks", "core.dlList",
                  init=lambda b: DlListPage(b.parent),
-                 order=30, title="core.wid.pages.downloadList.title", layer="stack")
+                 order=30, title="core.wid.pages.downloadList.title")

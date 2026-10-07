@@ -37,8 +37,23 @@ from ..registry import page, Box, registry, simple
 
 from ._init import *
 
+# 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
+_FIELDS = {
+    "core.setting.preferences": {'spacing': 30},
+    "core.setting.general": {'spacing': 30},
+    "core.setting.java": {'attr': 'sec_java', 'spacing': 30},
+    "core.setting.plugins": {'spacing': 30},
+    "core.setting.theme": {'attr': '_t1_theme'},
+    "core.setting.lang": {'attr': '_t1_lang'},
+    "core.setting.close": {'attr': '_t2_close'},
+    "core.setting.java.select": {'attr': '_t3_select'},
+}
+
+
 
 @page("core.setting")
+
+
 class Setting(Page):
     name = "core.wid.pages.setting"
     icon = BTN_SETTING
@@ -149,38 +164,142 @@ class Setting(Page):
         class Launcher(Page):
             def __init__(self, parent=None, text=None,icon=None):
                 super().__init__(parent,text,icon)
+                self._secs = {}          # 容器 key → (控件, 签名)，对账用
+                # javaManager 是全局单例：这条线只接一次，回调读的永远是当前那份
+                # 控件（重建之后照样对）。接在 init_wid 里的话，每次重建会多接一条。
+                javaManager.changed.connect(lambda javas: self._t3_select_fill(javas))
                 self.init_wid()
 
-            def init_wid(self):
-                # 分组容器从注册表取，每个容器再取自己那几项（条目用 section 指着
-                # 容器 key）：加一组 = 登记一条容器 + 条目写它的 key，本页一行都不用改。
-                # 空容器不摆 —— 插件的组在没装插件时就是空的，那块标题也就不出现。
-                for sec in registry.entries("core.setting.sections"):
-                    items = registry.entries("core.setting.items",
-                                             where={"section": sec.key})
-                    if not items:
-                        continue
-                    wid = sec.init(Box(parent=self, entry=sec, items=items))
-                    attr = sec.get("attr")     # 可选：页面要往这一组里补控件时取它
-                    if attr:
-                        setattr(self, attr, wid)
-                    self.add(wid, sec.get("spacing", 0))
+            # ── 分组：从注册表建，也能按注册表对账 ──
 
-                # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
+            def _plan(self):
+                """当前该摆哪几组、每组哪几项。
+
+                分组容器从注册表取，每个容器再取自己那几项（条目用 section 指着
+                容器 key）：加一组 = 登记一条容器 + 条目写它的 key，本页一行都不用改。
+                空容器不摆 —— 插件的组在没装插件时就是空的，那块标题也就不出现。
+                """
+                items_all = registry.entries("core.setting.items")
+                out = []
+                for sec in registry.entries("core.setting.sections"):
+                    items = [e for e in items_all if e.get("section") == sec.key]
+                    if items:
+                        out.append((sec, items))
+                return out
+
+            @staticmethod
+            def _sig(sec, items):
+                """一组的签名：容器的 init 工厂 + 每项的 key 与 init 工厂。
+
+                为什么要带上 init：插件重载之后键还是那些键，但工厂是新的一份
+                （闭包连着新实例）。签名就是用来认出「同一批键、换了实例」的。
+                """
+                return (sec.init, tuple((e.key, e.init) for e in items))
+
+            def init_wid(self):
+                for sec, items in self._plan():
+                    self._add_section(sec, items)
+                self._wire_preferences()
+                self._wire_general()
+                self._wire_java()
+                self.langing()
+                self.lighting(bool(events.settings["theme"]))
+                # 插件集合一变就对账：条目没了控件不能留着，重载后还得换成连着
+                # 新实例的那一份（见 sync_registry_parts）。
+                events.on("plugins_changed", self.sync_registry_parts)
+
+            def _add_section(self, sec, items, index=None):
+                f = _FIELDS.get(sec.key, {})
+                wid = sec.init(Box(parent=self, entry=sec, items=items, fields=_FIELDS))
+                if f.get("attr"):
+                    setattr(self, f["attr"], wid)
+                spacing = f.get("spacing", 0)
+                if index is None:
+                    self.add(wid, spacing)
+                else:
+                    if spacing:
+                        self.scroll.scroll_layout.insertSpacing(index, spacing)
+                        index += 1
+                    self.scroll.scroll_layout.insertWidget(index, wid)
+                    self.scroll.barShow()
+                self._secs[sec.key] = (wid, self._sig(sec, items))
+                return wid
+
+            def _insert_index(self, key, plan):
+                """新的一组该插在布局的哪一格：排在它后面、且已经有控件的那组之前。"""
+                keys = [s.key for s, _ in plan]
+                for later in keys[keys.index(key) + 1:]:
+                    wid = self._secs.get(later, (None,))[0]
+                    if wid is not None:
+                        return self.scroll.scroll_layout.indexOf(wid)
+                return self.scroll.scroll_layout.count()
+
+            def _drop_section(self, key):
+                wid, _ = self._secs.pop(key)
+                self.scroll.scroll_layout.removeWidget(wid)
+                wid.setParent(None)
+                wid.deleteLater()
+
+            def sync_registry_parts(self):
+                """插件集合变了：设置页按注册表对账（增 / 删 / 换实例）。
+
+                为什么要走这一步：设置项是**界面构建期**从注册表建出来的，条目被
+                摘掉时没有任何人会顺手删那个控件 —— 留着就是一个连着已卸载实例的
+                开关（拨一下写进一个已经不存在的插件的设置里）；插件重载之后，
+                台上那些控件也还连着旧实例。页面 / 语言 / 样式 / 托盘各自都订了
+                plugins_changed 对账，设置页跟着一起。
+
+                内置那几组签名永不改变（条目在本文件 register() 里一次性登记），
+                所以它们连同手工接的线原样留着 —— 重建只落在插件动过的那一组上，
+                重建之后由 _reconnect 把那一组的手工线按新控件重接。
+                """
+                plan = self._plan()
+                want = {sec.key: (sec, items) for sec, items in plan}
+                changed = []
+                for key in list(self._secs):
+                    now = want.get(key)
+                    if now is None or self._sig(*now) != self._secs[key][1]:
+                        self._drop_section(key)
+                        changed.append(key)
+                for sec, items in plan:
+                    if sec.key in self._secs:
+                        continue
+                    self._add_section(sec, items, self._insert_index(sec.key, plan))
+                    self._reconnect(sec.key)
+                    changed.append(sec.key)
+                if changed:
+                    self.langing()
+                    self.lighting(bool(events.settings["theme"]))
+                return changed
+
+            def _reconnect(self, key):
+                """某一组重建之后，把它那几条手工接的线按新控件重接一遍。
+
+                只接这一组：别的组没重建，重复连接会让同一个动作执行两遍。
+                """
+                {"core.setting.preferences": self._wire_preferences,
+                 "core.setting.general": self._wire_general,
+                 "core.setting.java": self._wire_java,
+                 }.get(key, lambda: None)()
+
+            # ── 行为绑定：控件已就位，这里只接信号与填初值 ──
+
+            def _wire_preferences(self):
                 self._t1_theme.btn.setChecked(events.settings["theme"])
                 self._t1_theme.push.connect(events.setTheme)
 
-                def _t1_lang_showEvent(self,combo):
+                def _t1_lang_showEvent(combo):
                     items = events.lang.get_langs_info()
                     combo.clear()
                     for lang_name, lang_info in items.items():
                         combo.addItem(f"{lang_info[0]}",lang_name)
                         combo.setItemData(combo.count()-1,lang_info[1], Qt.ToolTipRole)
                     combo.setCurrentIndex(combo.findData(events.settings["language"]))
-                _t1_lang_showEvent(self,self._t1_lang.combo)
-                self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang,self._t1_lang.combo))
+                _t1_lang_showEvent(self._t1_lang.combo)
+                self._t1_lang.combo.popupAboutToShow.connect(lambda: _t1_lang_showEvent(self._t1_lang.combo))
                 self._t1_lang.combo.activated.connect(lambda: events.lang.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == events.settings["language"] else None)
 
+            def _wire_general(self):
                 # 关闭窗口时：未设置（= 每次点 × 都弹一层问，见 main.py 的 close_()）
                 # / 隐藏到托盘 / 退出启动器。写的就是那个 closeByTray（浮层里那条
                 # 「保存到设置」写的是同一个键，两处看到的是同一件事）。
@@ -207,6 +326,7 @@ class Setting(Page):
                 self._t2_close.combo.activated.connect(
                     lambda: _t2_close_pick(self._t2_close.combo.currentData()))
 
+            def _wire_java(self):
                 # 添加 Java：挂在 Java 那一组的末尾（尺寸跟游戏管理那排按钮一致）。
                 # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写 ——
                 # 但挂进容器（sec_java），不再往页面上平铺。
@@ -222,70 +342,68 @@ class Setting(Page):
                 self._t3_add.setFixedSize(122,40)
                 self._t3_add.setIconSize(QSize(16,16))
                 self._t3_add_row_layout.addWidget(self._t3_add,0)
+                self._t3_add.clicked.connect(lambda: self._t3_add_clicked())
+                self._t3_add_light = None      # 重建后是新按钮，主题色得重刷一遍
                 self._t3_select_hasjava = True
-                def _t3_select_fill(javas=None):
-                    if javas is None:
-                        javas = events.settings["javaPaths"]
-                    else:
-                        javas = list(javas)
-                    events.settings["javaPaths"] = javas
-                    # 失效路径不进下拉框（设置里那份保持原样：硬盘插回来还能用）
-                    show = [java for java in javas if javaManager.isJava(java[0])]
-                    combo = self._t3_select.combo
-                    combo.clear()
-                    if not show:
-                        self._t3_select_hasjava = False
-                        combo.addItem(events.lang.get("core.wid.pages.setting.launcher.java.select.none"),"nojava")
-                        return
-                    self._t3_select_hasjava = True
-                    combo.addItem(events.lang.get("core.wid.pages.setting.launcher.java.select.auto"),"auto")
-                    for java in show:
-                        combo.addItem(f"v{java[1]}",java[0])
-                        combo.setItemData(combo.count()-1,java[0],Qt.ToolTipRole)
-                    select = "auto"
-                    chosen = events.settings["javaPath"]
-                    for java in show:
-                        # 记法可能变过（绝对 ↔ 相对），比真身而不是比字符串
-                        if chosen and javaManager.sameJava(chosen, java[0]):
-                            select = java[0]
-                    events.settings["javaPath"] = select if select != "auto" else None
-                    combo.setCurrentIndex(combo.findData(select))
+                QTimer.singleShot(0, lambda: self._t3_select_fill())
+                self._t3_select.combo.popupAboutToShow.connect(lambda: self._t3_select_fill())
+                self._t3_select.combo.activated.connect(lambda: events.settings.__setitem__("javaPath", self._t3_select.combo.currentData() if (self._t3_select.combo.currentData() != "auto") else None))
 
-                QTimer.singleShot(0,lambda: _t3_select_fill())
-                self._t3_select.combo.popupAboutToShow.connect(lambda:_t3_select_fill())
-                self._t3_select.combo.activated.connect(lambda:(events.settings.__setitem__("javaPath",self._t3_select.combo.currentData() if (self._t3_select.combo.currentData() != "auto") else None)))
-                javaManager.changed.connect(lambda javas: _t3_select_fill(javas))
+            def _t3_select_fill(self, javas=None):
+                if getattr(self, "_t3_select", None) is None:
+                    return          # Java 那一组还没建出来（总线先广播过一次）
+                if javas is None:
+                    javas = events.settings["javaPaths"]
+                else:
+                    javas = list(javas)
+                events.settings["javaPaths"] = javas
+                # 失效路径不进下拉框（设置里那份保持原样：硬盘插回来还能用）
+                show = [java for java in javas if javaManager.isJava(java[0])]
+                combo = self._t3_select.combo
+                combo.clear()
+                if not show:
+                    self._t3_select_hasjava = False
+                    combo.addItem(events.lang.get("core.wid.pages.setting.launcher.java.select.none"),"nojava")
+                    return
+                self._t3_select_hasjava = True
+                combo.addItem(events.lang.get("core.wid.pages.setting.launcher.java.select.auto"),"auto")
+                for java in show:
+                    combo.addItem(f"v{java[1]}",java[0])
+                    combo.setItemData(combo.count()-1,java[0],Qt.ToolTipRole)
+                select = "auto"
+                chosen = events.settings["javaPath"]
+                for java in show:
+                    # 记法可能变过（绝对 ↔ 相对），比真身而不是比字符串
+                    if chosen and javaManager.sameJava(chosen, java[0]):
+                        select = java[0]
+                events.settings["javaPath"] = select if select != "auto" else None
+                combo.setCurrentIndex(combo.findData(select))
 
-                def _t3_add_java(java):
-                    # 记进候选表（javaManager 与两个页面的下拉框都读这一份）：先剔掉指向同一个
-                    # java.exe 的旧条目（写法不同也算同一个），再按路径排序
-                    java = javaManager.resolve(java)
-                    javas = [item for item in list(events.settings["javaPaths"])
-                             if item and not javaManager.sameJava(item[0], java)]
-                    javas.append([javaManager.record(java),javaManager.getJavaVersion(java)])
-                    javas.sort(key=lambda item: item[0].lower())
-                    events.settings["javaPaths"] = javas
-                    events.saveSettings()
-                    _t3_select_fill()
+            def _t3_add_java(self, java):
+                # 记进候选表（javaManager 与两个页面的下拉框都读这一份）：先剔掉指向同一个
+                # java.exe 的旧条目（写法不同也算同一个），再按路径排序
+                java = javaManager.resolve(java)
+                javas = [item for item in list(events.settings["javaPaths"])
+                         if item and not javaManager.sameJava(item[0], java)]
+                javas.append([javaManager.record(java),javaManager.getJavaVersion(java)])
+                javas.sort(key=lambda item: item[0].lower())
+                events.settings["javaPaths"] = javas
+                events.saveSettings()
+                self._t3_select_fill()
 
-                def _t3_add_clicked():
-                    # 先选目录：认得出 <目录>/bin/java.exe 才往下走，认不出弹浮层说明原因
-                    folder = QFileDialog.getExistingDirectory(self,events.lang.get("core.wid.pages.setting.launcher.java.add"))
-                    if not folder:
-                        return
-                    java = os.path.join(folder,"bin","java.exe")
-                    error = None
-                    if not javaManager.isJava(java):
-                        error = t(events.lang.get("core.log.warning.javaAddInvalid"),folder)
-                        events.logger.warning(error,name="Java")
-                    events.emit(
-                        "overlayRequested",
-                        self.AddJava(folder,_t3_add_java,error))
-
-                self._t3_add.clicked.connect(lambda: _t3_add_clicked())
-
-                self.langing()
-                self.lighting(bool(events.settings["theme"]))
+            def _t3_add_clicked(self):
+                # 先选目录：认得出 <目录>/bin/java.exe 才往下走，认不出弹浮层说明原因
+                folder = QFileDialog.getExistingDirectory(self,events.lang.get("core.wid.pages.setting.launcher.java.add"))
+                if not folder:
+                    return
+                java = os.path.join(folder,"bin","java.exe")
+                error = None
+                if not javaManager.isJava(java):
+                    error = t(events.lang.get("core.log.warning.javaAddInvalid"),folder)
+                    events.logger.warning(error,name="Java")
+                events.emit(
+                    "overlayRequested",
+                    self.AddJava(folder,self._t3_add_java,error))
 
             class AddJava(QWidget):
                 """添加 Java 的叠加浮层：目录已经在外面选好了，这里只交代「认出了哪个 Java」。
@@ -455,39 +573,35 @@ def register():
     # 分组容器：条目用 section 字段指向它。空容器设置页不摆（插件的组没装插件时
     # 就是空的，那块标题也就不出现）。spacing 是加在容器上方的空隙。
     registry.add("core.setting.sections", "core.setting.preferences",
-                 init=lambda b: Section(b.parent, b.title, b.items),
-                 order=10, spacing=30,
+                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
+                 order=10,
                  title="core.wid.pages.setting.launcher.preferences")
     registry.add("core.setting.sections", "core.setting.general",
-                 init=lambda b: Section(b.parent, b.title, b.items),
-                 order=40, spacing=30,
+                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
+                 order=40,
                  title="core.wid.pages.setting.launcher.general")
     registry.add("core.setting.sections", "core.setting.java",
-                 init=lambda b: Section(b.parent, b.title, b.items),
-                 order=50, spacing=30, attr="sec_java",
+                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
+                 order=50,
                  title="core.wid.pages.setting.launcher.java")
     # 插件那些设置项的落脚处（Plugin.add_setting 的默认 section）。插件想自己开
     # 一组就照上面这样再登记一条容器。
     registry.add("core.setting.sections", "core.setting.plugins",
-                 init=lambda b: Section(b.parent, b.title, b.items),
-                 order=900, spacing=30,
+                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
+                 order=900,
                  title="core.wid.pages.setting.plugins")
     # 标准条目：attr 是绑回 Launcher 的老名字，下面的行为绑定代码仍按这些名字
     # 引用控件；section 指着上面那几个容器。
     registry.add("core.setting.items", "core.setting.theme",
                  init=simple(Bool), section="core.setting.preferences", order=20,
-                 attr="_t1_theme",
                  title="core.wid.pages.setting.launcher.preferences.theme")
     registry.add("core.setting.items", "core.setting.lang",
                  init=simple(Combo), section="core.setting.preferences", order=30,
-                 attr="_t1_lang",
                  title="core.wid.pages.setting.launcher.preferences.lang")
     # 通用：关闭窗口时怎么办（和点 × 弹的那一层是同一个设置）
     registry.add("core.setting.items", "core.setting.close",
                  init=simple(Combo), section="core.setting.general", order=10,
-                 attr="_t2_close",
                  title="core.wid.pages.setting.launcher.general.close")
     registry.add("core.setting.items", "core.setting.java.select",
                  init=simple(Combo), section="core.setting.java", order=60,
-                 attr="_t3_select",
                  title="core.wid.pages.setting.launcher.java.select")

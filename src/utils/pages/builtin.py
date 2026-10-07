@@ -31,9 +31,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     fStack/         浮层栈：整页导航，一页压一页
     downloads/      下载页内部：各下载源的页签
 
-文件夹不是摆设：浮层页面登记 core.overlays 时用 layer 字段声明自己在哪一层
-（'overlay' / 'stack'），open_overlay 照它发请求。放在哪一层看得见、也不必让
-每个调用方记住该发哪个信号。
+文件夹不是摆设：浮层按「在哪一层」分开登记 —— 叠加层进 core.overlays
+（带遮罩居中，fOverlay/），整页浮层栈进 core.stacks（一页压一页，fStack/）。
+open_overlay 两个点都找，照条目所在的点发对应请求，调用方只给 key。
 
 为什么契约集中在这里声明
 ------------------------
@@ -53,7 +53,8 @@ registry.declare("core.pages", registrant="core",
                  fields=("init", "title", "icon", "order", "default"),
                  required=("init", "title"),
                  built=("main", "btn"),
-                 doc="主窗口左栏导航页（顺序由各条目的 order 决定）")
+                 doc="主窗口左栏导航页（顺序由各条目的 order 决定）。"
+                     "default=True 的那条是启动默认页（没有就取第一页）。")
 
 registry.declare("core.setting.pages", registrant="core.setting",
                  fields=("init", "title", "icon", "order"),
@@ -71,27 +72,24 @@ registry.declare("core.qss", registrant="core",
 registry.declare("core.tray.menu", registrant="core",
                  fields=("init", "title", "order"),
                  required=("init", "title"),
-                 doc="系统托盘右键菜单里的一项：init(Box) 返回 QAction。"
-                     "title 是语言键，语言切换时托盘会照它重设文案。")
+                 doc="系统托盘右键菜单里的一项：init 收到构建上下文，返回 QAction。"
+                     "title 是语言键，语言切换时托盘照它重设文案。")
 
 registry.declare("core.setting.sections", registrant="core.setting",
-                 fields=("init", "title", "order", "spacing", "attr"),
+                 fields=("init", "title", "order"),
                  required=("init", "title"),
                  doc="设置子页里的分组容器（标题 + 它容纳的条目）。"
-                     "容器由 init 建（Box 的本次上下文里带 items：这一组的条目表），"
-                     "所以「分组长什么样」也是可换的。"
-                     "attr 可选：设置页要往这一组里补控件时，用它在页面上取容器。")
+                     "init 收到构建上下文，其中 items 是这一组容纳的条目表。")
 
 registry.declare("core.setting.items", registrant="core.setting",
-                 fields=("init", "section", "order", "title", "spacing", "attr"),
+                 fields=("init", "section", "order", "title"),
                  required=("init", "section", "title"),
-                 doc="设置子页里的条目（Bool / Combo / 插件自绘的控件…），"
-                     "section 指向它所属的容器 key（core.setting.sections 里的条目）。"
-                     "attr 可选：内置条目靠它绑回页面上的老名字，插件用不着。")
+                 doc="设置子页里的条目（Bool / Combo / 插件自绘的控件…）。"
+                     "section 指向所属的分组容器 key（core.setting.sections 里的条目）。")
 
 registry.declare("core.start.bottom", registrant="core.start",
-                 fields=("init", "attr", "order"),
-                 required=("init", "attr"),
+                 fields=("init", "order"),
+                 required=("init",),
                  doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
 
 registry.declare("core.download.tabs", registrant="core.download",
@@ -101,13 +99,13 @@ registry.declare("core.download.tabs", registrant="core.download",
                  doc="下载页左栏的页签")
 
 registry.declare("core.download.sources", registrant="core.download",
-                 fields=("init", "title", "icon", "order", "color"),
+                 fields=("init", "title", "icon", "order"),
                  required=("init", "title", "icon"),
                  built=("main", "btn"),
                  doc="下载页顶部页签的游戏来源")
 
 registry.declare("core.download.item.actions", registrant="core.download",
-                 fields=("init", "title", "icon", "order", "attr"),
+                 fields=("init", "title", "icon", "order"),
                  required=("init", "title", "icon"),
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
@@ -115,13 +113,17 @@ registry.declare("core.download.item.actions", registrant="core.download",
 # 浮层页面：盖在窗口上的整页界面，由 FloatingStack 承载。
 # 与 core.pages 的区别是它不进左栏、而是弹出来；条目形态一样。
 registry.declare("core.overlays", registrant="core",
-                 fields=("init", "title", "order", "layer"),
+                 fields=("init", "title", "order"),
                  required=("init", "title"),
-                 doc="浮层页面（盖在窗口上的整页界面）。"
-                     "layer 决定它在哪一层被打开，也就是发哪个请求："
-                     "'overlay'（缺省）= 叠加层，带遮罩、内容居中，见 pages/fOverlay/；"
-                     "'stack' = 浮层栈，整页导航、一页压一页，见 pages/fStack/。"
+                 doc="叠加层页面：盖在窗口上、带遮罩、内容居中（见 pages/fOverlay/）。"
+                     "整页浮层栈是另一个点：core.stacks（见 pages/fStack/）。"
+                     "open_overlay 两个点都找，按 key 决定发哪个请求 —— "
                      "发错请求的表现是「点了没反应」，所以别让调用方自己记着。")
+
+registry.declare("core.stacks", registrant="core",
+                 fields=("init", "title", "order"),
+                 required=("init", "title"),
+                 doc="整页浮层栈：一页压一页、可逐级返回（见 pages/fStack/）。")
 
 registry.declare("core.gameManager.pages", registrant="core.gameManager",
                  fields=("init", "title", "icon", "order"),
@@ -130,8 +132,8 @@ registry.declare("core.gameManager.pages", registrant="core.gameManager",
                  doc="游戏管理浮层左栏的功能页（设置 / Mods / …）。icon 可省")
 
 registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
-                 fields=("init", "attr", "order", "spacing"),
-                 required=("init", "attr"),
+                 fields=("init", "order", "spacing"),
+                 required=("init",),
                  doc="游戏管理页的区块（文件夹 / Java …）")
 
 # ─────────────────────────── 内置条目登记 ───────────────────────────
@@ -157,7 +159,7 @@ setting.register()                 # core.setting.pages + core.setting.items
 githubSetting.register()           # core.overlays：GitHub 设置页（叠加层）
 dlList.register()                  # core.overlays：下载列表（浮层栈）
 _download_sources.register()       # core.download.sources（三个下载源）
-gameManager.register()             # core.overlays + 管理浮层的功能页与区块
+gameManager.register()             # core.stacks + 管理浮层的功能页与区块
 _register_close_ask()              # core.overlays：关闭询问（叠加层）
 
 

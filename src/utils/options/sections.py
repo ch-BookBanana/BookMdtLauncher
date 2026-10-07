@@ -44,18 +44,19 @@ class Section(QWidget):
     摆法照 Scroll.add 的规矩：spacing 是加在**这一项上方**的空隙。
     """
 
-    def __init__(self, page=None, title=None, items=()):
+    def __init__(self, page=None, title=None, items=(), fields=None):
         super().__init__()
         self.page = page
         self.title_ = title
+        self.fields = fields or {}
         self.wids = []
         self.init_wid()
         for e in items:
             wid = e.init(Box(parent=page, entry=e))
-            attr = e.get("attr")        # 可选：内置条目靠它绑回页面上的老名字
-            if attr:
-                setattr(page, attr, wid)
-            self.add_wid(wid, e.get("spacing", 0))
+            f = self.fields.get(e.key, {})
+            if f.get("attr"):
+                setattr(page, f["attr"], wid)
+            self.add_wid(wid, f.get("spacing", 0))
 
     def init_wid(self):
         self.layout = QVBoxLayout(self)

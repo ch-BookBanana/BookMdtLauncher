@@ -39,6 +39,17 @@ from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
 from ...registry import Box, registry
 
+# 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
+_FIELDS = {
+    "core.origin": {'color': False},
+    "core.mindustryx": {'color': False},
+    "core.mindustryarc": {'color': False},
+    "core.download.item.download": {'attr': 'btn_download'},
+    "core.download.item.repoInfo": {'attr': 'btn_repoInfo'},
+    "core.download.item.link": {'attr': 'btn_link'}
+}
+
+
 
 # 进行中的游戏下载任务。QDownloader 实例必须被强引用着：一旦没人引用，出作用域
 # 就被回收，下载会静默中断（不报错、也不会有 finished）。
@@ -50,6 +61,8 @@ _ACTIVE_DOWNLOADS = []
 # ─────────────── 下载列表项的操作按钮（core.download.item.actions）───────────────
 # init 由这一层自己提供：按钮自己知道该弹什么，Item 只负责把它们摆到右边、
 # 并统一管显隐（悬停时才显示）。
+
+
 
 
 def _item_action_download(b):
@@ -214,7 +227,7 @@ class Game(QWidget):
 
             # 下载源从注册表取：本模块的 register() 登记一次（由 builtin.py 调）。
             for e in registry.entries("core.download.sources"):
-                page = self.add_page(e, color=e.get("color", True))
+                page = self.add_page(e, color=_FIELDS.get(e.key, {}).get("color", True))
                 registry.bind("core.download.sources", e.key, main=page, btn=page.btn)
 
         def add_page(self, entry, color=True):
@@ -905,7 +918,7 @@ class Game(QWidget):
                         self._action_btns = []
                         for e in registry.entries("core.download.item.actions"):
                             btn = e.init(Box(parent=self, entry=e))
-                            setattr(self, e.attr, btn)
+                            setattr(self, _FIELDS.get(e.key, {}).get("attr", ""), btn)
                             self.layout.addWidget(btn, 0)
                             self._action_btns.append(btn)
 
@@ -1913,13 +1926,13 @@ def register():
     def _src_init(cls):
         return lambda b: cls(b.parent, b.title, b.icon)
     registry.add("core.download.sources", "core.origin",
-                 init=_src_init(Game.Main.Origin), order=10, color=False,
+                 init=_src_init(Game.Main.Origin), order=10,
                  title=Game.Main.Origin.title_key, icon=Game.Main.Origin.iconPath)
     registry.add("core.download.sources", "core.mindustryx",
-                 init=_src_init(Game.Main.MindustryX), order=20, color=False,
+                 init=_src_init(Game.Main.MindustryX), order=20,
                  title=Game.Main.MindustryX.title_key, icon=Game.Main.MindustryX.iconPath)
     registry.add("core.download.sources", "core.mindustryarc",
-                 init=_src_init(Game.Main.MindustryARC), order=30, color=False,
+                 init=_src_init(Game.Main.MindustryARC), order=30,
                  title=Game.Main.MindustryARC.title_key, icon=Game.Main.MindustryARC.iconPath)
 
     # 列表项右侧的操作按钮：init 用 b.parent（那个 Item）现取宿主，
@@ -1927,11 +1940,11 @@ def register():
     # 里懒登记，现在条目在这就位，Item 只管摆位置。
     point = "core.download.item.actions"
     registry.add(point, "core.download.item.download",
-                 init=_item_action_download, attr="btn_download", order=10,
+                 init=_item_action_download, order=10,
                  title="core.wid.pages.download.item.download", icon=BTN_DOWNLOAD)
     registry.add(point, "core.download.item.repoInfo",
-                 init=_item_action_repo, attr="btn_repoInfo", order=20,
+                 init=_item_action_repo, order=20,
                  title="core.wid.pages.download.item.repoInfo", icon=NAV_MENU)
     registry.add(point, "core.download.item.link",
-                 init=_item_action_link, attr="btn_link", order=30,
+                 init=_item_action_link, order=30,
                  title="core.wid.pages.download.item.link", icon=NAV_LINK)

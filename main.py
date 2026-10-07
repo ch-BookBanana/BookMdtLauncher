@@ -226,7 +226,6 @@ try:
                 pass
             # 删除 markdown 图片缓存（mdimg），下次渲染时重新下载
             try:
-                import shutil
                 mdimg = getPath("BML/.tmp/mdimg")
                 if os.path.isdir(mdimg):
                     shutil.rmtree(mdimg, ignore_errors=True)
@@ -315,10 +314,12 @@ try:
             （retry=True 会连停用名单里的一起重试；失败就再标回去）。
 
             界面（页面 / 托盘 / 样式 / 语言）不在这里逐个收拾 —— 它们各自挂在
-            plugins_changed 上对账。这里只补一次语言与样式，保证「插件集合的
-            最终状态」被完整应用一次（卸载过程中是逐条触发的）。
+            plugins_changed 上对账。整段包成一个批次：不包的话每卸一个插件都会
+            触发一次全量重算（重读语言、重建样式表、重建托盘、页面重新对账），
+            插件多的时候重载会肉眼可见地卡与闪。
             """
             try:
+                pluginLoader.begin_batch()
                 for info in list(pluginLoader.loaded()):
                     pluginLoader.unload(info)
                 infos = pluginLoader.load_all(retry_disabled=retry)
@@ -328,13 +329,15 @@ try:
                     "插件已重载：%d 个加载成功%s"
                     % (len(ok), "，%d 个失败（已标注停用）" % len(bad) if bad else ""),
                     name="Plugin")
-                # 界面不必在这里逐个收拾：load_all 末尾会发 plugins_changed，
+                # 界面不必在这里逐个收拾：这批结束时统一发一次 plugins_changed，
                 # 语言 / 样式 / 托盘 / 页面各自挂在它上面按注册表对账。
                 return infos
             except Exception:
                 self.logger.error("重载插件失败：\n" + traceback.format_exc(limit=6),
                                   name="Plugin")
                 return []
+            finally:
+                pluginLoader.end_batch()
 
         def _on_close_requested(self, mode):
             """关闭询问浮层的答复：藏到托盘 / 退出启动器。
@@ -1299,7 +1302,8 @@ try:
                         self.root = root
                         self.nav = nav          # 左栏导航按钮组，由 Window 注入
                         self.pages = []         # 建好的页面，与 btns 一一对应
-                        self.btns = []          # 对应的左栏按钮（pages[i].btn is btns[i]）
+                        self.btns = []          # 对应的左栏按钮（内置页面上 pages[i].btn 也是它；
+                                                # 插件页没有 btn 属性，按钮只归装配方管）
                         self._page_keys = {}    # core.pages 的 key -> (page, btn)，对账用
                         self.init_wid()
                         # 默认页由 core.pages 里 default=True 的那条决定；
@@ -1346,8 +1350,18 @@ try:
                         # 三栏控件不能留在界面上（原先要重启才干净）。
                         events.on("plugins_changed", self.sync_pages)
 
+                    @staticmethod
+                    def _page_sig(e):
+                        """一条页面条目的身份：决定「这一页长什么样」的那几个字段。
+
+                        只比 key 是不够的：条目可以被别家 set 顶掉、顶的人走了再回退
+                        （见 registry 的覆盖记录），这时 key 没变而提供者换了 ——
+                        照 key 对账会继续用着上一个提供者建的那一页。
+                        """
+                        return (e.init, e.get("title"), e.get("icon"), e.get("order"))
+
                     def sync_pages(self):
-                        """按 core.pages 对账：没建的补上、不在表里的摘掉。
+                        """按 core.pages 对账：没建的补上、不在表里的摘掉、换过提供者的重建。
 
                         为什么是对账而不是整体重建：整体重建会把所有页面的状态
                         （滚动位置、正在走的任务、控制台内容）一起清掉，而且每次
@@ -1355,10 +1369,15 @@ try:
                         """
                         want = registry.entries("core.pages")
                         keys = [e.key for e in want]
+                        sigs = {e.key: self._page_sig(e) for e in want}
 
-                        # 先摘：建过、但现在不在注册表里的（插件被卸了）
+                        # 先摘：建过、但现在不在注册表里的（插件被卸了），
+                        # 以及同 key 换了提供者的（覆盖加回退）
                         for key in [k for k in self._page_keys if k not in keys]:
                             self._drop_page(key)
+                        for key, built in list(self._page_keys.items()):
+                            if built[2] != sigs[key]:
+                                self._drop_page(key)
 
                         # 再补：按注册表顺序插到该在的位置
                         for index, e in enumerate(want):
@@ -1379,10 +1398,10 @@ try:
                         page = e.init(Box(parent=self, entry=e, btn=btn))
                         # 这两张表归装配方维护，不由页面自己追加 ——
                         # 插件页面不走内置的 Page 基类，靠自己就会漏。
-                        # btns 装的是左栏按钮（pages[i].btn is btns[i]）。
+                        # btns 装的是左栏按钮（内置页面上 pages[i].btn is btns[i]）。
                         self.pages.insert(index, page)
                         self.btns.insert(index, btn)
-                        self._page_keys[e.key] = (page, btn)
+                        self._page_keys[e.key] = (page, btn, self._page_sig(e))
                         btn.clicked.connect(page.changePage)
                         setattr(self, e.name, page)
                         # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到
@@ -1392,10 +1411,10 @@ try:
                     def _drop_page(self, key):
                         """拆一页：三栏控件、左栏按钮、挂在本容器上的属性一起摘。
 
-                        注册表那边不用管 —— 条目已经先被 remove_namespace 摘掉了，
+                        注册表那边不用管 —— 条目已经先被摘掉 / 换掉了，
                         所以这里拿不到（也不需要）Entry。
                         """
-                        page, btn = self._page_keys.pop(key)
+                        page, btn = self._page_keys.pop(key)[:2]
                         was_current = self.main.currentWidget() is getattr(page, "main", None)
 
                         for stack, wid in ((self.left, getattr(page, "left", None)),

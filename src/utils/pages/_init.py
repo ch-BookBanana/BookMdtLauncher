@@ -36,21 +36,24 @@ def _shell():
 def open_overlay(key, parent=None, **ctx):
     """按条目 key 现建一个浮层页面，请求挂上去，并**返回它**。
 
-    浮层条目登记在 core.overlays 里，开的人只需要 key，不必 import 那个类：
-    标题栏的 GitHub 设置、下载列表，启动页的游戏管理都走这里。
-
-    挂哪一层由条目自己的 layer 字段说了算（见 builtin.py 的契约声明），
-    调用方不必记住该发 overlayRequested 还是 stackRequested —— 记错了就是
-    「点了没反应」，而且光看调用处看不出来。要显式换层就直接发信号。
+    条目落在哪个扩展点，就发哪个请求：core.overlays = 叠加层（带遮罩居中），
+    core.stacks = 整页浮层栈。调用方只给 key，不必记着该发哪个信号。
 
     只有开浮层这一刻才知道的东西（比如游戏管理管哪个实例）走关键字传，
     见 registry.Box 的「本次上下文」。
     """
-    entry = registry.entry("core.overlays", key)
-    wid = entry.init(Box(parent=parent, entry=entry, **ctx))
-    events.emit("stackRequested" if entry.get("layer") == "stack"
-                else "overlayRequested", wid)
-    return wid
+    last = None
+    for point, signal in (("core.overlays", "overlayRequested"),
+                          ("core.stacks", "stackRequested")):
+        try:
+            entry = registry.entry(point, key)
+        except Exception as e:                     # 不在这层，试下一层
+            last = e
+            continue
+        wid = entry.init(Box(parent=parent, entry=entry, **ctx))
+        events.emit(signal, wid)
+        return wid
+    raise last
 
 
 class Leftw(QWidget):

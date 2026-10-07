@@ -83,7 +83,13 @@ set PYTHON=C:\Users\Book\Desktop\BookMDTLauncher\python\python.exe
 %PYTHON% -m nuitka ^
   --onefile ^
   --enable-plugin=pyside6 ^
-  --include-qt-plugins=sensible ^
+  --include-qt-plugins=all ^
+REM  插件可能用到的 Qt 模块 / 第三方包：按需去掉下面几行前面的 REM，
+REM  每行末尾都要留着 ^ 才能接下一行。开一个，打包体积与时间都会涨。
+REM  --include-module=PySide6.QtSvg ^
+REM  --include-module=PySide6.QtSvgWidgets ^
+REM  --include-module=PySide6.QtXml ^
+REM  --include-package=requests ^
   --include-data-dir=src=src ^
   --windows-console-mode=attach ^
   --msvc=latest ^

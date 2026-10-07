@@ -22,9 +22,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 是靠这两个钩子挂在总线上的，自己写就得手动补；用这里的控件就自动有了，
 而且外观、间距、配色跟内置页面保持一致。
 
-控件构造签名统一为 (parent, root, title)：root 现在还没从控件里削掉（那是
-宿主内部下一批的活），但插件不必关心 —— 用 Plugin.add_setting(cls) 就行，
-参数由宿主拼。
+控件构造签名（各不一样，按类看）
+--------------------------------
+    Bool / Combo / Slider / Title / Line   (parent, text=None)
+        这几个是标准的「设置项」控件：`self.add_setting(name, cls, title=…)`
+        会把 (parent, 语言键) 拼好传进来，主题与语言由控件自己跟总线。
+
+    Section(page, title, items, fields=None)
+        设置页里的一个分组容器（`@registrar.section` 的构建函数用它，
+        `ctx.items` 是这一组容纳的条目）。
+
+    Scroll(parent, horizontal=False, …)
+        滚动区，宿主内部用得多；它**不是**设置项控件（签名对不上），
+        别交给 add_setting。
 """
 
 from ..utils.options.items import Bool, Combo, Slider

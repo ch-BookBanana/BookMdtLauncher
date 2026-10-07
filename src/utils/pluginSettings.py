@@ -18,10 +18,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 存哪儿
 ------
-就存在宿主 settings.json 的 "plugins" 里，一格一个插件：
+就存在宿主 settings.json 的 "pluginSettings" 里，一格一个插件：
 
-    "plugins": {
-        "com.example.hello": {"volume": 30}
+    "pluginSettings": {
+        "example_hello": {"volume": 30}
     }
 
 为什么不给每个插件单独一个 settings.json：宿主的设置读取、合并、损坏备份
@@ -29,12 +29,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 逻辑再写一遍；而且「设置在哪」会变成插件作者要关心的第二件事。
 
 settings.json 的合并规则只收默认值里已有的键（用来淘汰已删掉的设置项），
-所以 "plugins" 的默认值是**空 dict** —— 见 main.py 的 _merge_settings：
+所以 "pluginSettings" 的默认值是**空 dict** —— 见 settings.py 的 _merge：
 空 dict 默认值按开放映射处理，里面的键宿主不认识也整片收下。
 
 为什么给视图而不是原生 dict
 --------------------------
-PluginSettings 是 MutableMapping 视图，本体是 settings["plugins"][id]：
+PluginSettings 是 MutableMapping 视图，本体是 settings["pluginSettings"][id]：
   * 插件够不着别的键 —— 否则一个插件把键名写错一个字就能改掉 language/theme；
   * 卸载时按 id 一格摘掉，不留残渣（见 forget）；
   * 默认值由插件声明，读不到就回默认值，不必到处兜 None。
@@ -43,13 +43,13 @@ PluginSettings 是 MutableMapping 视图，本体是 settings["plugins"][id]：
 from collections.abc import MutableMapping
 
 # 宿主 settings 里放插件设置的那一格
-NAMESPACE = "plugins"
+NAMESPACE = "pluginSettings"
 
 
 class PluginSettings(MutableMapping):
-    """一个插件自己的设置格子：settings["plugins"][<id>]。
+    """一个插件自己的设置格子：settings["pluginSettings"][<id>]。
 
-        s = PluginSettings("com.example.hello", {"volume": 50})
+        s = PluginSettings("example_hello", {"volume": 50})
         s["volume"]            # 50（没存过就是默认值）
         s["volume"] = 30       # 写值顺手存盘
         s.get("nope", "x")     # "x"
@@ -72,23 +72,25 @@ class PluginSettings(MutableMapping):
         return events.settings
 
     def _cell(self, create=True):
-        """settings["plugins"][pid]，必要时补出来。
+        """settings["pluginSettings"][pid]，必要时补出来。
 
         create=False 用于纯读路径：读一个不存在的插件设置不该改宿主 settings。
-        文件被手改坏时（plugins 不是 dict）也走同一条兜底，不让插件崩在读取上。
+        文件被手改坏时（那一格不是 dict）也走同一条兜底，不让插件崩在读取上。
         """
         settings = self._settings
-        plugins = settings.get(NAMESPACE)
-        if not isinstance(plugins, dict):
+        if not isinstance(settings.get(NAMESPACE), dict):
             if not create:
                 return {}
-            plugins = settings[NAMESPACE] = {}
-        cell = plugins.get(self.pid)
-        if not isinstance(cell, dict):
+            settings[NAMESPACE] = {}
+        # 写进去之后**重新取**：子对象存进去的是包过的那一份（见 settings._Section），
+        # 链式赋值 `plugins = settings[NAMESPACE] = {}` 拿到的却是原 dict，
+        # 往它上面写等于写进一个马上被丢掉的副本。
+        plugins = settings[NAMESPACE]
+        if not isinstance(plugins.get(self.pid), dict):
             if not create:
                 return {}
-            cell = plugins[self.pid] = {}
-        return cell
+            plugins[self.pid] = {}
+        return plugins[self.pid]
 
     # ── MutableMapping ──
 
@@ -105,10 +107,29 @@ class PluginSettings(MutableMapping):
         self.save()
 
     def __delitem__(self, key):
+        """删一个键：已存过的从格子里删，只在默认值里的从默认值里删。
+
+        两处都认，视图才是自洽的 —— 否则 `"mode" in s` 为真、`s["mode"]` 有值，
+        却 `del s["mode"]` 报 KeyError（`s.pop("mode", 默认)` 同样会炸，
+        因为 MutableMapping.pop 内部就是 del）。
+        """
         cell = self._cell(create=False)
-        if key not in cell:
-            raise KeyError(key)
-        del cell[key]
+        if key in cell:
+            del cell[key]
+            self.save()
+            return
+        if key in self.defaults:
+            del self.defaults[key]
+            self.save()
+            return
+        raise KeyError(key)
+
+    def clear(self):
+        """清空这一格：已存值全删、默认值也清掉（遍历顺序撞到默认值键时不再半途而废）。"""
+        cell = self._cell(create=False)
+        if cell:
+            cell.clear()
+        self.defaults.clear()
         self.save()
 
     def __iter__(self):
@@ -132,6 +153,18 @@ class PluginSettings(MutableMapping):
         out = dict(self.defaults)
         out.update(self._cell(create=False))
         return out
+
+    def pop(self, key, *default):
+        """删键并返回值（MutableMapping.pop 的默认实现撞上「只在默认值里的键」
+        会抛 KeyError，这里按 del 的语义重写一遍）。"""
+        try:
+            value = self[key]
+        except KeyError:
+            if default:
+                return default[0]
+            raise
+        del self[key]
+        return value
 
     def save(self):
         """立刻存盘。

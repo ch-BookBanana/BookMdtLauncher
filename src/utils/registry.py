@@ -37,16 +37,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         "core.pages": {
             "__registrant__": "core",
             "__kind__":       "class",
-            "__fields__":     ("cls", "title", "icon", "order", "default"),
-            "__required__":   ("cls", "title"),
+            "__fields__":     ("init", "title", "icon", "order", "default"),
+            "__required__":   ("init", "title"),
             "__doc__":        "主窗口左栏导航页",
 
             "core.start": {
-                "cls": Start, "title": ..., "order": 10,     # ← add()  登记
+                "init": Start, "title": ..., "order": 10,     # ← add()  登记
                 "__built__": {"main": <Start 实例>,           # ← bind() 回填
                               "btn":  <左栏导航按钮>},
             },
-            "com.example.hello.main": {"cls": HelloPage, "order": 100},
+            "example_hello.main": {"init": HelloPage, "order": 100},
         },
     }
 
@@ -55,10 +55,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 * 条目内的 `__built__` 专放**构建产物**：add 进来的是「谁登记谁提供」的声明，
   bind 填进去的是「谁构建谁回填」的实例。两者分开，`__fields__` 校验才不会
   把 main/btn 当成未知字段。产物用 e.main / e.btn 直读（查找顺序：登记字段 → 产物）。
-* 条目的 namespace 既是「谁登记的」，也是卸载/回滚时的摘除依据；
-  **不要用 key.split(".")[0] 求它** —— `core.download.sources` 的条目
-  `core.origin` 属于 `core`，而插件的 `com.example.hello.main` 属于
-  `com.example.hello`，只有按最后一段切才对。
+* 条目的 namespace 既是「谁登记的」，也是卸载/回滚时的摘除依据；求它要按**前缀**
+  而不是 `key.split(".")[0]`：`core.download.sources` 的条目 `core.origin` 属于 `core`，
+  插件的 `example_hello.main` 属于 `example_hello`，而 `example_hello.tools.about`
+  同样属于 `example_hello`（条目名里带点也得摘得掉）；`example_hello_2.k` 不属于
+  `example_hello`（前缀要按段对齐）。
 
 边界
 ----
@@ -66,6 +67,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 谁来 new、传什么参数，是拥有该扩展点的界面自己的事；否则这里会变成第二个
 「什么都知道」的上帝对象。
 """
+
+import copy
+import re
 
 __all__ = ["RegistryError", "Entry", "Box", "Registry", "registry", "page",
            "simple", "DEFAULT_ORDER"]
@@ -82,6 +86,16 @@ _RESERVED = ("__registrant__", "__kind__", "__fields__", "__required__",
 # 「未知字段」，validate() 也分不清「登记时写错了」和「构建时填进来的」。
 _BUILT = "__built__"
 
+# 条目里的另外两个保留键：覆盖记录。
+# 一条条目可以被别家 set() 顶掉（插件换掉内置的关闭询问、换掉某一页）。被顶掉的
+# 那些不能就这么丢了 —— 顶的人一走（卸载 / 加载失败回滚），得把他盖住的那条
+# 放回原位，界面于是回到上一个提供者的控件。所以：
+#   __owner__ 这条现在归谁（默认 = key 的命名空间；set 顶掉别人的时候写调用方）
+#   __over__  被它顶掉的层，栈；栈顶是最近被顶掉的那条（回退时先放它）
+_OWNER = "__owner__"
+_OVER = "__over__"
+_ENTRY_RESERVED = (_BUILT, _OWNER, _OVER)
+
 
 class RegistryError(Exception):
     """注册表用法错误：扩展点未声明、字段越界、key 重复或格式不对。"""
@@ -92,12 +106,42 @@ def _namespace_of(key):
     return key.rpartition(".")[0]
 
 
+def _owned_by(key, owner, ns):
+    """这条条目归 ns 吗？
+
+    两处认：条目上记的归属（set 顶掉别人时写的 __owner__、或没记时的命名空间），
+    以及**按段对齐的前缀** —— 插件把自己的条目名叫成 "tools.about" 时 key 会变成
+    `example_b.tools.about`，按「最后一个点之前」算出来的命名空间是
+    `example_b.tools`，卸载时就摘不掉它了（幽灵托盘项 + 重新加载撞「已存在条目」）。
+    `example_b_2.k` 不算（前缀必须按段对齐）。
+    """
+    return owner == ns or key == ns or key.startswith(ns + ".")
+
+
+def _sort_key(value):
+    """排序用的 order 值：非数值（老数据 / 手改过的 settings）退到默认值。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return DEFAULT_ORDER
+    return value
+
+
 def _is_entry_key(key):
     """条目 key 必须是 <namespace>.<name>：两段以上、各段非空、不以 __ 开头。"""
     if not isinstance(key, str) or key.startswith("__"):
         return False
     parts = key.split(".")
     return len(parts) >= 2 and all(parts)
+
+
+# 条目 key 每一段的字符规约（与插件 id 同一套）
+_SEG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+# 宿主命名空间：remove_namespace 不许碰它们（插件 id 的规约本身就挡住了同名插件，
+# 这里是防「插件拿着 host.registry 直接调」的那种手滑/恶意）
+HOST_NAMESPACES = ("core", "src", "main", "bmlcore", "bmlplugin", "bml_plugin")
+
+# commit/abort 的默认凭据：有主人的会话必须带对凭据，没主人的照旧裸调
+_ANY_TOKEN = object()
 
 
 class Entry:
@@ -116,7 +160,9 @@ class Entry:
         self._registrant = registrant
         self.key = key
         # 登记字段与构建产物在这里分开：fields 只留 add() 时登记的，built 只留 bind() 填的
-        self.fields = {k: v for k, v in raw_fields.items() if k != _BUILT}
+        # （__owner__ / __over__ 是登记表内部用的覆盖记录，也不当字段露出去）
+        self.fields = {k: v for k, v in raw_fields.items()
+                       if k not in _ENTRY_RESERVED}
         self.built = dict(raw_fields.get(_BUILT) or {})
         self.built_fields = tuple(built_fields)
         ns, _, name = key.rpartition(".")
@@ -221,7 +267,7 @@ class Box:
 
 
 def simple(cls, **extra):
-    """便捷 init：控件构造签名正好是 (parent, root, title, **extra) 时用它。
+    """便捷 init：控件构造签名正好是 (parent, title, **extra) 时用它。
 
     这只是**注册方**替自己省事 —— 注册方知道自己的类长什么样；
     装配方不必知道，它只管调 init。
@@ -234,7 +280,7 @@ class Registry:
 
     加载会话（begin / commit / abort）
     ---------------------------------
-    插件 setup 跑到一半抛异常时，它之前登记的东西不能留在正表里 —— 界面会冒出
+    插件构造跑到一半抛异常时，它之前登记的东西不能留在正表里 —— 界面会冒出
     半截条目（点下去还可能炸），重试也会撞「已存在条目」。所以插件登记做成
     **全有或全无**：
 
@@ -245,9 +291,15 @@ class Registry:
     为什么不是「失败了按命名空间擦」：擦不干净（插件自己 declare 出来的扩展点
     擦不掉），而且每条失败路径都得记得擦一次 —— 靠记性的事迟早漏。
 
-    会话期间**读**看到的是两张表之和：插件在 setup 里要读宿主的扩展点、
+    会话期间**读**看到的是两张表之和：插件构造时可能要读宿主的扩展点、
     要读依赖交出来的服务（依赖已经 commit 过了，在正表里），这些必须照常可见。
     所以只把「写」导向暂存区，读是合并视图。
+
+    边界：**会话里只有 add / set / declare 三种写**（也就是插件的全部登记动作），
+    它们都进暂存区；`bind` / `unbind` 在会话里只允许动**本次会话写下的**条目
+    （插件自己 declare 一个点又 provide 上去就是这种），碰正表里的条目会当场报错；
+    `remove_namespace` 这种整表操作在会话里一律报错。理由同一条：
+    「构建期失败就整块舍弃」的前提是「会话里写的每一笔都在暂存区」。
     """
 
     RESERVED = _RESERVED
@@ -258,6 +310,8 @@ class Registry:
         # 同一个扩展点可能两边都有块：正表那块带 schema（以及已提交的条目），
         # 暂存区那块装本次会话新加的条目。查询要合起来看。
         self._stage = None
+        self._session_owner = None      # 加载会话的主人（插件 id），见 begin()
+        self._session_token = None      # 有主人的会话的凭据，见 begin()
 
     # ─────────────────────────── 加载会话 ───────────────────────────
 
@@ -265,16 +319,46 @@ class Registry:
         """当前是否在加载会话里。"""
         return self._stage is not None
 
-    def begin(self):
-        """开一个加载会话。已经在会话里就报错 —— 嵌套说明调用方搞错了。"""
-        if self._stage is not None:
-            raise RegistryError("已经在加载会话里，不能嵌套（插件 setup 里别再开一个）")
-        self._stage = {}
-        return self
+    def begin(self, registrant=None):
+        """开一个加载会话；registrant 是这场会话的主人（插件 id）。
 
-    def commit(self):
-        """把会话登记的并进正表：先声明新扩展点，再落条目。返回并进去的条数。"""
+        记下主人是为了**归属自动**：插件在自己的构建窗口里 set 顶掉别人的条目时，
+        不用自己声明「这条算我的」—— 会话里的人就是加载器正在装的那个插件。
+        于是它加载失败（abort）或过后被卸载（remove_namespace）时，注册表都认得出
+        哪些条目该回退。已经在会话里就报错，嵌套说明调用方搞错了。
+
+        返回一个**会话凭据**（token）：有主人的会话，`commit`/`abort` 必须把它带回来。
+        否则插件在自己的构造里随手 `registry.abort()` 一下，会话就没了 —— 之后它写的
+        东西直接落正表，而加载器那一步「失败就整块舍弃」的 `abort()` 成了空操作，
+        半截条目留在正表里（这条实测过）。没主人的会话（测试里直接 begin()）
+        不受影响，照旧裸调。
+        """
+        if self._stage is not None:
+            raise RegistryError("已经在加载会话里，不能嵌套（插件构造里别再开一个）")
+        self._stage = {}
+        self._session_owner = registrant
+        self._session_token = object() if registrant is not None else None
+        return self._session_token
+
+    def _end_session(self, token=_ANY_TOKEN, force=False):
+        if (not force and self._session_token is not None
+                and token is not self._session_token):
+            raise RegistryError(
+                "这不是本次加载会话：有主人的会话只能由开始它的那一方"
+                "（加载器）用自己拿到的凭据 commit/abort —— 插件在自己的构造里"
+                "不要关会话，登记的东西交给加载器整块提交或丢弃")
         stage, self._stage = self._stage, None
+        self._session_owner = None
+        self._session_token = None
+        return stage
+
+    def commit(self, token=_ANY_TOKEN, *, force=False):
+        """把会话登记的并进正表：先声明新扩展点，再落条目。返回并进去的条数。
+
+        force=True 是给加载器兜底用的（凭据对不上时也要能关掉会话，否则进程内
+        谁都开不了新会话，只有重启能救）；插件不该用它。
+        """
+        stage = self._end_session(token, force)
         if not stage:
             return 0
         n = 0
@@ -300,9 +384,12 @@ class Registry:
                 n += 1
         return n
 
-    def abort(self):
-        """丢掉这次会话的全部登记。返回丢掉的条数（新扩展点不算条数）。"""
-        stage, self._stage = self._stage, None
+    def abort(self, token=_ANY_TOKEN, *, force=False):
+        """丢掉这次会话的全部登记。返回丢掉的条数（新扩展点不算条数）。
+
+        force=True 见 commit 的说明。
+        """
+        stage = self._end_session(token, force)
         if not stage:
             return 0
         return sum(1 for block in stage.values()
@@ -325,6 +412,40 @@ class Registry:
         if self._stage is None:
             return self.data.setdefault(point, {})
         return self._stage.setdefault(point, {})
+
+    def _staged_entry(self, point, key):
+        """这条条目在暂存区里吗（在 = 它就是本次会话写下的）。"""
+        block = (self._stage or {}).get(point)
+        if not block or key in self.RESERVED:
+            return None
+        return block.get(key)
+
+    def _guard_built(self, point, key, what):
+        """回填 / 摘产物：会话里只许动**本次会话写下的**条目。
+
+        条目是本次会话 add/set 的（比如插件自己 declare 一个点又 provide 上去），
+        它就在暂存区里，改动跟着 abort() 一起丢掉 —— 安全。
+        条目来自正表（宿主早先登记的），改的就是正表那一份，abort() 滚不掉 ——
+        而「构建期失败就整块舍弃」正是靠「会话里写的每一笔都能被丢掉」立住的。
+        真出现这种情况宁可当场报错：留着的那种改动会让界面与注册表对不上，
+        事后查起来毫无线索。
+        """
+        if self._stage is None or self._staged_entry(point, key) is not None:
+            return
+        raise RegistryError(
+            f"加载会话里不能对正表条目 {point}.{key} 做 {what}：它不在暂存区，"
+            f"会话的 abort() 回滚不了这笔改动。"
+            f"会话里只该 add/set/declare（插件的登记动作）")
+
+    def _guard_session(self, what):
+        """会话期间不许做的整表操作（remove_namespace）：它同时改正表与暂存区。
+
+        「加载期只往暂存区写」是「插件构建期失败就整块舍弃」这条承诺的**前提**。
+        卸载别的插件是宿主在会话之外做的事，真在会话里做了就当场报错。
+        """
+        if self._stage is not None:
+            raise RegistryError(
+                f"加载会话里不能 {what}：它直接改正表，会话的 abort() 回滚不了")
 
     def _find_entry(self, point, key):
         """取条目**本身**（暂存区优先，它更新）。没有就返回 None。
@@ -355,9 +476,24 @@ class Registry:
         if not isinstance(point, str) or not point or point.startswith("__"):
             raise RegistryError(f"扩展点名不合法：{point!r}")
 
+        # 字符串参数会被 tuple() 逐字符拆开（fields="title" → 't','i','t','l','e'），
+        # 而 required 也一起被拆开，竟然能通过「必须在 fields 中」的检查 ——
+        # 错误要拖到登记时才以看不懂的样子爆出来。这里当场拦。
+        for name, value in (("fields", fields), ("required", required), ("built", built)):
+            if isinstance(value, str):
+                raise RegistryError(
+                    f"{point}: declare 的 {name} 要的是序列（元组/列表），"
+                    f"不是字符串 —— 传字符串会被逐字符拆开。收到 {value!r}")
         fields = tuple(fields)
         required = tuple(required)
         built = tuple(built)
+        # 保留键不许当字段：它们要么被静默吞掉（读了取不到），要么伪造出产物
+        clash = sorted((set(fields) | set(required) | set(built))
+                       & (set(_ENTRY_RESERVED) | set(_RESERVED)))
+        if clash:
+            raise RegistryError(
+                f"{point}: 这些名字是注册表的保留键，不能当字段或产物槽位：{clash}"
+                f"（保留键：{sorted(set(_ENTRY_RESERVED) | set(_RESERVED))}）")
         stray = [f for f in required if f not in fields]
         if stray:
             raise RegistryError(f"{point}: __required__ 里的 {stray} 不在 __fields__ 中")
@@ -431,7 +567,7 @@ class Registry:
         return Entry(point, key, block["__registrant__"], dict(fields),
                      block.get("__built_fields__", ()))
 
-    def set(self, point, key, **fields):
+    def set(self, point, key, *, by=None, **fields):
         """写一条条目：已有就**顶掉**，没有就新建。返回 Entry。
 
         与 add() 的分工：add 是「登记」（撞名报错，防手滑、也防两条内置条目
@@ -442,25 +578,77 @@ class Registry:
         会话里（插件加载期）同样成立：写进暂存区把正表那条盖住，abort 就什么
         都没发生，commit 才真落到正表。
 
-        谁 set 谁负责：插件顶掉宿主的内置条目之后，卸载时要把宿主那条 set 回来
-        （卸载按命名空间摘，而 `core.*` 这种 key 挂不到插件名下）。
+        覆盖记录（by）
+        --------------
+        被顶掉的那条**不丢**，整条记在新条目的 __over__ 里（连同它自己压着的那些），
+        新条目再用 __owner__ 记下这条现在归谁：
+
+            registry.set("core.overlays", "core.closeAsk", by="example_x", …)
+
+        by 省略时按 key 的命名空间算 —— 宿主登记自己的条目就是这种。于是
+        remove_namespace("example_x") 既摘得掉插件顶上去的那条（key 是
+        core.* 也算他的），又把被顶掉的宿主条目**放回原位**，界面于是回到
+        上一个提供者的控件。在此之前谁 set 谁得自己负责 set 回来，忘了就是
+        宿主的条目永久消失、只留一个连着已卸载实例的控件。
         """
         block = self._block(point)
         self._check_key(point, key)
         self._check_fields(point, key, block, fields)
-        self._write_block(point)[key] = dict(fields)
-        return Entry(point, key, block["__registrant__"], dict(fields),
+        owner = by or self._session_owner or _namespace_of(key)
+        entry = dict(fields)
+        entry[_OWNER] = owner
+        cur = self._find_entry(point, key)
+        if isinstance(cur, dict):
+            # 自己再设一次：只更新自己那层，不往栈里堆 —— 重载插件会把同一批
+            # key 再写一遍，堆下去是无界增长。
+            chain = list(cur.get(_OVER) or [])
+            if cur.get(_OWNER, _namespace_of(key)) != owner:
+                # 换人了：把被顶掉的这条（不含产物，界面要按回退后的条目重建）
+                # 压进栈里；它自己压着的那些跟着一起留着。
+                displaced = {k: v for k, v in cur.items() if k != _BUILT}
+                chain.append(displaced)
+            entry[_OVER] = chain
+        self._write_block(point)[key] = entry
+        return Entry(point, key, block["__registrant__"], entry,
                      block.get("__built_fields__", ()))
 
     def _check_key(self, point, key):
+        """条目 key：`<namespace>.<name>`，每段都是标识符。
+
+        段规约与插件 id 同一套（字母开头，只有字母/数字/下划线）：key 会进报错
+        文本、也会当命名空间前缀用，带空格或中文的 key 事后根本认不出来是哪条。
+        """
         if not _is_entry_key(key):
             raise RegistryError(
                 f"{point}: 条目 key {key!r} 不合法，必须是 <namespace>.<name>"
-                f"（如 core.start / com.example.hello.main）"
+                f"（如 core.start / example_hello.main）"
+            )
+        bad = [seg for seg in key.split(".") if not _SEG_RE.match(seg)]
+        if bad:
+            raise RegistryError(
+                f"{point}: 条目 key {key!r} 里有不合规的段 {bad} —— "
+                f"每一段都只能用字母、数字与下划线，且首字符是字母"
+                f"（key 会当命名空间前缀用，也出现在报错文本里）"
+            )
+
+    def _check_order(self, point, key, fields):
+        """order 必须是数值（或没写）。
+
+        为什么非查不可：entries() 的排序键直接把 order 塞进元组比较，一个字符串
+        order 会让整整一页的装配在排序时抛 TypeError，而那个报错既不是
+        RegistryError、也说不清是哪条登记的问题；validate() 也查不出来。
+        """
+        if "order" not in fields:
+            return
+        value = fields["order"]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RegistryError(
+                f"{point}.{key}: order 必须是数字，收到 "
+                f"{type(value).__name__}（{value!r}）"
             )
 
     def _check_fields(self, point, key, block, fields):
-        """字段校验（add 与 set 共用）：认得的字段、必填的字段。"""
+        """字段校验（add 与 set 共用）：认得的字段、必填的字段、字段值本身。"""
         allowed = set(block["__fields__"])
         unknown = sorted(set(fields) - allowed)
         if unknown:
@@ -470,6 +658,7 @@ class Registry:
         missing = sorted(set(block["__required__"]) - set(fields))
         if missing:
             raise RegistryError(f"{point}.{key}: 缺必填字段 {missing}")
+        self._check_order(point, key, fields)
 
     def provide(self, point, key, obj, **meta):
         """登记一个**已经存在**的对象，登记完立刻可查。
@@ -489,6 +678,7 @@ class Registry:
         责任人不同、时机也不同 —— 插件可以在启动早期就登记完，而界面要等宿主建好
         才开始构建。产物走 __built__，不参与 __fields__ 校验。
         """
+        self._guard_built(point, key, "bind（回填构建产物）")
         block = self._block(point)
         raw = self._find_entry(point, key)
         if not isinstance(raw, dict) or key in self.RESERVED:
@@ -505,6 +695,7 @@ class Registry:
 
     def unbind(self, point, key, *names):
         """摘掉构建产物（界面重建 / 卸载前）。不带 names 则清空该条目的全部产物。"""
+        self._guard_built(point, key, "unbind（摘构建产物）")
         block = self._block(point)
         raw = self._find_entry(point, key)
         if not isinstance(raw, dict) or key in self.RESERVED:
@@ -525,7 +716,7 @@ class Registry:
 
     # ─────────────────────────── 查询 ───────────────────────────
 
-    def entries(self, point, *, where=None, order_by="order"):
+    def entries(self, point, *, where=None, order_by=_ANY_TOKEN):
         """按 order 取条目；where 做等值筛选（如 where={"group": "preferences"}）。
 
         排序键是 (order, key)：同一 order 下按 key 定序，保证每次构建顺序一致 ——
@@ -533,8 +724,21 @@ class Registry:
 
         返回的 Entry 是**只读视图**（字段为副本）：界面拿着它构造控件即可，
         要改登记内容请走 add()/remove_namespace()，别改快照。
+
+        where / order_by 的字段名写错**当场报错**，而不是静默降级：错一个字
+        （where={"gropu": …}）会安静地过滤掉整组条目，界面上表现为「那一块
+        凭空消失」，比一条报错难查得多。
         """
         block = self._block(point)
+        allowed = set(block.get("__fields__", ()))
+        if order_by is _ANY_TOKEN:
+            order_by = "order" if "order" in allowed else None
+        for name, keys in (("where", where or {}), ("order_by", (order_by,) if order_by else ())):
+            unknown = sorted(k for k in keys if k not in allowed)
+            if unknown:
+                raise RegistryError(
+                    f"{point}: {name} 里的 {unknown} 不是这个扩展点的字段；"
+                    f"可用字段：{sorted(allowed)}")
         out = []
         seen = set()
         # 暂存区在前、正表在后：会话里 set 过的以暂存区为准（同 key 只出面一次，
@@ -550,7 +754,9 @@ class Registry:
                     continue
                 out.append(e)
         if order_by:
-            out.sort(key=lambda e: (e.fields.get(order_by, DEFAULT_ORDER), e.key))
+            # 排序键写成不会抛 TypeError 的形式：order 已经在 add/set 时校验过是数值，
+            # 但正表里的老数据（或别人手改过的）不该让整整一页的装配死在排序上。
+            out.sort(key=lambda e: (_sort_key(e.fields.get(order_by)), e.key))
         return out
 
     def entry(self, point, key):
@@ -586,7 +792,7 @@ class Registry:
                 if not isinstance(fields, dict):
                     problems.append(f"{point}.{key}: 条目内容不是 dict")
                     continue
-                unknown = sorted(set(fields) - allowed - {_BUILT})
+                unknown = sorted(set(fields) - allowed - set(_ENTRY_RESERVED))
                 if unknown:
                     problems.append(f"{point}.{key}: 未知字段 {unknown}")
                 missing = sorted(required - set(fields))
@@ -595,37 +801,123 @@ class Registry:
         return problems
 
     def remove_namespace(self, ns):
-        """按命名空间摘掉条目（插件禁用 / 加载失败回滚），返回摘掉的条数。
+        """摘掉某个提供者的条目（插件卸载 / 加载失败回滚），返回改动过的条数。
 
-        只摘条目，不动扩展点本身的声明 —— 扩展点归声明者，不该被插件带走。
+        谁算「它的条目」看两处：key 的命名空间，以及条目上的 __owner__（它 set
+        顶掉别人条目时写的那个）—— 于是插件顶掉宿主内置的 `core.*` 条目也摘得掉。
+
+        摘一条时先看它的 __over__：
+          * 栈里还有被顶掉的 → 把栈顶那条**放回原位**（产物不带回来：控件得由
+            界面按回退后的条目重建），它自己压着的那些继续留在栈里；
+          * 栈空了 → 这条整个删掉（它本来没有前身）。
+
+        剔层与回退是**两步**，顺序要紧：先把全表所有条目的 __over__ 链里属于 ns
+        的层剔掉，再处理「这条归 ns」的条目。倒过来的话，「A 顶内置、B 顶 A、先卸 A
+        再卸 B」这条最常见的顺序（卸载顺序 = 加载顺序）就会把已经卸载的 A 放回正表
+        —— 界面重建时那条幽灵条目又回来了，它的闭包还攥着卸掉的实例。
+
+        另外把**它自己声明的扩展点**一并撤掉（连带那个点里的条目，包括别人往它那儿登记的）：
+        契约是它带来的，它走了契约不该留着 —— 留着的话，插件下次带着改过的字段表回来
+        会撞「已声明且 schema 不同」，界面上的表现是「重载插件失败」，非得重启启动器才能
+        再装上。
+
+        宿主命名空间（core / src / main / …）一律拒绝：内置扩展点的声明只在启动时
+        声明一次，删掉之后进程内没有恢复路径，而插件拿得到 host.registry。
         """
+        self._guard_session("remove_namespace（摘条目）")
+        if ns in HOST_NAMESPACES:
+            raise RegistryError(
+                f"不能按命名空间摘宿主的条目（{ns!r}）：内置扩展点的声明只在启动时"
+                f"做一次，删掉之后恢复不了。要撤插件请传它的 id")
         removed = 0
         for table in (self.data, self._stage or {}):
-            for point, block in table.items():
-                doomed = [k for k in block
-                          if k not in self.RESERVED and _namespace_of(k) == ns]
-                for k in doomed:
-                    del block[k]
+            # ① 先剔层：谁的身上压着 ns 的层都要剔（不论那条现在归谁）
+            for block in table.values():
+                for key, fields in list(block.items()):
+                    if key in self.RESERVED or not isinstance(fields, dict):
+                        continue
+                    chain = fields.get(_OVER)
+                    if not chain:
+                        continue
+                    kept = self._strip_layers(chain, ns)
+                    if len(kept) != len(chain):
+                        if kept:
+                            fields[_OVER] = kept
+                        else:
+                            fields.pop(_OVER, None)
+            # ② 再撤它声明的点：连点带条目一起（那些条目指向一个正在消失的契约）
+            for point in [p for p, block in table.items()
+                          if _owned_by(p, block.get("__registrant__", ""), ns)]:
+                removed += sum(1 for k in table[point] if k not in self.RESERVED)
+                del table[point]
+            # ③ 最后处理条目本身：回退或删除
+            for point, block in list(table.items()):
+                for key in [k for k in block if k not in self.RESERVED]:
+                    fields = block[key]
+                    if not isinstance(fields, dict):
+                        continue
+                    if not _owned_by(key, self._owner_of(key, fields), ns):
+                        continue
                     removed += 1
+                    chain = list(fields.get(_OVER) or [])
+                    if chain:
+                        back = chain.pop()
+                        back.pop(_BUILT, None)          # 产物是上一次构建的，重建才有
+                        if chain:
+                            back[_OVER] = chain
+                        else:
+                            back.pop(_OVER, None)       # 回到最底下那条：记录清干净
+                        block[key] = back
+                    else:
+                        del block[key]
         return removed
 
+    @staticmethod
+    def _owner_of(key, fields):
+        """条目现在归谁（没记过就是 key 的命名空间）。"""
+        return fields.get(_OWNER) or _namespace_of(key)
+
+    @staticmethod
+    def _strip_layers(chain, ns):
+        """把栈里属于 ns 的层剔掉，其余原样保留（顺序不变）。"""
+        return [layer for layer in chain
+                if not (isinstance(layer, dict) and layer.get(_OWNER) == ns)]
+
     def clear(self):
-        """清空整表（测试隔离用）。"""
+        """清空整表（测试隔离用）：连会话一起收掉，免得清完还留着一个半开的暂存区。"""
         self.data.clear()
+        self._stage = None
+        self._session_owner = None
+        self._session_token = None
+
+    def table(self):
+        """可用扩展点查询表：{扩展点: {fields, required, built, registrant, doc}}。
+
+        契约声明本来就存在注册表里，这里只是把它摊成一张可查的表 ——
+        写给插件作者与工具用（「有哪些块、各要什么字段」），不必另抄一份
+        （手抄的那份一定会漂）。按扩展点名排序，输出稳定。
+        """
+        out = {}
+        for point in self.points():
+            block = self._block(point)
+            out[point] = {
+                "fields": list(block.get("__fields__", ())),
+                "required": list(block.get("__required__", ())),
+                "built": list(block.get("__built_fields__", ())),
+                "registrant": block.get("__registrant__", ""),
+                "doc": (block.get("__doc__") or "").strip(),
+            }
+        return out
 
     def dump(self):
         """当前结构的快照，供排查时直接打印。
 
         条目也复制一层：dump 出来的东西要是能被随手改坏注册表，
-        那它就不是快照而是后门了。
+        那它就不是快照而是后门了。**要深拷贝**：条目里的 __over__（栈）与
+        __built__（产物）是可变容器，浅拷贝只换外壳 —— 往 dump 出来的
+        __over__ 里塞一层，就能让 remove_namespace 把一条假条目「回退」进正表。
         """
-        out = {}
-        for point, block in self.data.items():
-            out[point] = {
-                k: (dict(v) if isinstance(v, dict) else v)
-                for k, v in block.items()
-            }
-        return out
+        return copy.deepcopy(self.data)
 
     # ─────────────────────────── 内部 ───────────────────────────
 

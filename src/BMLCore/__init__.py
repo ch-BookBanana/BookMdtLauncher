@@ -21,11 +21,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     from BMLCore import Plugin
 
     class Hello(Plugin):
-        id = "com.example.hello"      # 反向域名，同时是注册表里的命名空间
+        id = "you_hello"              # 标识符，建议带作者名；同时是注册表命名空间
         name = "Hello"
 
-        def setup(self):
-            self.add("core.setting.items", "greet", init=..., section=..., title=...)
+        def __init__(self, host):
+            super().__init__(host)
+            self.add("core.setting.items", "greet",
+                     init=..., section="core.setting.plugins", title="you_hello.greet")
 
 为什么中间要有这一层
 --------------------
@@ -56,7 +58,7 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
     self.add_tray(...)      往系统托盘右键菜单加一项
 
 插件设置不用单独记一个名字：它挂在插件实例上 —— self.settings["key"]，
-存进宿主 settings.json 的 "plugins" 里自己那一格（见 utils/pluginSettings.py）。
+存进宿主 settings.json 的 "pluginSettings" 里自己那一格（见 utils/pluginSettings.py）。
 
 边界提醒（写插件前务必分清）
 ----------------------------
@@ -67,11 +69,11 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
 
 from PySide6.QtCore import Signal
 
-from . import Widgets
-from .Plugin import API_VERSION, Plugin
+from . import Widgets, registrar
+from .Plugin import API_VERSION, BMLPlugin, Ctx, Plugin, Service
 from ..utils.events import events
 from ..utils.path_utils import getPath
 from ..utils.registry import registry, simple
 
-__all__ = ["API_VERSION", "Plugin", "Widgets", "events", "registry", "simple",
-           "getPath", "Signal"]
+__all__ = ["API_VERSION", "Plugin", "BMLPlugin", "Ctx", "Service", "registrar",
+           "Widgets", "events", "registry", "simple", "getPath", "Signal"]
