@@ -47,6 +47,7 @@
     "core.log.warning.javaInvalidPath": "Java path unavailable, reverted to auto match: $1",
     "core.log.warning.dlJavaSyncError": "[DlList] Java state sync error: $1",
     "core.log.warning.dlMdtPausedError": "[DlList] Failed to sync pause state to downloading.json: $1",
+    "core.log.warning.dlCancelPending": "[DlList] Download thread still blocked on a network read; temp files kept, target dir not removed",
     "core.log.warning.dlMdtResumeError": "[mdt-download] Startup resume $1 failed: $2",
     "core.log.warning.dlMdtScanError": "[mdt-download] Failed to scan unfinished downloads: $1",
 

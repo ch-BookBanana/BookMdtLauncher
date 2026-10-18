@@ -453,18 +453,27 @@ class DlListPage(QWidget):
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
                     def _do_cancel(e, t=self.task, dest=self.task_info.get("dest") or ""):
                         try:
-                            t.cancel(timeout=8)
-                        finally:
-                            # mdt 游戏下载：取消后删除目标文件夹（含 downloading.json）
-                            if dest and _is_mdt_download(dest):
-                                mdir = os.path.dirname(dest)
-                                try:
-                                    if os.path.isdir(mdir):
-                                        shutil.rmtree(mdir, ignore_errors=True)
-                                    events.logger.info(t(events.lang.get("core.log.info.dlMdtCancelCleaned"),
-                                                            os.path.basename(mdir) or mdir))
-                                except Exception:
-                                    pass
+                            stopped = t.cancel(timeout=8)
+                        except Exception:
+                            stopped = False
+                        # 分片线程没停下来就别删目标目录：它还阻塞在网络读上，
+                        # 收尾时会继续往临时目录里写。这时删掉目录，用户看到的
+                        # 是「取消了但文件又回来了」，而紧接着重新下载同一个目标
+                        # 会复用同一个 task_id，两个线程写同一批分块文件。
+                        if not stopped:
+                            events.logger.warning(t(
+                                events.lang.get("core.log.warning.dlCancelPending")))
+                            return
+                        # mdt 游戏下载：取消后删除目标文件夹（含 downloading.json）
+                        if dest and _is_mdt_download(dest):
+                            mdir = os.path.dirname(dest)
+                            try:
+                                if os.path.isdir(mdir):
+                                    shutil.rmtree(mdir, ignore_errors=True)
+                                events.logger.info(t(events.lang.get("core.log.info.dlMdtCancelCleaned"),
+                                                        os.path.basename(mdir) or mdir))
+                            except Exception:
+                                pass
                     QThTimer.task(0, _do_cancel, dedicated=True)
             else:
                 self.delete_requested.emit(self.state_file)
