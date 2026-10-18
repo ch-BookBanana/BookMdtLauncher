@@ -1,0 +1,36 @@
+# 行尾统一为 LF
+#
+# 仓库里长期只有 main.py 与 src/lang/zh-CN.json 是 CRLF，其余全是 LF。
+# 在 Windows 上两者都能跑，但 git diff 会把整个文件算成改动（一个换行符
+# 差异就是一整file的重写），代码审查时真正的改动被淹没。
+#
+# 这里对所有文本文件统一声明为 LF，并让 git 在检出时也写 LF（不加 eol=crlf）：
+# 目标是仓库内与工作区一致，任何平台 clone 下来都得到同样的字节。
+#
+# 二进制资源（png / jar / zip 等）不能做换行符转换，交给 git 自动识别；
+# 显式列出常见的几类，避免被 auto 误判成文本。
+
+* text=auto eol=lf
+
+# ── 明确按文本处理 ──
+*.py     text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.qss    text eol=lf
+*.cmd    text eol=lf
+*.toml   text eol=lf
+*.txt    text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# ── 明确按二进制处理（不做任何换行符转换与文本 diff）──
+*.png    binary
+*.ico    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.jar    binary
+*.zip    binary
+*.mp3    binary
+*.pyc    binary
