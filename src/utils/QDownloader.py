@@ -860,6 +860,12 @@ class QDownloader(QObject):
             # 暂停时阻塞等待（resume 或 cancel 时唤醒），不返回失败
             self._pause_event.wait()
 
+            # stream=True 的响应必须显式 close 才会把连接还给连接池；中途放弃
+            # （取消 / 断流重试 / raise_for_status 失败）时 iter_content 不会读到
+            # 结尾，不关就漏一个连接。8 线程 × 重试足以耗尽默认 pool_maxsize=10，
+            # 表现为下载后段变慢或卡住重连。`_race_sources` 的探测分支出于同一
+            # 原因也是显式 close 的（见该函数注释）。
+            resp = None
             try:
                 local_headers = self.headers.copy()
                 local_headers['Range'] = f'bytes={resume_from}-{end}'
@@ -917,6 +923,10 @@ class QDownloader(QObject):
                     _interruptible_sleep(2 ** attempt)
                     continue
                 raise
+
+            finally:
+                if resp is not None:
+                    resp.close()
 
         return False
 
