@@ -23,7 +23,7 @@ BookMDTLauncher/
         ├── javaManager.py      # 本地 Java 发现与校验（PATH / 常见目录 / 注册表）
         ├── javaDownload.py     # Java 自动下载 / 解压
         ├── QDownloader.py      # 多线程断点续传下载器
-        ├── QThTimer.py         # 跨线程定时器框架
+        ├── qthtimer.py         # 跨线程定时器框架
         ├── path_utils.py       # 多环境（开发 / PyInstaller / Nuitka）路径解析
         ├── utils.py            # 通用工具：翻译取用、图标改色、Markdown 渲染
         ├── bus.py              # 全局总线：主题/语言变化广播，控件用 bus.bind(self) 自行接入

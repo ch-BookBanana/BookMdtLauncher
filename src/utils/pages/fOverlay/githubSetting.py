@@ -34,7 +34,7 @@ from ...bus import bus
 from ...events import events
 from ...options.scrolls import Scroll
 from ...path_utils import getPath
-from ...QThTimer import QThTimer
+from ...qthtimer import QThTimer
 from ...registry import Box, registry
 from ...resources import ACT_TIPS, TBT_CLOSE
 from ...utils import change_color

@@ -40,7 +40,7 @@ from ...bus import bus
 from ...events import events
 from ...options.scrolls import Scroll
 from ...QDownloader import QDownloader
-from ...QThTimer import QThTimer
+from ...qthtimer import QThTimer
 from ...registry import Box, registry
 from ...utils import _is_mdt_download, t
 

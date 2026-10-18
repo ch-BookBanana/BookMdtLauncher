@@ -32,7 +32,7 @@ from typing import List, Optional, Set, Dict
 
 from PySide6.QtCore import QObject, Signal
 
-from .QThTimer import QThTimer
+from .qthtimer import QThTimer
 from .path_utils import getPath
 
 
