@@ -6,6 +6,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
 ![Language](https://img.shields.io/badge/Language-Python%20%2B%20PySide6-green)
 [![Version](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fgithub.com%2Fch-BookBanana%2FBookMdtLauncher%2Freleases.atom&query=%2F%2F*%5Blocal-name()%3D%27entry%27%5D%5B1%5D%2F*%5Blocal-name()%3D%27title%27%5D&label=Version&color=green)](https://github.com/ch-BookBanana/BookMdtLauncher/releases)
+[![QQ群](https://img.shields.io/badge/QQ群-337396920-blue.svg)](https://qm.qq.com/q/JoZzCNH0SQ)
 
 **基于 PySide6 的 Windows 桌面端 Mindustry 启动器**
 
