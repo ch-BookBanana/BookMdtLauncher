@@ -47,6 +47,7 @@
     "core.log.warning.javaInvalidPath": "Java 路径不可用，已改回自动匹配: $1",
     "core.log.warning.dlJavaSyncError": "[DlList] Java状态同步异常: $1",
     "core.log.warning.dlMdtPausedError": "[DlList] 同步 downloading.json 暂停状态失败: $1",
+    "core.log.warning.dlCancelPending": "[DlList] 下载线程仍在网络请求中，未能及时停止；临时文件已保留，目标目录暂不删除",
     "core.log.warning.dlMdtResumeError": "[mdt-download] 启动续传 $1 失败: $2",
     "core.log.warning.dlMdtScanError": "[mdt-download] 扫描未完成下载失败: $1",
 

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from ...events import events
 from ...QDownloader import QDownloader
 from ...mdtManager import mdtManager
-from ...QThTimer import QThTimer
+from ...qthtimer import QThTimer
 from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import _apply_md_image, change_color, md_to_html, t

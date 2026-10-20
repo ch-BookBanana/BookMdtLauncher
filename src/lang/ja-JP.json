@@ -47,6 +47,7 @@
     "core.log.warning.javaInvalidPath": "Java パスが利用不可のため自動マッチに戻しました: $1",
     "core.log.warning.dlJavaSyncError": "[DlList] Java 状態同期エラー: $1",
     "core.log.warning.dlMdtPausedError": "[DlList] downloading.json への一時停止状態同期に失敗: $1",
+    "core.log.warning.dlCancelPending": "[DlList] ダウンロードスレッドはまだ通信中です。一時ファイルは保持し、対象ディレクトリは削除しません",
     "core.log.warning.dlMdtResumeError": "[mdt-download] 起動時の再開 $1 に失敗: $2",
     "core.log.warning.dlMdtScanError": "[mdt-download] 未完了ダウンロードのスキャンに失敗: $1",
 

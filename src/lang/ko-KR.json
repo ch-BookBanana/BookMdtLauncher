@@ -47,6 +47,7 @@
     "core.log.warning.javaInvalidPath": "Java 경로를 쓸 수 없어 자동 매칭으로 되돌렸습니다: $1",
     "core.log.warning.dlJavaSyncError": "[DlList] Java 상태 동기화 오류: $1",
     "core.log.warning.dlMdtPausedError": "[DlList] downloading.json 일시정지 상태 동기화 실패: $1",
+    "core.log.warning.dlCancelPending": "[DlList] 다운로드 스레드가 아직 네트워크 요청 중입니다. 임시 파일은 유지하고 대상 디렉터리는 삭제하지 않습니다",
     "core.log.warning.dlMdtResumeError": "[mdt-download] 시작 시 재개 $1 실패: $2",
     "core.log.warning.dlMdtScanError": "[mdt-download] 미완료 다운로드 스캔 실패: $1",
 

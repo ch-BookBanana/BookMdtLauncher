@@ -71,7 +71,7 @@ try:
     from src.utils.settings import Settings
     from src.utils.mdtManager import mdtManager
     from src.utils.mdtLauncher import mdtLauncher, set_tr_func as mdt_set_tr_func
-    from src.utils.QThTimer import QThTimer
+    from src.utils.qthtimer import QThTimer
     from src.utils.api import githubAPI
     from src.utils.api.githubAPI import GithubAPI
     from src.utils.javaManager import javaManager

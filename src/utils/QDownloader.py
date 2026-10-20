@@ -60,6 +60,7 @@ import json
 import time
 import hashlib
 import shutil
+import socket
 import threading
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
@@ -405,9 +406,18 @@ class QDownloader(QObject):
 
         timeout: 等待工作线程退出的秒数；None 表示无限等待（默认）。
         线程未能及时退出时保留临时文件（下次可断点续传），不强行删除。
+
+        返回线程是否已退出。分片线程通常会被直接打断（见 _interrupt_inflight），
+        因此绝大多数情况下这里是 True；返回 False 说明连 shutdown 都没能
+        唤醒读（极少数平台/连接状态），此时临时文件原样保留，调用方据此
+        决定能不能紧接着删目标目录 —— 删了也没用，分片收尾时还会把数据写回
+        同一个临时目录。
         """
         self._is_cancelled = True
         self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
+        # 打断在途网络读：不这么做的话，分片线程要一直阻塞到读超时（60 秒）
+        # 才看得到取消标志，cancel() 也就跟着卡同样久。
+        self._interrupt_inflight()
         stopped = True
         if self._thread.isRunning():
             stopped = self._thread.wait(timeout)
@@ -416,6 +426,36 @@ class QDownloader(QObject):
         # 线程从未启动（未 start 即 cancel）：finished/cancelled 信号不会发射，
         # 需要手动注销，避免僵尸任务残留在注册表中
         unregister_task(self.task_id)
+        return stopped
+
+    def _interrupt_inflight(self):
+        """打断所有进行中的网络读，让阻塞在 recv 上的分片线程立刻返回。
+
+        为什么不用 resp.close()：socket.close() 只是把引用计数减一，内核里
+        已经阻塞的 recv 不会因此返回，要等对端发数据或读超时（实测 60 秒）。
+        必须 shutdown(SHUT_RDWR)，内核才会中断这个读并让 recv 立刻拿到 EOF。
+
+        副作用是安全的：被打断的分片会收到 ChunkedEncodingError（已在
+        _download_block 的 except 里），重试前会看到 _is_cancelled 而直接
+        返回 False，不会误判成下载失败。
+
+        socket 的取法（resp.raw._fp.fp.raw._sock）不是 requests / urllib3 的
+        公开 API，版本升级可能变。所以这里层层兜住：取不到就跳过，退回
+        「等读超时」的旧行为，不会崩，也不会影响那些已经正常结束的响应。
+        """
+        with self._lock:
+            resps = list(self._active_responses.values())
+        for resp in resps:
+            try:
+                sock = resp.raw._fp.fp.raw._sock
+            except Exception:
+                continue
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            except Exception:
+                pass
 
     def wait_thread(self, timeout=None):
         """等待内部下载线程完全退出（返回是否已退出）。
@@ -665,8 +705,10 @@ class QDownloader(QObject):
                 # 同时节流写 download.json，供界面展示与下次续传
                 while pending_futures:
                     if self._is_cancelled:
+                        # 先通知界面，再在下面 finally 里等分片收尾 —— 顺序不能反，
+                        # 否则界面要等 worker 退出（最坏是读超时）才有反应。
                         self.cancelled.emit()
-                        return
+                        break
                     done_set, pending_futures = wait(pending_futures, timeout=1.0)
                     self._watch_tick += 1
                     self._emit_progress()
@@ -697,8 +739,15 @@ class QDownloader(QObject):
                             self.finished.emit(False)
                             return
             finally:
-                # wait=False：不阻塞等待正在进行的网络请求，工作线程自然结束
-                executor.shutdown(wait=False, cancel_futures=True)
+                # 取消时 wait=True：本线程退出必须等于「分片都停了」，因为
+                # cancel() 正是靠 _thread.wait() 判断能不能清理临时目录。
+                # wait=False 的话它一看到本线程退出就去删目录，而分片仍在往
+                # 里头写 —— 已取消的下载反而会留下删不干净的临时文件。
+                # 分片线程阻塞在 recv 上时无法被外部唤醒（socket.close() 不会
+                # 中断阻塞读），所以这里的等待上界是读超时；等不及则由
+                # cancel() 的 timeout 判超时、保留临时文件供下次续传。
+                executor.shutdown(wait=self._is_cancelled,
+                                  cancel_futures=True)
 
             # 完成所有块（暂停只作用于块下载阶段，合并阶段不再阻塞，避免静默结束）
             if not self._is_cancelled:
@@ -860,6 +909,12 @@ class QDownloader(QObject):
             # 暂停时阻塞等待（resume 或 cancel 时唤醒），不返回失败
             self._pause_event.wait()
 
+            # stream=True 的响应必须显式 close 才会把连接还给连接池；中途放弃
+            # （取消 / 断流重试 / raise_for_status 失败）时 iter_content 不会读到
+            # 结尾，不关就漏一个连接。8 线程 × 重试足以耗尽默认 pool_maxsize=10，
+            # 表现为下载后段变慢或卡住重连。`_race_sources` 的探测分支出于同一
+            # 原因也是显式 close 的（见该函数注释）。
+            resp = None
             try:
                 local_headers = self.headers.copy()
                 local_headers['Range'] = f'bytes={resume_from}-{end}'
@@ -870,9 +925,9 @@ class QDownloader(QObject):
                 total_block = end - start + 1
                 with self._lock:
                     self._active_responses[block_idx] = resp
+                downloaded = cur
                 try:
                     with open(tmp_path, mode) as f:
-                        downloaded = cur
                         for chunk in resp.iter_content(chunk_size=8192):
                             # 暂停时阻塞等待（线程不退出，resume 后继续）
                             self._pause_event.wait()
@@ -895,6 +950,16 @@ class QDownloader(QObject):
                 finally:
                     with self._lock:
                         self._active_responses.pop(block_idx, None)
+                # 连接被提前关掉时（对端断开、中间设备掐断、或有人从外部 close
+                # 了这个响应）iter_content 不抛异常、静默结束，上面的 for 循环
+                # 照常走完。不校验字节数就 return True 的话，没下完的块会被当成
+                # 完成写进 completed_blocks，到合并阶段才发现块不完整。
+                if downloaded < total_block:
+                    if self._is_cancelled or _ABORT_EVENT.is_set():
+                        return False
+                    raise requests.exceptions.ChunkedEncodingError(
+                        "连接提前结束：已读 %d / 应有 %d 字节"
+                        % (downloaded, total_block))
                 return True
 
             except (requests.exceptions.Timeout,
@@ -917,6 +982,10 @@ class QDownloader(QObject):
                     _interruptible_sleep(2 ** attempt)
                     continue
                 raise
+
+            finally:
+                if resp is not None:
+                    resp.close()
 
         return False
 

@@ -47,6 +47,7 @@
     "core.log.warning.javaInvalidPath": "Java路不可用，復歸自擇: $1",
     "core.log.warning.dlJavaSyncError": "Java態同異: $1",
     "core.log.warning.dlMdtPausedError": "[DlList] 記 downloading.json 暫態敗: $1",
+    "core.log.warning.dlCancelPending": "[DlList] 下載之緒猶在網中，未能即止；暫存之文已留，目標之目暫不刪",
     "core.log.warning.dlMdtResumeError": "[mdt-download] 啟續載 $1 敗: $2",
     "core.log.warning.dlMdtScanError": "[mdt-download] 掃未竟之載敗: $1",
 

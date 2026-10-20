@@ -23,7 +23,7 @@ from PySide6.QtGui import QPixmap
 import os, zipfile, json, logging
 from .path_utils import getPath
 from .javaManager import javaManager
-from .QThTimer import QThTimer
+from .qthtimer import QThTimer
 from .resources import (ICON_MDT)
 
 _log = logging.getLogger("Main.MdtManager")
