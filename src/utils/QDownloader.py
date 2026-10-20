@@ -60,6 +60,7 @@ import json
 import time
 import hashlib
 import shutil
+import socket
 import threading
 from threading import Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
@@ -406,12 +407,17 @@ class QDownloader(QObject):
         timeout: 等待工作线程退出的秒数；None 表示无限等待（默认）。
         线程未能及时退出时保留临时文件（下次可断点续传），不强行删除。
 
-        返回线程是否已退出。False 表示分片线程仍阻塞在网络读上（此时临时
-        文件原样保留），调用方据此决定能不能紧接着删目标目录 —— 删了也没用，
-        分片收尾时还会把数据写回同一个临时目录。
+        返回线程是否已退出。分片线程通常会被直接打断（见 _interrupt_inflight），
+        因此绝大多数情况下这里是 True；返回 False 说明连 shutdown 都没能
+        唤醒读（极少数平台/连接状态），此时临时文件原样保留，调用方据此
+        决定能不能紧接着删目标目录 —— 删了也没用，分片收尾时还会把数据写回
+        同一个临时目录。
         """
         self._is_cancelled = True
         self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
+        # 打断在途网络读：不这么做的话，分片线程要一直阻塞到读超时（60 秒）
+        # 才看得到取消标志，cancel() 也就跟着卡同样久。
+        self._interrupt_inflight()
         stopped = True
         if self._thread.isRunning():
             stopped = self._thread.wait(timeout)
@@ -421,6 +427,35 @@ class QDownloader(QObject):
         # 需要手动注销，避免僵尸任务残留在注册表中
         unregister_task(self.task_id)
         return stopped
+
+    def _interrupt_inflight(self):
+        """打断所有进行中的网络读，让阻塞在 recv 上的分片线程立刻返回。
+
+        为什么不用 resp.close()：socket.close() 只是把引用计数减一，内核里
+        已经阻塞的 recv 不会因此返回，要等对端发数据或读超时（实测 60 秒）。
+        必须 shutdown(SHUT_RDWR)，内核才会中断这个读并让 recv 立刻拿到 EOF。
+
+        副作用是安全的：被打断的分片会收到 ChunkedEncodingError（已在
+        _download_block 的 except 里），重试前会看到 _is_cancelled 而直接
+        返回 False，不会误判成下载失败。
+
+        socket 的取法（resp.raw._fp.fp.raw._sock）不是 requests / urllib3 的
+        公开 API，版本升级可能变。所以这里层层兜住：取不到就跳过，退回
+        「等读超时」的旧行为，不会崩，也不会影响那些已经正常结束的响应。
+        """
+        with self._lock:
+            resps = list(self._active_responses.values())
+        for resp in resps:
+            try:
+                sock = resp.raw._fp.fp.raw._sock
+            except Exception:
+                continue
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            except Exception:
+                pass
 
     def wait_thread(self, timeout=None):
         """等待内部下载线程完全退出（返回是否已退出）。
