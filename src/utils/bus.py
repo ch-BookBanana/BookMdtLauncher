@@ -41,6 +41,7 @@ class _Sub(QObject):
     def __init__(self, widget, name, fn):
         super().__init__(widget)
         self._widget = widget
+        self._name = name
         self._label = f"{type(widget).__qualname__}.{name}"
         self._fn = fn
 
@@ -86,9 +87,17 @@ class _Bus(QObject):
         return widget
 
     def _sub(self, widget, name):
-        """给控件的一个钩子配个垫片；强引用挂在控件自己身上，随控件一起走。"""
+        """给控件的一个钩子配个垫片；强引用挂在控件自己身上，随控件一起走。
+
+        同一个 widget 的同一个钩子只建一个：bind() 末尾补主题时也要拿它调 fire，
+        每次都新建会让 _bus_subs 无限增长。
+        """
+        subs = widget.__dict__.setdefault("_bus_subs", [])
+        for sub in subs:
+            if sub._name == name:
+                return sub
         sub = _Sub(widget, name, getattr(widget, name))
-        widget.__dict__.setdefault("_bus_subs", []).append(sub)
+        subs.append(sub)
         return sub
 
 
