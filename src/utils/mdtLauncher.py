@@ -192,6 +192,10 @@ class mdtLauncher(QProcess):
             self.kill()
             if not self.waitForFinished(3000):
                 _log.warning("game process still alive after 3s: pid=%s" % self.processId())
+                # 进程没死：不解锁、也不把状态标成空闲。本轮正在退出，句柄会随
+                # BML 进程结束由系统释放；这里提前解锁反而让「仍在运行的实例」
+                # 看上去可以改名/删除。
+                return False
             self.going = 0
             self._locker.unlock()
             return True
@@ -389,14 +393,16 @@ class mdtLauncher(QProcess):
         if exitCode != 0:
             text += " (0x%08X)" % (exitCode & 0xFFFFFFFF)
         self.log.emit({"type": "info" if exitCode == 0 else "error", "text": text})
+        # going 先归零再发信号：lifecycle_finished 的接收方读 going 判断运行
+        # 状态，晚归零会让按钮停在禁用态。
+        self.going = 0
+        self._java_download_attempts = 0   # 游戏进程结束：生命周期结束，下次启动重新允许自动下载
         self._emit_finished(exitCode)
         # 游戏进程真正结束：单独发出 game_finished（区别于生命周期结束）
         try:
             self.game_finished.emit(exitCode)
         except Exception:
             pass
-        self.going = 0
-        self._java_download_attempts = 0   # 游戏进程结束：生命周期结束，下次启动重新允许自动下载
 
     def _on_error(self, error):
         err_map = {
@@ -410,6 +416,8 @@ class mdtLauncher(QProcess):
         msg = err_map.get(error, "processUnknownError")
         self.log.emit({"type": "error", "text": msg})
         self.going = 0
+        # 生命周期结束即重置自动下载计数，与 _on_finished 一致。
+        self._java_download_attempts = 0
         self._emit_finished(-2)
 
     def _disconnect_signals(self):

@@ -121,6 +121,10 @@ class Logger:
         main_logger.addHandler(file_handler_timestamp)
         main_logger.addHandler(file_handler_latest)
 
+        # 本 logger 自带三个 handler，不再向 root 冒泡：
+        # 否则任何一次 logging.basicConfig() 都会让每条日志重复输出一遍。
+        main_logger.propagate = False
+
         self._loggers[self.base_logger_name] = main_logger
 
     def set_settings(self, settings):
