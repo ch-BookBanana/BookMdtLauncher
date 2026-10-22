@@ -16,29 +16,17 @@
 
 ## 简介
 
-Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启动器：
+Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启动器，致力于辅助玩家下载/管理**游戏/蓝图/地图**等，并进行**存档/数据**的管理。
 
-- 游戏本体与 Java 运行时均**自动下载**，开箱即用；
-- 每个游戏副本**相互隔离**（独立数据目录），多版本可并存、互不干扰；
-- 同时支持多个上游的 Release 下载；
-- 内置多线程断点续传、GitHub API 集成、6 种界面语言与深浅双主题。
+>项目处于快速构建迭代期，未来可能会出现部分兼容性问题，请理性使用
 
 ## 功能特性
 
-- **多来源游戏下载**：实时拉取 GitHub Release 列表，区分原版 / MindustryX 的 alpha、beta 版本（beta 为时效性版本，附黄色提示条）
-- **多版本并存**：每份游戏副本独立目录（`BML/.Mindustrys/<名称>/`），重名自动追加 `(1)(2)`，启动时可自由切换默认游戏
-- **Java 全自动管理**：并发嗅探 PATH、注册表、常见目录中的 JDK；缺失时自动从清华镜像 / Adoptium 多源竞速下载 JDK 17 并解压，支持断点续传
-- **多线程断点续传下载器**：多源测速选优、分块并发（最高 8 线程）、HTTP Range 续传、SSL 降级重试、系统代理自动检测，下载任务可暂停 / 继续 / 取消
-- **下载状态持久化**：暂停状态写入 `downloading.json`，重启后自动接管并保持暂停状态
-- **取消即清理**：取消游戏下载时连同临时文件、目标文件夹一并删除，不留残留
+- **多来源游戏下载**：实时拉取 GitHub Release 列表，区分原版 / MindustryX 等不同源
+- **多版本并存**：每份游戏副本独立目录，启动时可自由切换目标游戏
+- **Java 全自动管理**：并发嗅探 PATH、注册表、常见目录中的 JDK；缺失时自动从清华镜像 / Adoptium 等多源竞速下载 JDK 17 并解压，支持断点续传
 - **GitHub Token 集成**：设置页粘贴 Token 即校验并显示头像与 API 剩余额度（core / search 分开计数，到点自动重置）
-- **Markdown 渲染**：Release 说明以 Markdown（含表格）渲染展示，图片缓存本地、后台逐张加载
-- **系统托盘**：按 Windows 主题自动切换图标，左键单击恢复窗口，支持最小化到托盘
-- **单实例运行**：二次启动自动唤起已有实例
-- **无边框窗口**：支持 5px 边缘拖拽缩放、最大化检测、系统主题变化响应
-- **多语言**：中 / 英 / 日 / 韩 / 繁体 / 文言文，运行时热切换无需重启，默认跟随系统语言
-- **深浅主题**：内置 dark / light 两套 QSS，图标运行时按主题自动改色
-- **完整日志**：日志按时间戳留存并自动清理，异常弹窗直接引导跳转 Issues 反馈
+- **Markdown 渲染**：Release 说明以 Markdown渲染展示，图片缓存本地、后台逐张加载
 
 ## 支持的游戏来源
 
@@ -48,7 +36,7 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 | MindustryX | [TinyLake/MindustryX](https://github.com/TinyLake/MindustryX) | 名称含 `X` 为 alpha、含 `B` 为 beta |
 | MindustryARC | [TinyLake/MindustryARC](https://github.com/TinyLake/MindustryARC) | 无分类 |
 
-已安装的游戏副本会被自动扫描并加入列表（每 2 秒刷新），删除副本目录后也会自动移除。
+已安装的游戏副本会被自动扫描并加入列表，删除副本目录后也会自动移除。
 
 ## 版本号规则
 
@@ -66,22 +54,11 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 
 ### 首次启动
 
-1. 启动器自动创建 `BML/`、`BML/logs/`、`BML/.Mindustrys/` 目录；
+1. 启动器自动创建 `BML/`数据目录；
 2. 自动检测系统语言与 Java；若本机没有可用的 JDK 17，启动游戏时会提示并自动下载；
 3. 进入「下载」页选择游戏版本 → 点击下载 → 下载完成后即可一键启动。
 
 > 建议在「设置」页填入 GitHub Token，可显著提高 API 请求限额，避免下载列表加载受限。
-
-## 语言支持
-
-| 语言 | 代码 |
-| --- | --- |
-| 简体中文 | `zh-CN` |
-| 繁体中文 | `zh-TW` |
-| English | `en-US` |
-| 日本語 | `ja-JP` |
-| 한국어 | `ko-KR` |
-| 文言文 | `lzh` |
 
 ## 参与贡献
 
