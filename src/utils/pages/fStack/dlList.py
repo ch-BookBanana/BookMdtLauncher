@@ -451,9 +451,12 @@ class DlListPage(QWidget):
             # 待续传：请求页面删除
             if self.task_info.get("kind") == "active":
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
-                    def _do_cancel(e, t=self.task, dest=self.task_info.get("dest") or ""):
+                    # 形参别叫 t：模块级 t 是翻译函数，重名会让下面
+                    # 那句 t(events.lang.get(...)) 变成「给下载器对象加括号」，
+                    # 抛 TypeError: 'QDownloader' object is not callable。
+                    def _do_cancel(e, task=self.task, dest=self.task_info.get("dest") or ""):
                         try:
-                            stopped = t.cancel(timeout=8)
+                            stopped = task.cancel(timeout=8)
                         except Exception:
                             stopped = False
                         # 分片线程没停下来就别删目标目录：它还阻塞在网络读上，

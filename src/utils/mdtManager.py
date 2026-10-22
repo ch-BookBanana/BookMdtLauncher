@@ -940,7 +940,12 @@ class mdtManager(QObject):
         事件驱动刷新（start.py Left.refresh）中调用，保证引用始终有效。"""
         mdts = self.getMdts()
         if not mdts:
-            self.settings["defaultGame"] = None
+            # 值没变就别写：checkGame 每 3 秒跑一次，无脑赋值会让
+            # settings 的变更通知每拍都触发一次存盘（实测每 3 秒一条
+            # "Settings saved"，下载期间尤其明显 —— 那时 .Mindustrys
+            # 里的 jar 还没落地，getMdts() 一直返回空）。
+            if self.settings["defaultGame"] is not None:
+                self.settings["defaultGame"] = None
         elif self.settings["defaultGame"] not in mdts:
             self.settings["defaultGame"] = mdts[0]
         return self.settings["defaultGame"]
