@@ -322,15 +322,18 @@ class JavaDownloadFlow(QObject):
         """取消流程：停止 QDownloader 与解压线程，并清掉下载记录（放弃续传）。"""
         _log.info(_tr("core.log.info.javaCancel"))
         self._is_cancelled = True
-        self.shutdown()
+        self.shutdown(discard=True)
         clear_info()
 
-    def shutdown(self):
-        """停止并等待所有内部子线程退出（下载线程 + 解压线程）。
+    def shutdown(self, discard=False):
+        """停止所有内部子线程（下载线程 + 解压线程）。
 
         幂等：可在流程结束、取消、销毁前多次调用。
         调用后所有 QThread 均已退出，可安全释放引用而不触发
         "QThread: Destroyed while thread is still running"。
+
+        discard: 是否丢弃断点数据。程序退出时用默认 False —— 关掉启动器
+        不等于放弃下载，下次启动该接着下。用户主动取消走 cancel()。
         """
         _log.info(_tr("core.log.info.javaShutdown"))
         # 1. 下载线程
@@ -338,8 +341,7 @@ class JavaDownloadFlow(QObject):
         self._downloader = None
         if dl is not None:
             try:
-                dl.cancel(timeout=3)
-                dl.wait_thread(5000)
+                dl.cancel(timeout=1.0, discard=discard)
                 dl.deleteLater()
             except Exception:
                 pass
@@ -350,7 +352,7 @@ class JavaDownloadFlow(QObject):
             try:
                 if thread.isRunning():
                     thread.quit()
-                thread.wait(5000)
+                thread.wait(1000)
             except Exception:
                 pass
         self._extract_worker = None
@@ -463,8 +465,11 @@ class JavaDownloadFlow(QObject):
         self._downloader = None
         if dl is not None:
             try:
-                dl.wait_thread(5000)
-                dl.deleteLater()
+                # 这里是 UI 线程，不能长等。线程一般已经被 _interrupt_inflight
+                # 打断、转瞬即退；万一没退，宁可留到进程退出兜底，也不要把
+                # 界面卡在这——运行中的 QThread 被销毁才是致命的。
+                if dl.wait_thread(500):
+                    dl.deleteLater()
             except Exception:
                 pass
         clear_info()

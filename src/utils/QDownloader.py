@@ -149,20 +149,23 @@ TMP_PATH = getPath(os.path.join("BML", ".tmp", "QDownloader"))
 _ABORT_EVENT = threading.Event()
 
 
-def _interruptible_sleep(seconds):
-    """可被全局退出打断的休眠（替代 time.sleep，避免退出时被重试等待卡住）。"""
-    end = time.time() + seconds
-    while time.time() < end:
-        if _ABORT_EVENT.is_set():
-            return
-        time.sleep(0.1)
+def _interruptible_sleep(seconds, stop_event=None):
+    """休眠一段时间，可被提前唤醒。
+
+    直接等 Event：置位即返回，不等满、不轮询。取消下载时工作线程靠它
+    立刻退出重试退避，不必空等完 2**attempt 秒。
+    """
+    (stop_event or _ABORT_EVENT).wait(seconds)
 
 
-def shutdown_all(timeout=5):
+def shutdown_all(timeout=5, keep_state=True):
     """停止所有活动下载任务（应用退出时调用）。
 
-    置位全局退出标志 → 逐个取消任务（有界等待）→ 等待注册表清空。
+    置位全局退出标志 → 逐个停任务（有界等待）→ 等待注册表清空。
     若有线程仍在网络请求中未能及时退出，由进程退出兜底处理。
+
+    keep_state: 默认保留断点数据。退出不是「放弃下载」，下次启动应该
+    接着下；只有用户主动取消才该丢弃（那走 QDownloader.cancel()）。
     """
     _ABORT_EVENT.set()
     with _REGISTRY_LOCK:
@@ -170,7 +173,7 @@ def shutdown_all(timeout=5):
     deadline = time.time() + timeout
     for task in tasks:
         try:
-            task.cancel(timeout=3)
+            task.cancel(timeout=1.0, discard=not keep_state)
         except Exception:
             pass
     while time.time() < deadline:
@@ -283,6 +286,7 @@ class QDownloader(QObject):
         self._pause_allowed = bool(pause_allowed)
         self._pause_event = threading.Event()
         self._pause_event.set()   # 默认未暂停
+        self._cancel_event = threading.Event()   # 取消即置位，用来立刻唤醒退避等待
 
         # 停滞监控（供诊断/看门狗）
         self._watch_tick = 0               # 主下载线程轮询次数
@@ -401,11 +405,14 @@ class QDownloader(QObject):
             self._pause_allowed = allowed
             self.pause_allowed_changed.emit(allowed)
 
-    def cancel(self, timeout=None):
-        """取消下载并清理临时文件（不可恢复）。
+    def cancel(self, timeout=None, discard=True):
+        """取消下载。
 
         timeout: 等待工作线程退出的秒数；None 表示无限等待（默认）。
         线程未能及时退出时保留临时文件（下次可断点续传），不强行删除。
+
+        discard: True 删掉临时目录与断点状态（用户主动取消，放弃续传）；
+                 False 只停线程、保留一切（程序退出，下次启动接着下）。
 
         返回线程是否已退出。分片线程通常会被直接打断（见 _interrupt_inflight），
         因此绝大多数情况下这里是 True；返回 False 说明连 shutdown 都没能
@@ -414,14 +421,15 @@ class QDownloader(QObject):
         同一个临时目录。
         """
         self._is_cancelled = True
-        self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
+        self._cancel_event.set()   # 唤醒正在退避重试的线程
+        self._pause_event.set()    # 唤醒暂停等待中的线程，使其退出
         # 打断在途网络读：不这么做的话，分片线程要一直阻塞到读超时（60 秒）
         # 才看得到取消标志，cancel() 也就跟着卡同样久。
         self._interrupt_inflight()
         stopped = True
         if self._thread.isRunning():
             stopped = self._thread.wait(timeout)
-        if stopped:
+        if stopped and discard:
             self._cleanup(keep_state=False)
         # 线程从未启动（未 start 即 cancel）：finished/cancelled 信号不会发射，
         # 需要手动注销，避免僵尸任务残留在注册表中
@@ -967,7 +975,7 @@ class QDownloader(QObject):
                     requests.exceptions.ChunkedEncodingError) as e:
                 # 网络抖动/断流：指数退避重试，并从断点位置继续
                 if attempt < max_retries - 1:
-                    _interruptible_sleep(2 ** attempt)
+                    _interruptible_sleep(2 ** attempt, self._cancel_event)
                     if os.path.exists(tmp_path):
                         cur = os.path.getsize(tmp_path)
                         resume_from = start + cur
@@ -979,7 +987,7 @@ class QDownloader(QObject):
                 # 服务器 5xx / 429 限流可重试，其余（4xx）直接失败
                 status = e.response.status_code if e.response is not None else 0
                 if status in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
-                    _interruptible_sleep(2 ** attempt)
+                    _interruptible_sleep(2 ** attempt, self._cancel_event)
                     continue
                 raise
 

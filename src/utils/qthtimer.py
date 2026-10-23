@@ -362,7 +362,7 @@ class QThTimer(QObject):
             _dedicated_threads.discard(thr)
             try:
                 thr.quit()
-                if not thr.wait(3000):
+                if not thr.wait(500):
                     _zombie_threads.append(thr)
             except Exception:
                 pass
@@ -559,6 +559,9 @@ def shutdown():
 
     全程不调用 terminate()，避免线程被强杀导致解释器崩溃；
     无法及时停止的线程保留引用，由进程退出（os._exit 兜底）统一处理。
+
+    等待都取短值：这是退出路径，用户已经点了关闭，卡住窗口比留下一个
+    僵尸线程难受得多 —— 僵尸本来就有进程退出兜底。
     """
     for t in list(_active_timers):
         try:
@@ -568,7 +571,7 @@ def shutdown():
     for thr in list(_dedicated_threads):
         try:
             thr.quit()
-            if not thr.wait(15000):
+            if not thr.wait(1000):
                 _zombie_threads.append(thr)
         except Exception:
             pass
@@ -579,6 +582,6 @@ def shutdown():
     # "QThreadStorage: entry destroyed before end of thread" 警告。
     for thr in list(_zombie_threads):
         try:
-            thr.wait(15000)
+            thr.wait(300)
         except Exception:
             pass

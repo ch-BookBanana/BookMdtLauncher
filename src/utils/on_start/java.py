@@ -206,10 +206,13 @@ def _java_go_home(root):
         pass
 
 
-def _java_cancel_all(root):
-    """取消当前 Java 下载流程（用户手动取消/退出时）。
+def _java_cancel_all(root, discard=True):
+    """结束当前 Java 下载流程。
 
-    仅当确实存在流程时才打印日志并执行取消，避免退出时产生误导性日志。
+    discard: True 是用户主动取消 —— 清掉 javaDownload.json，下次启动不续传；
+             False 是程序退出 —— 只停线程，记录留着，下次启动接着下。
+
+    仅当确实存在流程时才打印日志并执行，避免退出时产生误导性日志。
     """
     flow = root.java_flow
     root.java_flow = None
@@ -223,14 +226,14 @@ def _java_cancel_all(root):
         # 没有任何流程，无需打印"取消全部流程"
         return
     root.logger.info(root.langer.get("core.log.info.javaCancelAll"), name="Java")
-    if flow is not None:
+    for f in (flow, lf):
+        if f is None:
+            continue
         try:
-            flow.cancel()
-        except Exception:
-            pass
-    if lf is not None:
-        try:
-            lf.cancel()
+            if discard:
+                f.cancel()
+            else:
+                f.shutdown(discard=False)
         except Exception:
             pass
 

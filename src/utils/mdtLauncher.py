@@ -190,8 +190,8 @@ class mdtLauncher(QProcess):
                 return True
             self._disconnect_signals()
             self.kill()
-            if not self.waitForFinished(3000):
-                _log.warning("game process still alive after 3s: pid=%s" % self.processId())
+            if not self.waitForFinished(1000):
+                _log.warning("game process still alive after 1s: pid=%s" % self.processId())
                 # 进程没死：不解锁、也不把状态标成空闲。本轮正在退出，句柄会随
                 # BML 进程结束由系统释放；这里提前解锁反而让「仍在运行的实例」
                 # 看上去可以改名/删除。
