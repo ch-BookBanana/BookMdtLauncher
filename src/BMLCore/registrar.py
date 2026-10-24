@@ -1,44 +1,65 @@
 # -*- coding: utf-8 -*-
-"""注册装饰器族 —— 照 NcatBot 的 registrar：往哪儿登记写在方法上，参数写在自己那行。
+"""注册 DSL —— 所有登记只有一个出口：`registrar("命名空间")` / `register("命名空间")`。
 
-    from BMLCore import BMLPlugin, registrar
+    from BMLCore import BMLPlugin, registrar, register
 
     class Hello(BMLPlugin):
         id = "example_hello"
 
-        @registrar.setting(title="hello.greet")          # 默认进设置页「插件」那一组
-        def build_greet(self, ctx):
-            return Widgets.Bool(ctx.parent, ctx.title)
-
-        @registrar.page(title="hello.page", order=50)
-        def build_page(self, ctx):
+        # ① 方法上挂（装饰器）：先记标记，加载器 apply(plugin) 时真正登记
+        @registrar("core/pages").new(title="hello.page", order=50)
+        def page(self, ctx):
             return MyPage(ctx.parent)
 
-        @registrar.tray(title="hello.about")
-        def about(self):
-            self.log("点了「关于」")
+        # ② 类属性里挂（不带函数）：标记对象，同样在 apply 时落地
+        css = registrar("core/qss").new("hello.css", css="QLabel#x{color:red}", theme=None)
 
-        @registrar.on("start_gameChanged")
-        def on_game(self, data):
-            self.log("切了游戏：%s" % (data,))
+        # ③ 类体里声明设置 / 信号（apply 时落到插件自己名下）
+        settings_ = registrar("settings").new("volume", 50)
 
-        @registrar.on_ready()
-        def ready(self):
-            self.log("所有插件都加载完了")
+运行期（已经拿到插件实例）写在方法里，走 self.register(...)：
 
-        styles = registrar.qss("QLabel#helloTitle { font-weight: bold; }", theme=None)
+    def on_ready(self):
+        self.register("settings").new("runs", 0)       # 声明
+        self.register("settings").set("runs", 1)       # 写
+        self.register("settings").get("runs")          # 读
+        self.register("core/settings").get("theme")    # 跨桶读（显式路径）
+        self.register("signals").new("progress")       # 声明自己的信号
+        self.register("signals").set("progress", 0.5)  # 发（自动加 "<id>." 前缀）
+        self.register("signals").watch("progress", self._on_progress)   # 订
 
-装饰器只做标记；真正登记发生在加载器 `registrar.apply(plugin)` 那一步 —— 也就是
-插件构造之后、任何界面构建之前。构建函数收到的 `ctx` 是个 `Ctx`，里面只有 `parent`
-（挂哪）和 `title`（登记时的语言键）；容器那类还会多一个 `items`（它容纳的条目）。
-不玩「任意字段都能从 ctx 上取到」那一套。
+九个动词，每个命名空间都认同一套：
+
+    new      登记一项（装饰器 / 标记 / 运行期都行）
+    set      写值 / 顶掉已有条目 / 发信号
+    update   改自己那一条的字段 / 合并字典型设置
+    remove   摘掉自己的一条 / 删一个键
+    get      读一条（条目 / 设置值 / 信号持有者）
+    list     列出来（接口里的条目 / 设置键 / 自己的信号名）
+    owned    我名下登记的一切（按命名空间过滤）
+    contract 声明 / 查看接口契约（字段表、必填、是否可覆盖）
+    watch    盯变更（注册表变更 / 设置键 / 事件名）
+
+命名空间解析（owner 段可省 = 当前插件）：
+
+    "settings"        → 当前插件的设置桶（settings.json 里自己那一格）
+    "core/settings"   → 宿主设置桶（跨桶读走这条显式路径）
+    "signals"         → 全局事件总线（信号全走它；不再自定义 Signals 类）
+    "core/pages"      → 普通扩展点，owner = core
+    "example_hello/parts" → 自己的扩展点（显式写 owner 也行）
+
+装饰器与标记的落地时机统一在 `registrar.apply(plugin)`（加载器在插件构造之后
+调一次）：先记标记、后登记，构造里抛异常时整场登记一起回滚。
 """
 
-from .Plugin import Ctx
+from ..utils.events import events
+from ..utils.registry import registry
 
-# 标记挂在函数对象上：{kind: [meta, …]}
-# 每个 kind 底下是**列表**：一个方法挂两个 @registrar.on("a") / ("b") 时两条都要
-# 生效（以前是字典单值，后写的静默盖掉先写的，插件作者只看到「有一条没登记」）。
+# 九个动词：所有命名空间共用同一套名字
+VERBS = ("new", "set", "update", "remove", "get", "list", "owned", "contract", "watch")
+
+# 标记挂在函数上（列表，允许一个方法挂多条）：
+#   [ (Scope, verb, name, fields), ... ]
 _MARK = "__bml_registrar__"
 
 
@@ -51,95 +72,278 @@ def _unwrap(attr):
     return attr
 
 
-def _mark(kind, meta):
-    def deco(fn):
+def _split(path):
+    """命名空间 → (owner, 名字)。owner 为 None = 当前插件。"""
+    path = (path or "").strip().strip("/")
+    if not path:
+        raise ValueError("registrar(...) 需要一个命名空间，比如 core/pages / settings")
+    if "/" in path:
+        owner, _, name = path.partition("/")
+        if not owner or not name:
+            raise ValueError(f"命名空间 {path!r} 不合法：要写成 <owner>/<名字>")
+        return owner, name
+    return None, path
+
+
+class _Mark:
+    """一条登记声明：可以包方法（装饰器），也可以留在类属性里（标记对象）。"""
+
+    __slots__ = ("scope", "verb", "name", "fields")
+
+    def __init__(self, scope, verb, name, fields):
+        self.scope = scope      # Scope
+        self.verb = verb
+        self.name = name
+        self.fields = dict(fields)
+
+    def __call__(self, fn):
+        """装饰器：标记记在函数上，方法名作为条目名（name 为空时）。"""
         target = _unwrap(fn)
         if target is None or not callable(target):
             raise TypeError(
-                f"registrar.{kind} 只能写在普通方法上，收到 {type(fn).__name__}"
-                f"（property 之类不支持：登记发生在构造之后，取值语义对不上）")
-        marks = {k: list(v) for k, v in getattr(target, _MARK, {}).items()}
-        marks.setdefault(kind, []).append(meta)
+                f"registrar({self.scope.path!r}).{self.verb} 只能挂在普通方法上，"
+                f"收到 {type(fn).__name__}")
+        mark = _Mark(self.scope, self.verb, self.name if self.name else fn.__name__,
+                     self.fields)
+        marks = list(getattr(target, _MARK, ()))
+        marks.append(mark)
         setattr(target, _MARK, marks)
         return fn
-    return deco
+
+    def __repr__(self):
+        return "<registrar %r.%s %r>" % (self.scope.path, self.verb, self.name)
 
 
-# ─────────────────────────── 界面登记 ───────────────────────────
+class Scope:
+    """一个命名空间的注册作用域：方法名 = 九动词。"""
 
-def page(title, *, icon=None, order=100):
-    """主窗口左栏的一个页面：函数返回一个 QWidget（参数是 ctx）。"""
-    return _mark("page", {"title": title, "icon": icon, "order": order})
+    __slots__ = ("path", "owner", "name", "plugin")
+
+    def __init__(self, path, plugin=None):
+        self.path = str(path or "").strip()
+        self.owner, self.name = _split(self.path)
+        self.plugin = plugin        # 绑了插件实例时，运行期调用当场执行
+
+    # ── 九动词 ──
+
+    def new(self, name=None, *args, **fields):
+        """登记一项。
+
+        - 给函数（装饰器用法）：立刻把标记挂上去，apply() 时落地；
+        - 没绑实例（registrar("ns")）：返回标记对象（类属性用）；
+        - 绑了实例（self.register(...)）：当场执行（运行期声明）。
+        `new("音量", 50)` 这种第二个位置参数是默认值 / 值。
+        """
+        if callable(name) and not isinstance(name, str):
+            return _Mark(self, "new", name.__name__, fields)(name)
+        if args:
+            fields.setdefault("default", args[0])
+        if self.plugin is not None:
+            return self._exec("new", name, fields, None)
+        return _Mark(self, "new", name, fields)
+
+    def set(self, name=None, *args, **fields):
+        if callable(name) and not isinstance(name, str):
+            return _Mark(self, "set", name.__name__, fields)(name)
+        if args:
+            fields["value"] = args[0]
+            fields["args"] = args
+        return self._run_mark("set", name, fields)
+
+    def update(self, name=None, *args, **fields):
+        if callable(name) and not isinstance(name, str):
+            return _Mark(self, "update", name.__name__, fields)(name)
+        if args:
+            fields.setdefault("value", args[0])
+        return self._run_mark("update", name, fields)
+
+    def remove(self, name=None, *args, **fields):
+        if callable(name) and not isinstance(name, str):
+            return _Mark(self, "remove", name.__name__, fields)(name)
+        return self._run_mark("remove", name, fields)
+
+    def get(self, name=None):
+        return self._run_mark("get", name, {})
+
+    def list(self, **kw):
+        return self._run_mark("list", None, kw)
+
+    def owned(self, **kw):
+        return self._run_mark("owned", None, kw)
+
+    def contract(self, **fields):
+        return self._run_mark("contract", None, fields)
+
+    def watch(self, name=None, callback=None, **kw):
+        if callable(name) and callback is None:
+            callback, name = name, None
+        return self._run_mark("watch", name, dict(kw, callback=callback))
+
+    # ── 运行期 / 标记 ──
+
+    def _run_mark(self, verb, name, fields):
+        if self.plugin is None:
+            return _Mark(self, verb, name, fields)
+        return self._exec(verb, name, fields, None)
+
+    # ── 内部：解析与落地 ──
+
+    def _actor(self):
+        if self.plugin is not None:
+            return self.plugin.id
+        return registry._session_owner or registry._current_owner()
+
+    def _exec(self, verb, name, fields, fn):
+        actor = self._actor()
+        if self.name == "settings":
+            return self._settings(verb, name, fields, actor, fn)
+        if self.name == "signals":
+            return self._signals(verb, name, fields, actor, fn)
+        return self._registry(verb, name, fields, fn, actor)
+
+    # 设置：自己那一桶（self.plugin.settings）；core/settings 走 other()
+    def _settings(self, verb, name, fields, actor, fn=None):
+        if self.plugin is None:
+            raise RuntimeError(
+                "设置动词要在绑定了插件的 register(...) 上调用（self.register）")
+        view = self.plugin.settings
+        owner = self.owner or actor
+        if verb == "new":
+            if owner != actor:
+                raise KeyError(f"不能给 {owner!r} 的桶声明设置键（跨桶只读）")
+            return view.declare(name, fields.get("default"))
+        if verb == "set":
+            if owner != actor:
+                raise KeyError(f"别的桶不给写（覆盖许可只到自己的键）：{owner!r}")
+            # 与 set_config 同路：写值并通知 watch_config 的回调
+            self.plugin.set_config(name, fields.get("value"))
+            return None
+        if verb == "update":
+            if owner != actor:
+                raise KeyError(f"别的桶不给写：{owner!r}")
+            self.plugin.set_config(name, fields.get("value"))
+            return None
+        if verb == "remove":
+            if owner == actor:
+                try:
+                    del view[name]
+                except KeyError:
+                    pass
+                # 运行期声明过的键：连声明一起摘（否则删了还剩个默认值）
+                view.defaults.pop(name, None)
+            return None
+        if verb == "get":
+            return view.get(name) if owner == actor else self.plugin.settings.other(owner).get(name)
+        if verb == "list":
+            return list(view) if owner == actor else list(self.plugin.settings.other(owner))
+        if verb == "owned":
+            return sorted(view)
+        if verb == "contract":
+            return dict(view.defaults)
+        if verb == "watch":
+            cb = fields.get("callback")
+            if cb is None and fn is not None:
+                cb = getattr(self.plugin, fn.__name__)
+            if cb is None:
+                raise ValueError("watch 需要一个回调")
+            return self.plugin.watch_config(name, cb)
+        raise ValueError(f"settings 不支持动词 {verb!r}")
+
+    # 信号：全局总线，名字自动加 "<id>." 前缀
+    def _signals(self, verb, name, fields, actor, fn=None):
+        def bus_name(n):
+            n = str(n or "")
+            return n if n.startswith(f"{actor}.") or n.startswith("core.") else f"{actor}.{n}"
+
+        if verb == "new":
+            bus = bus_name(name)
+            events.register(bus)
+            return bus
+        if verb == "set":
+            events.emit(bus_name(name), *fields.get("args", ()))
+            return None
+        if verb == "update":
+            raise ValueError("signals 不支持 update（换签名请重新 new）")
+        if verb == "remove":
+            raise ValueError("signals 不支持 remove")
+        if verb == "get":
+            holder = events._holders.get(bus_name(name))
+            return holder.signal if holder is not None else None
+        if verb == "list":
+            return sorted(n for n in events.names() if n.startswith(f"{actor}."))
+        if verb == "owned":
+            return sorted(n for n in events.names() if n.startswith(f"{actor}."))
+        if verb == "contract":
+            return {"namespace": "signals", "prefix": f"{actor}."}
+        if verb == "watch":
+            cb = fields.get("callback")
+            if cb is None and fn is not None:
+                cb = getattr(self.plugin, fn.__name__) if self.plugin is not None \
+                    else getattr(fn, "__func__", fn)
+            if cb is None:
+                raise ValueError("watch 需要一个回调")
+            events.on(bus_name(name), cb, owner=actor)
+            return cb
+        raise ValueError(f"signals 不支持动词 {verb!r}")
+
+    # 普通扩展点：registry 那套
+    def _registry(self, verb, name, fields, fn, actor):
+        point = self.path if self.owner else f"{actor}/{self.name}"
+        key = f"{actor}/{name}" if name else None
+        if verb == "new" and fn is not None:
+            fields = dict(fields)
+            fields["init"] = _builder(self.plugin, fn, fields)
+        if verb == "new":
+            return registry.add(point, key, **fields)
+        if verb == "set":
+            return registry.set(point, key, by=actor, **fields)
+        if verb == "update":
+            return registry.update(point, key, **fields)
+        if verb == "remove":
+            return registry.remove(point, key)
+        if verb == "get":
+            return registry.entry(point, key)
+        if verb == "list":
+            return [e.key for e in registry.entries(point)]
+        if verb == "owned":
+            return registry.owned(actor)
+        if verb == "contract":
+            return registry.declare(point, registrant=actor, **fields)
+        if verb == "watch":
+            cb = fields.get("callback")
+            if cb is None:
+                raise ValueError("watch 需要一个回调")
+            return registry.watch(cb)
+        raise ValueError(f"不支持动词 {verb!r}")
 
 
-def overlay(title, *, order=100):
-    """叠加层页面（带遮罩居中）：函数返回一个 QWidget。"""
-    return _mark("page_overlay", {"title": title, "order": order})
+def registrar(path):
+    """工厂：`registrar("命名空间")` / `register("命名空间")` 都指向这里。"""
+    return Scope(path)
 
 
-def stack(title, *, order=100):
-    """整页浮层栈的页面：函数返回一个 QWidget。"""
-    return _mark("page_stack", {"title": title, "order": order})
+def _builder(plugin, fn, fields):
+    """把「方法 → init 工厂」包一层：宿主调 init(Ctx)，这里转交给插件的方法。"""
+    from .Plugin import Ctx
 
+    method = getattr(plugin, fn.__name__)
 
-def section(title, *, order=200):
-    """设置页里的一个分组容器：函数返回一个 QWidget（`ctx.items` 是这组容纳的条目）。"""
-    return _mark("section", {"title": title, "order": order})
+    def init(box):
+        ctx = Ctx(parent=getattr(box, "parent", None),
+                   title=fields.get("title", ""),
+                   items=getattr(box, "items", ()),
+                   entry=getattr(box, "entry", None))
+        return method(ctx)
 
-
-def setting(title, *, section="core.setting.plugins", order=900):
-    """设置页里的一项：函数返回一个 QWidget。"""
-    return _mark("setting", {"title": title, "section": section, "order": order})
-
-
-def game_page(title, *, icon=None, order=100):
-    """游戏管理浮层左栏的一个功能页：函数返回一个 QWidget。"""
-    return _mark("game_page", {"title": title, "icon": icon, "order": order})
-
-
-def tray(title, *, order=100):
-    """托盘右键菜单的一项：函数无参，点了就调用它。"""
-    return _mark("tray", {"title": title, "order": order})
-
-
-def _qss_value(css, theme, order):
-    class _Qss:
-        def __init__(self):
-            self.fields = {"qss": css, "theme": theme, "order": order}
-
-        def __repr__(self):
-            return "<registrar.qss theme=%r %d 字节>" % (theme, len(css))
-    return _Qss()
-
-
-def qss(css, *, theme=None, order=100):
-    """往全局样式表追加一段 css。当成**类属性**用：
-
-        styles = registrar.qss("QLabel#x { color: red; }", theme=True)
-
-    theme：None = 两套主题都加，True = 只浅色，False = 只深色。
-    """
-    return _qss_value(css, theme, order)
-
-
-# ─────────────────────────── 事件与就绪 ───────────────────────────
-
-def on(event):
-    """订阅事件：函数收到的参数就是 emit 来的那些。"""
-    return _mark("on", {"event": event})
-
-
-def on_ready():
-    """所有插件加载完、界面构建之前调一次（依赖者与被依赖者都已就位）。"""
-    return _mark("ready", {})
+    return init
 
 
 # ─────────────────────────── 收集与落地 ───────────────────────────
 
 def collect(cls):
-    """按 MRO 收集一个插件类上的全部标记，子类覆盖父类同名方法时以子类为准。
+    """按 MRO 收集一个插件类上的全部标记（函数标记 + 类属性标记）。
 
-    返回 [(kind, name, meta, fn)]，name 是方法名（用来去重）。
+    返回 [(scope, verb, name, fields, fn)]；fn 可能为 None（类属性声明）。
     """
     out = []
     seen = set()
@@ -149,6 +353,9 @@ def collect(cls):
             if name in seen:
                 continue
             seen.add(name)
+            if isinstance(attr, _Mark):
+                out.append((attr.scope, attr.verb, attr.name, attr.fields, None))
+                continue
             fn = _unwrap(attr)
             marks = getattr(fn, _MARK, None)
             if not marks:
@@ -157,59 +364,25 @@ def collect(cls):
                 raise TypeError(
                     f"{cls.__name__}.{name}：带 registrar 标记的方法被 property 包住了，"
                     f"这样登记不到（取值语义对不上）。把 property 去掉，或换个方法名")
-            # 同一个函数挂两个名字（`h1 = h2 = marked`）只登记一次 ——
-            # 否则同一个 bound method 会被订两遍，emit 一次回调跑两次。
             if id(fn) in used_fns:
                 continue
             used_fns.add(id(fn))
-            for kind, metas in marks.items():
-                for meta in metas:
-                    out.append((kind, name, meta, fn))
+            for mark in marks:
+                out.append((mark.scope, mark.verb, mark.name, mark.fields, fn))
     return out
 
 
 def apply(plugin):
-    """把收集到的标记真正登记出去。加载器在构造完插件之后调一次。"""
+    """把收集到的标记真正登记出去（加载器在插件构造之后调一次）。"""
     made = []
-    for kind, name, meta, fn in collect(type(plugin)):
-        if kind == "page":
-            made.append(plugin.add("core.pages", name,
-                                   init=_builder(plugin, fn, meta),
-                                   title=meta["title"], icon=meta["icon"],
-                                   order=meta["order"]))
-        elif kind in ("page_overlay", "page_stack"):
-            made.append(plugin.add(
-                "core.overlays" if kind == "page_overlay" else "core.stacks", name,
-                init=_builder(plugin, fn, meta),
-                title=meta["title"], order=meta["order"]))
-        elif kind == "section":
-            made.append(plugin.add("core.setting.sections", name,
-                                   init=_builder(plugin, fn, meta, with_items=True),
-                                   title=meta["title"], order=meta["order"]))
-        elif kind == "setting":
-            made.append(plugin.add("core.setting.items", name,
-                                   init=_builder(plugin, fn, meta),
-                                   title=meta["title"], section=meta["section"],
-                                   order=meta["order"]))
-        elif kind == "game_page":
-            made.append(plugin.add("core.gameManager.pages", name,
-                                   init=_builder(plugin, fn, meta),
-                                   title=meta["title"], icon=meta["icon"],
-                                   order=meta["order"]))
-        elif kind == "tray":
-            made.append(plugin.add_tray(name, title=meta["title"],
-                                        callback=getattr(plugin, name),
-                                        order=meta["order"]))
-        elif kind == "on":
-            plugin.on(meta["event"], getattr(plugin, name))
-        elif kind == "ready":
-            _READY.setdefault(plugin.id, []).append(getattr(plugin, name))
-    # 类属性形式声明的 qss（也扫实例：写在 __init__ 里的那些以前静默不生效）
-    for name, attr in _class_attrs(type(plugin)):
-        made.append(plugin.add("core.qss", name, **attr.fields))
-    for name, attr in vars(plugin).items():
-        if getattr(attr, "fields", None) and type(attr).__name__ == "_Qss":
-            made.append(plugin.add("core.qss", name, **attr.fields))
+    for scope, verb, name, fields, fn in collect(type(plugin)):
+        sc = Scope(scope.path, plugin)
+        made.append(sc._exec(verb, name, fields, fn))
+    # 实例上临时挂的标记（写在 __init__ 里的那种）也扫一遍
+    for attr in list(vars(plugin).values()):
+        if isinstance(attr, _Mark):
+            sc = Scope(attr.scope.path, plugin)
+            made.append(sc._exec(attr.verb, attr.name, attr.fields, None))
     return made
 
 
@@ -217,43 +390,10 @@ _READY = {}
 
 
 def ready(plugin_id):
-    """取（并清掉）某个插件的 on_ready 回调。加载器在全部加载完之后调。"""
-    return _READY.pop(plugin_id, [])
+    """（保留位）就绪钩子现在是 Plugin.on_ready 方法，不再走注册标记。"""
+    return list(_READY.pop(plugin_id, ()))
 
 
 def discard(plugin_id):
-    """丢掉某个插件攒下的 on_ready 回调（加载失败回滚时调）。
-
-    这批回调不在注册表里，注册表会话的 abort 滚不到它们：一个 id 加载失败、
-    修好后重新加载时，上一次那批还留在表里，会被 `ready()` 连着**已经回滚掉的
-    旧实例**一起取出来调一遍。
-    """
+    """丢掉某个插件攒下的就绪回调（加载失败回滚时调）。"""
     _READY.pop(plugin_id, None)
-
-
-def _class_attrs(cls):
-    """收集类属性里用 registrar.qss(...) 声明的东西（子类覆盖同名）。"""
-    seen = set()
-    out = []
-    for base in cls.__mro__:
-        for name, attr in vars(base).items():
-            if name in seen:
-                continue
-            seen.add(name)
-            if getattr(attr, "fields", None) and type(attr).__name__ == "_Qss":
-                out.append((name, attr))
-    return out
-
-
-def _builder(plugin, fn, meta, with_items=False):
-    """把「方法 → init 工厂」包一层：宿主调 init(Ctx)，这里转交给插件的方法。"""
-    method = getattr(plugin, fn.__name__)
-
-    def init(box):
-        ctx = Ctx(parent=getattr(box, "parent", None),
-                   title=meta.get("title", ""),
-                   items=getattr(box, "items", ()) if with_items else (),
-                   entry=getattr(box, "entry", None))
-        return method(ctx)
-
-    return init

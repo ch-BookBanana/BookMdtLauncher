@@ -227,7 +227,7 @@ class Game(QWidget):
 
             # 下载源从注册表取：本模块的 register() 登记一次（由 builtin.py 调）。
             for e in registry.entries("core.download.sources"):
-                page = self.add_page(e, color=_FIELDS.get(e.key, {}).get("color", True))
+                page = self.add_page(e, color=_FIELDS.get(e.key.replace("/", "."), {}).get("color", True))
                 registry.bind("core.download.sources", e.key, main=page, btn=page.btn)
 
         def add_page(self, entry, color=True):
@@ -918,7 +918,7 @@ class Game(QWidget):
                         self._action_btns = []
                         for e in registry.entries("core.download.item.actions"):
                             btn = e.init(Box(parent=self, entry=e))
-                            setattr(self, _FIELDS.get(e.key, {}).get("attr", ""), btn)
+                            setattr(self, _FIELDS.get(e.key.replace("/", "."), {}).get("attr", ""), btn)
                             self.layout.addWidget(btn, 0)
                             self._action_btns.append(btn)
 

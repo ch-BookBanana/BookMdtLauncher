@@ -53,7 +53,7 @@ class Section(QWidget):
         self.init_wid()
         for e in items:
             wid = e.init(Box(parent=page, entry=e))
-            f = self.fields.get(e.key, {})
+            f = self.fields.get(e.key.replace("/", "."), {})
             if f.get("attr"):
                 setattr(page, f["attr"], wid)
             self.add_wid(wid, f.get("spacing", 0))

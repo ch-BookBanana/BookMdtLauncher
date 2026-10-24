@@ -347,7 +347,7 @@ class Start(Page):
                 # 从注册表取：本模块的 register() 登记一次（由 pages/builtin.py 调）。
                 # 登记写在这里的话，第二次构建就会撞「已存在条目」。
                 for e in registry.entries("core.start.bottom"):
-                    setattr(self, _FIELDS.get(e.key, {}).get("attr", ""),
+                    setattr(self, _FIELDS.get(e.key.replace("/", "."), {}).get("attr", ""),
                             e.init(Box(parent=self, entry=e)))
 
             def set_have_game(self, have: bool):

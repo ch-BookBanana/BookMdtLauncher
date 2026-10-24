@@ -248,7 +248,7 @@ class QDownloader(QObject):
     paused_changed = Signal(bool)           # 实际暂停状态变化（True=已暂停 / False=已恢复）
 
     # ---------- 初始化 ----------
-    def __init__(self, url=None, urls=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None, cancel_allowed=True, pause_allowed=True, title=None):
+    def __init__(self, url=None, urls=None, dest_path=None, num_threads=4, chunk_size_mb=2, headers=None, proxy=None, cancel_allowed=True, pause_allowed=True, title=None, owner=None, state_dir=None):
         super().__init__()
         # 支持单源（url）与多源（urls 列表，启动时竞速选优）
         if urls:
@@ -260,6 +260,8 @@ class QDownloader(QObject):
         self.url = self.urls[0] if len(self.urls) == 1 else None   # 多源时竞速后确定
         self.dest_path = os.path.abspath(dest_path) if dest_path else None
         self.title = title or ""        # 显示名称（下载列表直接展示，而非文件名）
+        self.owner = owner            # 谁发起的（插件 id / core）—— 卸载收尾时按它找
+        self.state_dir = state_dir    # 断点续传状态放哪；None = 宿主的 BML/.tmp/QDownloader
         self.num_threads = max(1, min(num_threads, 8))
         self.chunk_size = chunk_size_mb * 1024 * 1024
         self.headers = headers or {}
@@ -320,7 +322,9 @@ class QDownloader(QObject):
         if not self.dest_path:
             return
         self.task_id = hashlib.md5(self.dest_path.encode()).hexdigest()
-        self.temp_root = os.path.join(TMP_PATH, self.task_id)
+        _root = self.state_dir or TMP_PATH
+        os.makedirs(_root, exist_ok=True)
+        self.temp_root = os.path.join(_root, self.task_id)
         self.temp_dir = self.temp_root
         self.state_file = os.path.join(self.temp_root, "state.json")
         self.merged_temp = os.path.join(self.temp_root, os.path.basename(self.dest_path))

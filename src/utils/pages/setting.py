@@ -33,7 +33,7 @@ from ..options.sections import Section
 from ..path_utils import getPath
 from ..utils import change_color, t
 from ..resources import (ACT_UNITS, BTN_SETTING, FILE_FOLDER, TBT_CLOSE)
-from ..registry import page, Box, registry, simple
+from ..registry import page, Box, registry, simple, normalize
 
 from ._init import *
 
@@ -182,7 +182,7 @@ class Setting(Page):
                 items_all = registry.entries("core.setting.items")
                 out = []
                 for sec in registry.entries("core.setting.sections"):
-                    items = [e for e in items_all if e.get("section") == sec.key]
+                    items = [e for e in items_all if normalize(e.get("section")) == normalize(sec.key)]
                     if items:
                         out.append((sec, items))
                 return out
@@ -209,7 +209,7 @@ class Setting(Page):
                 events.on("plugins_changed", self.sync_registry_parts)
 
             def _add_section(self, sec, items, index=None):
-                f = _FIELDS.get(sec.key, {})
+                f = _FIELDS.get(sec.key.replace("/", "."), {})
                 wid = sec.init(Box(parent=self, entry=sec, items=items, fields=_FIELDS))
                 if f.get("attr"):
                     setattr(self, f["attr"], wid)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 QThTimer 使用文档（简洁版，中文）
 
 简介
@@ -69,6 +69,7 @@ QThTimer 使用文档（简洁版，中文）
 
 import inspect
 import traceback
+import threading
 
 from PySide6.QtCore import QObject, QTimer, QThread, Qt, Signal, Slot
 
@@ -237,9 +238,14 @@ class QThTimer(QObject):
     _request_single_shot = Signal(bool)
     _request_job = Signal(object)
 
-    def __init__(self, interval=0, parent=None, dedicated=False):
+    def __init__(self, interval=0, parent=None, dedicated=False, owner=None):
         super().__init__(parent)
         self._interval = int(interval)
+        # 归属（插件 id 之类）：谁开的计时器，卸载时按 owner 找得到
+        self.owner = owner
+        # 取消信号：job 里轮询 timer.cancel_event.is_set() 就能及时收手；
+        # stop()/cancel()/destroy() 都会把它 set 上
+        self.cancel_event = threading.Event()
         self._single_shot = False
         self._job = None
         self._dedicated = dedicated
@@ -299,7 +305,14 @@ class QThTimer(QObject):
         self._request_start.emit()
 
     def stop(self):
+        self.cancel_event.set()
         self._request_stop.emit()
+
+    def cancel(self):
+        """停掉并销毁：job 里轮询 cancel_event 的那条路也该收手了。"""
+        self.cancel_event.set()
+        self.stop()
+        self.destroy()
 
     def _auto_destroy(self):
         """一次性任务完成后的自动销毁入口。
@@ -317,6 +330,7 @@ class QThTimer(QObject):
 
     def destroy(self):
         """异步安全销毁计时器。"""
+        self.cancel_event.set()
         if getattr(self, '_destroyed', False):
             return
         self._destroyed = True
@@ -400,8 +414,8 @@ class QThTimer(QObject):
         return cls.timer(interval, callbacks=callbacks, single_shot=False)
 
     @classmethod
-    def timer(cls, interval, callbacks=None, single_shot=False):
-        timer = cls(interval)
+    def timer(cls, interval, callbacks=None, single_shot=False, owner=None):
+        timer = cls(interval, owner=owner)
         timer.setSingleShot(single_shot)
         if callbacks:
             for fn in callbacks:
@@ -410,7 +424,7 @@ class QThTimer(QObject):
         return timer
 
     @classmethod
-    def task(cls, interval, job, events=None, result_callback=None, dedicated=False):
+    def task(cls, interval, job, events=None, result_callback=None, dedicated=False, owner=None):
         """
         在子线程执行 `job(event)`（事件模式）。
 
@@ -471,7 +485,7 @@ class QThTimer(QObject):
                 e = sys.exc_info()[1]
                 return e
 
-        timer = cls(interval, dedicated=dedicated)
+        timer = cls(interval, dedicated=dedicated, owner=owner)
         timer._event = event
         timer.setJob(_wrapped_job)
         if result_callback is not None:
@@ -486,7 +500,7 @@ class QThTimer(QObject):
 
 
     @classmethod
-    def taskP(cls, interval, job, events=None, result_callback=None, dedicated=False):
+    def taskP(cls, interval, job, events=None, result_callback=None, dedicated=False, owner=None):
         """
         周期性后台任务，每隔 `interval` 毫秒在子线程执行一次 `job(event)`。
 
@@ -544,7 +558,7 @@ class QThTimer(QObject):
                 e = sys.exc_info()[1]
                 return e
 
-        timer = cls(interval, dedicated=dedicated)
+        timer = cls(interval, dedicated=dedicated, owner=owner)
         timer._event = event
         timer.setJob(_wrapped_job)
         timer.setSingleShot(False)
@@ -582,3 +596,4 @@ def shutdown():
             thr.wait(15000)
         except Exception:
             pass
+

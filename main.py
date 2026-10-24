@@ -1431,7 +1431,7 @@ try:
                             self.btns.remove(btn)
 
                         # setattr(self, e.name, page) 挂上去的那个属性也要摘
-                        attr = key.rpartition(".")[2]
+                        attr = key.replace("/", ".").rpartition(".")[2]
                         if getattr(self, attr, None) is page:
                             delattr(self, attr)
 

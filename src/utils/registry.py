@@ -14,163 +14,155 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-扩展点注册中心：**先登记，后构建**。
+扩展点注册中心（v2）：**按 owner 归档**，接口与内容分区。
 
-为什么要有它
-------------
-界面此前各自造了一套注册方法，签名互不相同：有的收类、有的收实例、有的连参数
-顺序都不一样（Download.Main.add_page / Setting.Main.add_page / FloatingStack.add_page…）。
-结果是「加一个页面 / 一个下载源 / 一个设置项」每次都要去改那个界面的源码。这里把
-登记这件事收成一处，界面只负责 declare 自己的扩展点、再从里面取条目自己构造。
-
-为什么分两个阶段
-----------------
-1. **登记期不碰 Qt**。重复 key、字段拼错、缺必填，这些都能在没有窗口的时候查出来，
-   报的是「哪个扩展点的哪个条目错了」，而不是构造到一半的 AttributeError。
-2. **构建期顺序显式**。谁先被 import、谁先 new 都不再决定顺序，order 说了算。
-3. **加载顺序与界面创建解耦**。插件加载完 ≠ 界面已构建（GameSettings 就是点开才建），
-   登记只要全部完成于构建之前即可。
-
-数据结构
---------
-    {
-        "core.pages": {
-            "__registrant__": "core",
-            "__kind__":       "class",
-            "__fields__":     ("init", "title", "icon", "order", "default"),
-            "__required__":   ("init", "title"),
-            "__doc__":        "主窗口左栏导航页",
-
-            "core.start": {
-                "init": Start, "title": ..., "order": 10,     # ← add()  登记
-                "__built__": {"main": <Start 实例>,           # ← bind() 回填
-                              "btn":  <左栏导航按钮>},
-            },
-            "example_hello.main": {"init": HelloPage, "order": 100},
-        },
+数据长这样
+----------
+    data[owner] = {
+        "meta":      {名字 / 版本 / api / 来源 / 权限},        # 谁
+        "declares":  {<接口名>: <契约>},                       # 它声明的接口
+        "registers": {<父 owner>: {<接口名>: {<条目 key>: [层…]}}},   # 它往谁的接口里放了什么
     }
 
-* 保留键一律 `__xxx__`；条目 key 一律 `<namespace>.<name>` 且不得以 `__` 开头，
-  两组键因此永不打架（add() 会挡住越界的 key）。
-* 条目内的 `__built__` 专放**构建产物**：add 进来的是「谁登记谁提供」的声明，
-  bind 填进去的是「谁构建谁回填」的实例。两者分开，`__fields__` 校验才不会
-  把 main/btn 当成未知字段。产物用 e.main / e.btn 直读（查找顺序：登记字段 → 产物）。
-* 条目的 namespace 既是「谁登记的」，也是卸载/回滚时的摘除依据；求它要按**前缀**
-  而不是 `key.split(".")[0]`：`core.download.sources` 的条目 `core.origin` 属于 `core`，
-  插件的 `example_hello.main` 属于 `example_hello`，而 `example_hello.tools.about`
-  同样属于 `example_hello`（条目名里带点也得摘得掉）；`example_hello_2.k` 不属于
-  `example_hello`（前缀要按段对齐）。
+三条规矩（v2 的核心）
+
+1. **归属即桶**。条目长在谁的 `registers` 下就是谁登记的 —— 不需要从 key 前缀去猜，
+   卸载就是删一棵子树。往 `core` 的接口登记，也照样落在**你自己**的桶里，
+   所以「插件声明 core/ 前缀的接口」在结构上不可能发生。
+2. **接口与内容分区**。`declares` 只有契约（字段、callingMode、覆盖许可、产物槽位），
+   `registers` 只有内容。今天那种「同一个 dict 里混着 __fields__ 和条目、
+   靠三套保留键区分」的写法没有了。
+3. **覆盖是一条栈**。同一条目被别人顶掉时，被顶掉的那份留在下面，栈顶生效；
+   顶的人走了（卸载）就弹栈，回到上一个提供者 —— 界面按注册表重建即可。
+
+引用形态
+--------
+    接口：  core/pages            （owner/接口名）
+    条目：  core/pages#core/start  （接口路径#条目 key）
+            owner 段可以省略，省略时取「当前发起方」（登记时=登记方，取用时=调用方）
+
+会话
+----
+`begin(owner)` 开一次加载会话：之后的写都进暂存区（按 owner 分桶），
+`commit(token)` 一次并进正表（**先全校验再落盘**，不可半途而废），
+`abort(token)` 整块丢掉。有主人的会话只有拿着凭据的一方关得掉，
+插件在构造里动 `abort()/commit()` 是关不掉的 —— 那是「失败整块舍弃」的前提。
 
 边界
 ----
 本模块只做「登记 / 校验 / 查询」，**不含任何 Qt 代码、不负责构造控件**。
-谁来 new、传什么参数，是拥有该扩展点的界面自己的事；否则这里会变成第二个
-「什么都知道」的上帝对象。
 """
 
 import copy
 import re
 
 __all__ = ["RegistryError", "Entry", "Box", "Registry", "registry", "page",
-           "simple", "DEFAULT_ORDER"]
+           "simple", "DEFAULT_ORDER", "normalize"]
 
 # 条目没写 order 时排在这里：够小，自定义项默认落在内置项之后
 DEFAULT_ORDER = 100
 
-# 扩展点块里的保留键（扩展点自身的元信息，不是条目）
-_RESERVED = ("__registrant__", "__kind__", "__fields__", "__required__",
-             "__built_fields__", "__doc__")
+# 每一段（owner / 接口名的段）的字符规约：与插件 id 同一套
+_SEG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
-# 条目里的保留键：构建产物回填处。
-# 必须与登记字段分区 —— 否则 bind() 填进来的 main/btn 会被 __fields__ 判成
-# 「未知字段」，validate() 也分不清「登记时写错了」和「构建时填进来的」。
-_BUILT = "__built__"
+# 宿主命名空间：remove_namespace 不许碰它们
+HOST_NAMESPACES = ("core", "src", "main", "bmlcore", "bmlplugin", "bml_plugin")
 
-# 条目里的另外两个保留键：覆盖记录。
-# 一条条目可以被别家 set() 顶掉（插件换掉内置的关闭询问、换掉某一页）。被顶掉的
-# 那些不能就这么丢了 —— 顶的人一走（卸载 / 加载失败回滚），得把他盖住的那条
-# 放回原位，界面于是回到上一个提供者的控件。所以：
-#   __owner__ 这条现在归谁（默认 = key 的命名空间；set 顶掉别人的时候写调用方）
-#   __over__  被它顶掉的层，栈；栈顶是最近被顶掉的那条（回退时先放它）
-_OWNER = "__owner__"
-_OVER = "__over__"
-_ENTRY_RESERVED = (_BUILT, _OWNER, _OVER)
+# 条目里的内部键：不算登记字段（归属 / 产物 / 层序）
+_INTERNAL = ("by", "built", "seq")
+
+# 会话凭据的默认值：有主人的会话必须带对凭据，没主人的照旧裸调
+_ANY_TOKEN = object()
 
 
 class RegistryError(Exception):
-    """注册表用法错误：扩展点未声明、字段越界、key 重复或格式不对。"""
+    """注册表用法错误：接口未声明、字段越界、key 冲突或格式不对。"""
 
 
-def _namespace_of(key):
-    """条目 key → 命名空间（最后一段之前的部分）。"""
-    return key.rpartition(".")[0]
+# ─────────────────────────── 路径与 key ───────────────────────────
 
+def normalize(path):
+    """把旧写法统一成 v2 的路径写法：`core.pages` → `core/pages`。
 
-def _owned_by(key, owner, ns):
-    """这条条目归 ns 吗？
-
-    两处认：条目上记的归属（set 顶掉别人时写的 __owner__、或没记时的命名空间），
-    以及**按段对齐的前缀** —— 插件把自己的条目名叫成 "tools.about" 时 key 会变成
-    `example_b.tools.about`，按「最后一个点之前」算出来的命名空间是
-    `example_b.tools`，卸载时就摘不掉它了（幽灵托盘项 + 重新加载撞「已存在条目」）。
-    `example_b_2.k` 不算（前缀必须按段对齐）。
+    迁移期两套写法都要认（宿主里还有大量 `core.setting.items` 这种点号写法），
+    但存下来的永远是斜杠形态 —— 这样 v2 只有一套路径语义。
     """
-    return owner == ns or key == ns or key.startswith(ns + ".")
+    return str(path).replace(".", "/")
+
+
+def _split_point(point):
+    """接口路径 → (owner, 接口名)。`core/pages` → ("core", "pages")。"""
+    path = normalize(point)
+    owner, _, name = path.partition("/")
+    if not owner or not name:
+        raise RegistryError(
+            f"接口 {point!r} 不合法：要写成 <owner>/<接口名>（如 core/pages）")
+    for seg in path.split("/"):
+        if not _SEG_RE.match(seg):
+            raise RegistryError(
+                f"接口 {point!r} 的段 {seg!r} 不合法：只能用字母、数字、下划线，"
+                f"且首字符是字母")
+    return owner, name
+
+
+def _split_key(key):
+    """条目 key → (owner, 名字)。`core/start` → ("core", "start")。
+
+    没写 owner（`#settings` 这种）时返回 ("", 名字)，由调用方按当前发起方补齐。
+    """
+    path = normalize(key)
+    if "/" not in path:
+        if not path:
+            raise RegistryError("条目 key 不能为空")
+        return "", path
+    owner, _, name = path.partition("/")
+    if not owner or not name:
+        raise RegistryError(
+            f"条目 key {key!r} 不合法：要写成 <owner>/<名字>（如 core/start）")
+    return owner, name
+
+
+def _same(a, b):
+    """宽松相等：两个字符串都规范化再比 —— 迁移期点号与斜杠两种写法算同一个。"""
+    if isinstance(a, str) and isinstance(b, str):
+        return normalize(a) == normalize(b)
+    return a == b
 
 
 def _sort_key(value):
-    """排序用的 order 值：非数值（老数据 / 手改过的 settings）退到默认值。"""
+    """排序用的 order 值：非数值（老数据 / 手改过的文件）退到默认值。"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return DEFAULT_ORDER
     return value
 
 
-def _is_entry_key(key):
-    """条目 key 必须是 <namespace>.<name>：两段以上、各段非空、不以 __ 开头。"""
-    if not isinstance(key, str) or key.startswith("__"):
-        return False
-    parts = key.split(".")
-    return len(parts) >= 2 and all(parts)
-
-
-# 条目 key 每一段的字符规约（与插件 id 同一套）
-_SEG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-
-# 宿主命名空间：remove_namespace 不许碰它们（插件 id 的规约本身就挡住了同名插件，
-# 这里是防「插件拿着 host.registry 直接调」的那种手滑/恶意）
-HOST_NAMESPACES = ("core", "src", "main", "bmlcore", "bmlplugin", "bml_plugin")
-
-# commit/abort 的默认凭据：有主人的会话必须带对凭据，没主人的照旧裸调
-_ANY_TOKEN = object()
-
+# ─────────────────────────── 条目视图 ───────────────────────────
 
 class Entry:
-    """一个登记项：key 拆出来的身份 + 登记字段 + 构建产物。
+    """一个登记项：身份 + 登记字段 + 构建产物（只读视图）。
 
-    字段既可以用 e.cls 直读，也可以用 e.get("cls", 默认值)；
-    查找顺序是「登记字段 → 构建产物」，所以页面装配好之后
-    e.main / e.btn 也能直接读（那两个是 bind() 的产物，不是登记字段）。
+    字段既可以用 `e.title` 直读，也可以用 `e.get("title", 默认值)`；
+    查找顺序是「登记字段 → 构建产物」，所以页面装配好之后 `e.main / e.btn`
+    也能直接读（那两个是 bind() 的产物，不是登记字段）。
     """
 
     __slots__ = ("key", "namespace", "name", "fields", "built", "built_fields",
-                 "_point", "_registrant")
+                 "_point", "_registrant", "_by")
 
     def __init__(self, point, key, registrant, raw_fields, built_fields=()):
         self._point = point
         self._registrant = registrant
         self.key = key
-        # 登记字段与构建产物在这里分开：fields 只留 add() 时登记的，built 只留 bind() 填的
-        # （__owner__ / __over__ 是登记表内部用的覆盖记录，也不当字段露出去）
         self.fields = {k: v for k, v in raw_fields.items()
-                       if k not in _ENTRY_RESERVED}
-        self.built = dict(raw_fields.get(_BUILT) or {})
+                       if k not in _INTERNAL}
+        self.built = dict(raw_fields.get("built") or {})
         self.built_fields = tuple(built_fields)
-        ns, _, name = key.rpartition(".")
-        self.namespace = ns or registrant
-        self.name = name or key
+        owner, name = _split_key(key)
+        self.namespace = owner
+        self.name = name
+        self._by = raw_fields.get("by") or registrant
 
     def __getattr__(self, item):
-        # __slots__ 里的字段正常查找就命中了，走不到这里；能走到说明是在要扩展字段。
         try:
             fields = object.__getattribute__(self, "fields")
         except AttributeError:
@@ -184,15 +176,13 @@ class Entry:
         if item in slots:
             raise AttributeError(
                 f"{self._point} 的条目 {self.key!r} 声明了产物槽位 {item!r}，"
-                f"但还没有 bind() 回填"
-            )
+                f"但还没有 bind() 回填")
         avail = (sorted(fields)
                  + [f"{k}(产物)" for k in sorted(built)]
                  + [f"{k}(槽位)" for k in sorted(slots) if k not in built])
         raise AttributeError(
             f"{self._point} 的条目 {self.key!r} 没有字段 {item!r}"
-            f"（可用：{', '.join(avail) or '无'}）"
-        )
+            f"（可用：{', '.join(avail) or '无'}）")
 
     def get(self, item, default=None):
         """先查登记字段，再查构建产物。"""
@@ -201,7 +191,7 @@ class Entry:
         return self.built.get(item, default)
 
     def is_built(self):
-        """构建产物是否已回填（比如页面装配完成、main/btn 就位）。"""
+        """构建产物是否已回填（页面装配完成、main/btn 就位）。"""
         return bool(self.built)
 
     def __repr__(self):
@@ -212,29 +202,13 @@ class Entry:
 class Box:
     """构建一个条目时交给 init 的「匣子」。
 
-    装配方只负责「备好容器与配套产物 → 调 e.init(box)」，不再需要知道每个条目
-    类的构造签名 —— 那本来就是**注册方**（写下那个类的人）才知道的事。
-    签名不一致、需要额外参数、甚至是几个控件拼出来的复合控件，都由 init 自己解决。
-
     box.parent  该条目该挂到哪个容器
-    （原先还有个 root —— 「把宿主整个递进去」的旧做法，已去掉：
-     组件要什么从 events 取，构造只要容器与自己的元信息）
     box.entry   条目自身，可读 title / icon / order / name / key 等
-    box.btn     配套按钮（扩展点声明了 btn 产物槽位时才有，否则为 None）
+    box.btn     配套按钮（接口声明了 btn 产物槽位时才有，否则为 None）
 
-    b.title 这类读取直接代理到条目，省得每次都写 b.entry.title。
-
-    本次上下文
-    ----------
-    关键词参数就是上下文：Box(parent=…, entry=…, game="<:|default|:>")，
-    init 里 b.game 就取得到。用在「只有构建这一刻才知道」的东西上 ——
-    比如开游戏管理浮层时才知道要管**哪个实例**：
-
-        self.add("core.overlays", "x", init=lambda b: Mgr(b.game, b.parent))
-
-    静态元信息（title/icon/order…）该写在条目字段里；上下文只放一次性的。
-    两者重名时以本次上下文为准。没给又去读，会当场抛 AttributeError
-    并把可用的上下文列出来 —— 好过默默给个 None 让上层隔很远才炸。
+    关键词参数就是**本次上下文**：`Box(parent=…, entry=…, game="<:|default|:>")`，
+    init 里 `b.game` 就取得到。静态元信息该写在条目字段里，上下文只放一次性的；
+    两者重名时以本次上下文为准。没给又去读，会当场抛 AttributeError 并列出可用项。
     """
 
     __slots__ = ("parent", "entry", "btn", "_ctx")
@@ -246,9 +220,6 @@ class Box:
         self._ctx = ctx
 
     def __getattr__(self, item):
-        # 正常查找失败才走到这里：先看本次上下文，再看条目字段。
-        # 条目自己的报错带着扩展点名与可用字段清单，比在这里再包一层有用，
-        # 所以原样放它出去。
         try:
             ctx = object.__getattribute__(self, "_ctx")
         except AttributeError:
@@ -258,81 +229,501 @@ class Box:
         try:
             entry = object.__getattribute__(self, "entry")
         except AttributeError:
-            raise AttributeError(item) from None
-        return getattr(entry, item)
-
-    def __repr__(self):
-        key = getattr(self.entry, "key", None)
-        return f"<Box {key}>"
+            entry = None
+        if entry is not None:
+            return getattr(entry, item)
+        raise AttributeError(item)
 
 
 def simple(cls, **extra):
-    """便捷 init：控件构造签名正好是 (parent, title, **extra) 时用它。
-
-    这只是**注册方**替自己省事 —— 注册方知道自己的类长什么样；
-    装配方不必知道，它只管调 init。
-    """
+    """便捷 init：控件构造签名正好是 (parent, title, **extra) 时用它。"""
     return lambda b: cls(b.parent, b.title, **extra)
 
 
+# ─────────────────────────── 注册中心 ───────────────────────────
+
 class Registry:
-    """扩展点登记中心。实例只有一个（模块底部 registry），但类可单独实例化便于测试。
+    """扩展点登记中心。实例只有一个（模块底部 registry），但类可单独实例化便于测试。"""
 
-    加载会话（begin / commit / abort）
-    ---------------------------------
-    插件构造跑到一半抛异常时，它之前登记的东西不能留在正表里 —— 界面会冒出
-    半截条目（点下去还可能炸），重试也会撞「已存在条目」。所以插件登记做成
-    **全有或全无**：
-
-        registry.begin()   开一个会话，之后插件写的都进暂存区
-        registry.commit()  跑完了，把暂存区并进正表
-        registry.abort()   没跑完，整块丢掉（连它本次 declare 的扩展点一起）
-
-    为什么不是「失败了按命名空间擦」：擦不干净（插件自己 declare 出来的扩展点
-    擦不掉），而且每条失败路径都得记得擦一次 —— 靠记性的事迟早漏。
-
-    会话期间**读**看到的是两张表之和：插件构造时可能要读宿主的扩展点、
-    要读依赖交出来的服务（依赖已经 commit 过了，在正表里），这些必须照常可见。
-    所以只把「写」导向暂存区，读是合并视图。
-
-    边界：**会话里只有 add / set / declare 三种写**（也就是插件的全部登记动作），
-    它们都进暂存区；`bind` / `unbind` 在会话里只允许动**本次会话写下的**条目
-    （插件自己 declare 一个点又 provide 上去就是这种），碰正表里的条目会当场报错；
-    `remove_namespace` 这种整表操作在会话里一律报错。理由同一条：
-    「构建期失败就整块舍弃」的前提是「会话里写的每一笔都在暂存区」。
-    """
-
-    RESERVED = _RESERVED
+    RESERVED = ()
 
     def __init__(self):
+        # owner → {"meta": {}, "declares": {}, "registers": {}}
         self.data = {}
-        # 会话中的暂存区（形状与 data 一样：{point: block}）。
-        # 同一个扩展点可能两边都有块：正表那块带 schema（以及已提交的条目），
-        # 暂存区那块装本次会话新加的条目。查询要合起来看。
-        self._stage = None
-        self._session_owner = None      # 加载会话的主人（插件 id），见 begin()
-        self._session_token = None      # 有主人的会话的凭据，见 begin()
+        self._stage = None          # 会话期间的同形暂存区（按 owner 分桶）
+        self._session_owner = None  # 会话主人（插件 id）
+        self._session_token = None  # 有主人的会话的凭据
+        self._watchers = []         # [(接口路径, 回调)]
+        self._seq = 0               # 层序号：决定覆盖栈里的先后
 
-    # ─────────────────────────── 加载会话 ───────────────────────────
+    # ── 内部：桶 ──
+
+    def _bucket(self, owner, create=False, table=None):
+        table = self.data if table is None else table
+        b = table.get(owner)
+        if b is None:
+            if not create:
+                return None
+            b = table[owner] = {"meta": {}, "declares": {}, "registers": {}}
+            b["meta"]["id"] = owner
+        return b
+
+    def _write_bucket(self, owner):
+        """写落到哪个表：会话里落暂存区，否则落正表。"""
+        if self._stage is None:
+            return self._bucket(owner, create=True)
+        return self._bucket(owner, create=True, table=self._stage)
+
+    def _tables(self):
+        """[正表, 暂存区(可能有)]"""
+        out = [self.data]
+        if self._stage is not None:
+            out.append(self._stage)
+        return out
+
+    def _interface(self, point):
+        """找接口契约（暂存区优先）。找不到就报错并列出已有的。"""
+        owner, name = _split_point(point)
+        for table in reversed(self._tables()):
+            b = table.get(owner)
+            if b and name in b["declares"]:
+                return owner, name, b["declares"][name]
+        known = ", ".join(sorted(self.points())) or "（尚未声明任何接口）"
+        raise RegistryError(
+            f"接口 {point!r} 尚未声明，请先 registry.declare(...)；已声明：{known}")
+
+    def _layers(self, iface_owner, iface_name, key):
+        """某条目在合并视图里的层栈（按登记先后排序），没有就是 []。"""
+        return self._all_entries(iface_owner, iface_name).get(key, [])
+
+    def _all_entries(self, iface_owner, iface_name):
+        """合并所有 owner 在这个接口下的条目：key → 层栈（按 seq 排序，栈顶生效）。
+
+        层可以躺在不同 owner 的桶里（谁 set 的就在谁那儿），所以合并时按
+        seq 排 —— 卸载某个 owner 时只掉它那几层，其余层顺序不变。
+        """
+        stacks = {}
+        for table in self._tables():
+            for b in table.values():
+                regs = b["registers"].get(iface_owner)
+                if not regs:
+                    continue
+                for key, stack in regs.get(iface_name, {}).items():
+                    stacks.setdefault(key, []).extend(stack)
+        for stack in stacks.values():
+            stack.sort(key=lambda layer: layer.get("seq", 0))
+        return stacks
+
+    # ── 声明接口 ──
+
+    def declare(self, point, *, registrant=None, fields=(), required=(),
+                built=(), kind="class", doc="", callingMode=None, override=True):
+        """声明一个接口。字段表钉死它能接受哪些字段。
+
+        callingMode  : ["modifier"] 只允许加载期声明；["modifier","function"] 也允许运行期增删
+        override     : 该接口下的条目默认允不允许被别人顶掉（默认允许；个别条目在条目上单独关）
+        """
+        owner, name = _split_point(point)
+        # v1 的 registrant 是「分区标签」（core.setting / core.gameManager…）：
+        # 它必须落在接口路径里面 —— 那是**出处标注**，不是 owner；owner 永远是路径第一段。
+        decl_label = registrant or owner
+        if decl_label != owner:
+            np_, nl = normalize(point), normalize(decl_label)
+            if not (np_ == nl or np_.startswith(nl + "/")):
+                raise RegistryError(
+                    f"接口 {point!r} 的 owner 是 {owner!r}，"
+                    f"registrant {decl_label!r} 既不是它、也不是它的前缀")
+        for arg_name, value in (("fields", fields), ("required", required),
+                                ("built", built)):
+            if isinstance(value, str):
+                raise RegistryError(
+                    f"{point}: declare 的 {arg_name} 要的是序列（元组/列表），"
+                    f"不是字符串 —— 传字符串会被逐字符拆开。收到 {value!r}")
+        fields = tuple(fields)
+        required = tuple(required)
+        built = tuple(built)
+        clash = sorted((set(fields) | set(required) | set(built)) & {"built", "by"})
+        if clash:
+            raise RegistryError(f"{point}: {clash} 是注册表保留字段名，不能当字段")
+        stray = [f for f in required if f not in fields]
+        if stray:
+            raise RegistryError(f"{point}: required 里的 {stray} 不在 fields 中")
+        overlap = [f for f in built if f in fields]
+        if overlap:
+            raise RegistryError(
+                f"{point}: {overlap} 同时出现在 fields 和产物槽位里；两者必须分开")
+        modes = tuple(callingMode or ("modifier", "function"))
+        for m in modes:
+            if m not in ("modifier", "function"):
+                raise RegistryError(
+                    f"{point}: callingMode 只能是 modifier / function，收到 {m!r}")
+
+        block = {
+            "fields": fields,
+            "required": required,
+            "built": built,
+            "kind": kind,
+            "doc": doc,
+            "callingMode": modes,
+            "override": bool(override),
+            "label": decl_label,
+        }
+        target = self._write_bucket(owner)
+        cur = target["declares"].get(name)
+        if cur is not None:
+            if cur != block:
+                diff = [k for k in block if cur.get(k) != block[k]]
+                raise RegistryError(
+                    f"接口 {point!r} 已声明且契约不同（{', '.join(diff)}）")
+            return point
+        target["declares"][name] = block
+        self._notify(_path(owner, name))
+        return point
+
+    # ── 写条目 ──
+
+    def add(self, point, key, **fields):
+        """新建一条（`new`）：撞名报错。返回 Entry。"""
+        return self._write(point, key, "new", **fields)
+
+    def new(self, point, key, **fields):
+        return self.add(point, key, **fields)
+
+    def set(self, point, key, *, by=None, **fields):
+        """顶掉已有条目：被顶掉的那份压进栈里，栈顶生效。返回 Entry。"""
+        return self._write(point, key, "set", override_by=by, **fields)
+
+    def update(self, point, key, **fields):
+        """改**自己那条**的字段（不产生新层）。"""
+        return self._write(point, key, "update", **fields)
+
+    def _write(self, point, key, mode, override_by=None, **fields):
+        iface_owner, iface_name, contract = self._interface(point)
+        owner, name = _split_key(key)
+        # 省略 owner（`#settings`）时按当前发起方算：新建时是会话主人，否则看 key
+        if not owner:
+            owner = self._current_owner()
+        full_key = f"{owner}/{name}"
+        actor = self._session_owner or owner
+        block = self._write_bucket(actor)
+        path = _path(iface_owner, iface_name)
+        regs = block["registers"].setdefault(iface_owner, {})
+        # 每个 owner 只写自己那份；别人的层靠合并视图读到
+        table = regs.setdefault(iface_name, {})
+        mine = table.setdefault(full_key, [])
+        stack = self._layers(iface_owner, iface_name, full_key)
+        self._check_write(contract, point, full_key, fields, mode, stack, actor)
+
+        if mode == "new":
+            if stack:
+                raise RegistryError(
+                    f"{path} 里已存在条目 {full_key!r}（要顶掉它用 set）")
+            mine.append(self._layer(actor, fields))
+        elif mode == "set":
+            mine.append(self._layer(actor, fields))
+        else:                                        # update
+            if not stack:
+                raise RegistryError(f"{path} 里没有条目 {full_key!r}，无法 update")
+            idx = next((i for i in range(len(mine) - 1, -1, -1)
+                        if mine[i].get("by") == actor), None)
+            if idx is None:
+                raise RegistryError(
+                    f"{path}#{full_key} 不是你登记的（是 {stack[-1].get('by')!r}），"
+                    f"不能 update")
+            merged = dict(mine[idx])
+            merged.update(fields)
+            mine[idx] = merged
+        if not mine:
+            table.pop(full_key, None)
+        self._notify(path)
+        return self.get(point, full_key)
+
+    def _layer(self, owner, fields):
+        self._seq += 1
+        return dict(fields, by=owner, seq=self._seq)
+
+    def _layers_existing(self, iface_owner, iface_name):
+        """把别的 owner 已登记的条目收进当前写桶（同一 key 只出现一次）。"""
+        out = {}
+        for table in self._tables():
+            for b in table.values():
+                regs = b["registers"].get(iface_owner)
+                if not regs:
+                    continue
+                for key, stack in regs.get(iface_name, {}).items():
+                    out.setdefault(key, stack)
+        return out
+
+    def _check_write(self, contract, point, key, fields, mode, stack, owner):
+        allowed = set(contract["fields"])
+        unknown = sorted(set(fields) - allowed)
+        if unknown:
+            raise RegistryError(
+                f"{point}#{key}: 未知字段 {unknown}；该接口只接受 {sorted(allowed)}")
+        merged = dict(stack[-1]) if stack else {}
+        merged.update(fields)
+        missing = sorted(set(contract["required"]) - set(merged))
+        if missing:
+            raise RegistryError(f"{point}#{key}: 缺必填字段 {missing}")
+        if "order" in fields:
+            v = fields["order"]
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise RegistryError(
+                    f"{point}#{key}: order 必须是数字，收到 {type(v).__name__}（{v!r}）")
+        if stack and stack[-1].get("by") != owner:
+            if not contract.get("override", True):
+                raise RegistryError(
+                    f"{point}#{key}: 这条不开放覆盖（接口声明 override=false），"
+                    f"不能顶掉 {stack[-1].get('by')!r} 的那一份")
+        if self._session_owner is None and "function" not in contract.get("callingMode", ()):
+            raise RegistryError(
+                f"{point}: 这个接口只接受加载期声明（callingMode 不含 function），"
+                f"不能在运行期增删")
+
+    def remove(self, point, key):
+        """摘掉自己的条目（运行期增删要接口 callingMode 含 function）。"""
+        iface_owner, iface_name, contract = self._interface(point)
+        owner, name = _split_key(key)
+        full_key = f"{owner}/{name}"
+        if self._session_owner is None and "function" not in contract.get("callingMode", ()):
+            raise RegistryError(f"{point}: 这个接口只接受加载期声明，不能运行期 remove")
+        for table in self._tables():
+            b = table.get(owner)
+            if not b:
+                continue
+            regs = b["registers"].get(iface_owner)
+            if not regs:
+                continue
+            sec = regs.get(iface_name, {})
+            stack = sec.get(full_key)
+            if not stack:
+                continue
+            stack = [x for x in stack if x.get("by") != owner]
+            if stack:
+                sec[full_key] = stack
+            else:
+                sec.pop(full_key, None)
+            self._notify(_path(iface_owner, iface_name))
+            return True
+        raise RegistryError(f"{_path(iface_owner, iface_name)} 里没有条目 {full_key!r}")
+
+    # ── 取 ──
+
+    def get(self, point, key):
+        """取条目（合并视图）。"""
+        iface_owner, iface_name, contract = self._interface(point)
+        full_key = self._normalize_key(key)
+        stack = self._all_entries(iface_owner, iface_name).get(full_key)
+        if not stack:
+            have = sorted(self._all_entries(iface_owner, iface_name))
+            raise RegistryError(
+                f"{_path(iface_owner, iface_name)} 里没有条目 {full_key!r}；现有：{have or '（空）'}")
+        return self._entry(point, full_key, stack, contract)
+
+    def entry(self, point, key):
+        return self.get(point, key)
+
+    def list(self, point, *, where=None, order_by=_ANY_TOKEN):
+        return self.entries(point, where=where, order_by=order_by)
+
+    def entries(self, point, *, where=None, order_by=_ANY_TOKEN):
+        """按 order 取条目；where 做等值筛选。未知字段当场报错。"""
+        iface_owner, iface_name, contract = self._interface(point)
+        allowed = set(contract["fields"])
+        if order_by is _ANY_TOKEN:
+            order_by = "order" if "order" in allowed else None
+        for label, keys in (("where", where or {}),
+                            ("order_by", (order_by,) if order_by else ())):
+            unknown = sorted(k for k in keys if k not in allowed)
+            if unknown:
+                raise RegistryError(
+                    f"{_path(iface_owner, iface_name)}: {label} 里的 {unknown} "
+                    f"不是这个接口的字段；可用：{sorted(allowed)}")
+        out = []
+        for key, stack in self._all_entries(iface_owner, iface_name).items():
+            e = self._entry(point, key, stack, contract)
+            if where and any(not _same(e.fields.get(k), v) for k, v in where.items()):
+                continue
+            out.append(e)
+        if order_by:
+            out.sort(key=lambda e: (_sort_key(e.fields.get(order_by)), e.key))
+        return out
+
+    def owned(self, point, owner=None):
+        """只看某个 owner 登记的条目。"""
+        owner = owner or self._current_owner()
+        iface_owner, iface_name, contract = self._interface(point)
+        out = []
+        for key, stack in self._all_entries(iface_owner, iface_name).items():
+            if stack[-1].get("by") == owner:
+                out.append(self._entry(point, key, stack, contract))
+        return out
+
+    def contract(self, point):
+        """接口契约（字段、必填、产物槽位、callingMode、覆盖许可、文档）。"""
+        owner, name, contract = self._interface(point)
+        return dict(contract)
+
+    def _locate(self, iface_owner, iface_name, full_key):
+        """找到真正持有这条目的桶：返回 (该桶的接口条目表, 层栈)。
+
+        产物归「登记它的那个 owner」，不能按 key 前缀去猜 —— 比如宿主构建页面时
+        回填 main/btn，条目可能长在插件自己的桶里。
+        """
+        for table in (self.data, self._stage or {}):
+            for b in table.values():
+                regs = b["registers"].get(iface_owner)
+                if not regs:
+                    continue
+                sec = regs.get(iface_name, {})
+                if full_key in sec:
+                    return sec, sec[full_key]
+        return {}, []
+
+    def _entry(self, point, key, stack, contract):
+        top = stack[-1]
+        return Entry(point, key, top.get("by", ""), top, contract.get("built", ()))
+
+    def _normalize_key(self, key):
+        owner, name = _split_key(key)
+        if not owner:
+            owner = self._current_owner()
+        return f"{owner}/{name}"
+
+    def _current_owner(self):
+        """当前发起方：会话主人优先，否则 core（宿主代码的默认身份）。"""
+        return self._session_owner or "core"
+
+    # ── 查询接口 ──
+
+    def points(self):
+        out = []
+        for table in reversed(self._tables()):
+            for owner, b in table.items():
+                for name in b["declares"]:
+                    p = _path(owner, name)
+                    if p not in out:
+                        out.append(p)
+        return sorted(out)
+
+    def declared(self, point):
+        try:
+            self._interface(point)
+            return True
+        except RegistryError:
+            return False
+
+    def meta(self, point=None):
+        """接口契约；不传则给出全部接口的契约表。"""
+        if point is not None:
+            return self.contract(point)
+        return {p: self.contract(p) for p in self.points()}
+
+    def table(self):
+        """可用接口查询表：{接口: {fields, required, built, registrant, doc, callingMode}}。"""
+        out = {}
+        for p in self.points():
+            owner, name, c = self._interface(p)
+            out[p] = {
+                "fields": list(c["fields"]),
+                "required": list(c["required"]),
+                "built": list(c["built"]),
+                "registrant": owner,
+                "doc": c.get("doc") or "",
+                "callingMode": list(c.get("callingMode", ())),
+                "override": bool(c.get("override", True)),
+            }
+        return out
+
+    def owners(self):
+        return sorted({o for table in self._tables() for o in table})
+
+    def owner_meta(self, owner):
+        for table in reversed(self._tables()):
+            b = table.get(owner)
+            if b is not None:
+                return dict(b["meta"])
+        return {}
+
+    def set_meta(self, owner, **info):
+        """记录某个 owner 的元信息快照（名字/版本/api/来源/权限）。"""
+        self._write_bucket(owner)["meta"].update(info)
+
+    # ── 构建产物 ──
+
+    def provide(self, point, key, obj, **meta):
+        """登记一个**已经存在**的对象（登记完立刻可查）。"""
+        self.add(point, key, **dict(meta, init=lambda b: obj))
+        return self.bind(point, key, obj=obj)
+
+    def bind(self, point, key, **built):
+        """回填构建产物（页面实例 main、导航按钮 btn…）。"""
+        iface_owner, iface_name, contract = self._interface(point)
+        full_key = self._normalize_key(key)
+        slots = contract["built"]
+        unknown = sorted(set(built) - set(slots))
+        if unknown:
+            raise RegistryError(
+                f"{_path(iface_owner, iface_name)}#{full_key}: 未声明的产物 {unknown}；"
+                f"该接口声明的产物槽位是 {list(slots) or '（无）'}")
+        sec, stack = self._locate(iface_owner, iface_name, full_key)
+        if not stack:
+            raise RegistryError(
+                f"{_path(iface_owner, iface_name)} 里没有条目 {full_key!r}，无法回填产物")
+        top = dict(stack[-1])
+        top.setdefault("built", {})
+        top["built"].update(built)
+        sec[full_key] = list(stack[:-1]) + [top]
+        return self._entry(point, full_key, sec[full_key], contract)
+
+    def unbind(self, point, key, *names):
+        """摘掉构建产物。"""
+        iface_owner, iface_name, contract = self._interface(point)
+        full_key = self._normalize_key(key)
+        sec, stack = self._locate(iface_owner, iface_name, full_key)
+        if not stack:
+            raise RegistryError(
+                f"{_path(iface_owner, iface_name)} 里没有条目 {full_key!r}，无法摘除产物")
+        top = dict(stack[-1])
+        slot = dict(top.get("built") or {})
+        if not names:
+            n = len(slot)
+            slot = {}
+        else:
+            n = 0
+            for name_ in names:
+                if name_ in slot:
+                    del slot[name_]
+                    n += 1
+        top["built"] = slot
+        sec[full_key] = list(stack[:-1]) + [top]
+        return n
+
+    # ── 变更通知 ──
+
+    def watch(self, point=None, callback=None):
+        """盯接口的变更（增删改）：callback(接口路径)。"""
+        self._watchers.append((point, callback))
+
+    def unwatch(self, callback):
+        self._watchers = [(p, cb) for p, cb in self._watchers if cb is not callback]
+
+    def _notify(self, path):
+        for point, cb in list(self._watchers):
+            if point is not None and normalize(point) != path:
+                continue
+            try:
+                cb(path)
+            except Exception:
+                pass
+
+    # ── 加载会话 ──
 
     def in_session(self):
-        """当前是否在加载会话里。"""
         return self._stage is not None
 
     def begin(self, registrant=None):
-        """开一个加载会话；registrant 是这场会话的主人（插件 id）。
-
-        记下主人是为了**归属自动**：插件在自己的构建窗口里 set 顶掉别人的条目时，
-        不用自己声明「这条算我的」—— 会话里的人就是加载器正在装的那个插件。
-        于是它加载失败（abort）或过后被卸载（remove_namespace）时，注册表都认得出
-        哪些条目该回退。已经在会话里就报错，嵌套说明调用方搞错了。
-
-        返回一个**会话凭据**（token）：有主人的会话，`commit`/`abort` 必须把它带回来。
-        否则插件在自己的构造里随手 `registry.abort()` 一下，会话就没了 —— 之后它写的
-        东西直接落正表，而加载器那一步「失败就整块舍弃」的 `abort()` 成了空操作，
-        半截条目留在正表里（这条实测过）。没主人的会话（测试里直接 begin()）
-        不受影响，照旧裸调。
-        """
+        """开一次加载会话。registrant 是会话主人（插件 id），返回凭据。"""
         if self._stage is not None:
             raise RegistryError("已经在加载会话里，不能嵌套（插件构造里别再开一个）")
         self._stage = {}
@@ -344,629 +735,198 @@ class Registry:
         if (not force and self._session_token is not None
                 and token is not self._session_token):
             raise RegistryError(
-                "这不是本次加载会话：有主人的会话只能由开始它的那一方"
-                "（加载器）用自己拿到的凭据 commit/abort —— 插件在自己的构造里"
-                "不要关会话，登记的东西交给加载器整块提交或丢弃")
+                "这不是本次加载会话：有主人的会话只能由开始它的那一方（加载器）"
+                "用自己拿到的凭据 commit/abort —— 插件在自己的构造里不要关会话")
         stage, self._stage = self._stage, None
         self._session_owner = None
         self._session_token = None
         return stage
 
     def commit(self, token=_ANY_TOKEN, *, force=False):
-        """把会话登记的并进正表：先声明新扩展点，再落条目。返回并进去的条数。
-
-        force=True 是给加载器兜底用的（凭据对不上时也要能关掉会话，否则进程内
-        谁都开不了新会话，只有重启能救）；插件不该用它。
-        """
+        """并进正表：**先全校验再落盘**，不会半途而废。返回并进去的条数。"""
         stage = self._end_session(token, force)
         if not stage:
             return 0
+        problems = self._validate_stage(stage)
+        if problems:
+            raise RegistryError("登记校验失败，整块丢弃：\n  - " + "\n  - ".join(problems))
         n = 0
-        for point, block in stage.items():
-            res = {k: v for k, v in block.items() if k in self.RESERVED}
-            if res:
-                # 本次会话声明的新扩展点，连 schema 一起并过去。
-                # 正表已有同名点时 declare 是幂等的（schema 一样就返回）。
-                self.declare(point,
-                             registrant=res["__registrant__"],
-                             fields=res["__fields__"],
-                             required=res["__required__"],
-                             built=res.get("__built_fields__", ()),
-                             kind=res.get("__kind__", "class"),
-                             doc=res.get("__doc__", ""))
-            for key, fields in block.items():
-                if key in self.RESERVED:
-                    continue
-                # 直接写进正表，不走 add()：会话里 set 过的可能正是正表已有的
-                # 同名条目，add 会撞「已存在条目」—— 而 set 的语义就是顶掉它。
-                # 产物（__built__）就在 fields 里，整条照抄即可。
-                self.data.setdefault(point, {})[key] = dict(fields)
-                n += 1
+        for owner, sb in stage.items():
+            b = self._bucket(owner, create=True)
+            for name, contract in sb["declares"].items():
+                b["declares"].setdefault(name, contract)
+            for iface_owner, ifaces in sb["registers"].items():
+                for iface_name, entries in ifaces.items():
+                    sec = b["registers"].setdefault(iface_owner, {}).setdefault(iface_name, {})
+                    for key, stack in entries.items():
+                        sec[key] = stack
+                        n += 1
+            b["meta"].update(sb["meta"])
+        for owner in stage:
+            self._notify_owner(owner)
         return n
 
     def abort(self, token=_ANY_TOKEN, *, force=False):
-        """丢掉这次会话的全部登记。返回丢掉的条数（新扩展点不算条数）。
-
-        force=True 见 commit 的说明。
-        """
+        """丢掉这次会话的全部登记。"""
         stage = self._end_session(token, force)
         if not stage:
             return 0
-        return sum(1 for block in stage.values()
-                   for key in block if key not in self.RESERVED)
+        return sum(len(entries)
+                   for sb in stage.values()
+                   for ifaces in sb["registers"].values()
+                   for entries in ifaces.values())
 
-    def _blocks_of(self, point):
-        """这个扩展点上「有条目」的块，按 [正表, 暂存区] 给（暂存区可能没有）。"""
-        out = []
-        real = self.data.get(point)
-        if real is not None:
-            out.append(real)
-        if self._stage is not None:
-            stage = self._stage.get(point)
-            if stage is not None:
-                out.append(stage)
-        return out
-
-    def _write_block(self, point):
-        """写条目该落到哪块：会话中落暂存区（正表那块只读着用），否则落正表。"""
-        if self._stage is None:
-            return self.data.setdefault(point, {})
-        return self._stage.setdefault(point, {})
-
-    def _staged_entry(self, point, key):
-        """这条条目在暂存区里吗（在 = 它就是本次会话写下的）。"""
-        block = (self._stage or {}).get(point)
-        if not block or key in self.RESERVED:
-            return None
-        return block.get(key)
-
-    def _guard_built(self, point, key, what):
-        """回填 / 摘产物：会话里只许动**本次会话写下的**条目。
-
-        条目是本次会话 add/set 的（比如插件自己 declare 一个点又 provide 上去），
-        它就在暂存区里，改动跟着 abort() 一起丢掉 —— 安全。
-        条目来自正表（宿主早先登记的），改的就是正表那一份，abort() 滚不掉 ——
-        而「构建期失败就整块舍弃」正是靠「会话里写的每一笔都能被丢掉」立住的。
-        真出现这种情况宁可当场报错：留着的那种改动会让界面与注册表对不上，
-        事后查起来毫无线索。
-        """
-        if self._stage is None or self._staged_entry(point, key) is not None:
-            return
-        raise RegistryError(
-            f"加载会话里不能对正表条目 {point}.{key} 做 {what}：它不在暂存区，"
-            f"会话的 abort() 回滚不了这笔改动。"
-            f"会话里只该 add/set/declare（插件的登记动作）")
-
-    def _guard_session(self, what):
-        """会话期间不许做的整表操作（remove_namespace）：它同时改正表与暂存区。
-
-        「加载期只往暂存区写」是「插件构建期失败就整块舍弃」这条承诺的**前提**。
-        卸载别的插件是宿主在会话之外做的事，真在会话里做了就当场报错。
-        """
-        if self._stage is not None:
-            raise RegistryError(
-                f"加载会话里不能 {what}：它直接改正表，会话的 abort() 回滚不了")
-
-    def _find_entry(self, point, key):
-        """取条目**本身**（暂存区优先，它更新）。没有就返回 None。
-
-        注意返回的是 block[key] 而不是 block —— 调用方（bind / entry / add 查重）
-        要的都是那条目的字段。
-        """
-        for block in reversed(self._blocks_of(point)):
-            if key not in self.RESERVED and key in block:
-                return block[key]
-        return None
-
-    # ─────────────────────────── 声明扩展点 ───────────────────────────
-
-    def declare(self, point, *, registrant=None, fields=(), required=(),
-                built=(), kind="class", doc=""):
-        """声明一个扩展点，并钉死它能接受哪些字段。
-
-        fields    允许出现的字段名（不在表里的字段，add() 会当场报错）
-        required  其中必须提供的字段
-        built     构建产物的**槽位名**（如页面条的 main/btn）。声明了槽位，
-                  bind() 填别的名字就会报错，读的时候也知道「这个条目本该有产物」。
-        registrant 谁声明了这个扩展点；缺省取 point 的前缀（"core.pages" → "core"）
-
-        重复声明且 schema 一致时视为幂等（模块可能被多次 import），
-        schema 不同则报错 —— 那说明两处对同一个扩展点的约定已经打架了。
-        """
-        if not isinstance(point, str) or not point or point.startswith("__"):
-            raise RegistryError(f"扩展点名不合法：{point!r}")
-
-        # 字符串参数会被 tuple() 逐字符拆开（fields="title" → 't','i','t','l','e'），
-        # 而 required 也一起被拆开，竟然能通过「必须在 fields 中」的检查 ——
-        # 错误要拖到登记时才以看不懂的样子爆出来。这里当场拦。
-        for name, value in (("fields", fields), ("required", required), ("built", built)):
-            if isinstance(value, str):
-                raise RegistryError(
-                    f"{point}: declare 的 {name} 要的是序列（元组/列表），"
-                    f"不是字符串 —— 传字符串会被逐字符拆开。收到 {value!r}")
-        fields = tuple(fields)
-        required = tuple(required)
-        built = tuple(built)
-        # 保留键不许当字段：它们要么被静默吞掉（读了取不到），要么伪造出产物
-        clash = sorted((set(fields) | set(required) | set(built))
-                       & (set(_ENTRY_RESERVED) | set(_RESERVED)))
-        if clash:
-            raise RegistryError(
-                f"{point}: 这些名字是注册表的保留键，不能当字段或产物槽位：{clash}"
-                f"（保留键：{sorted(set(_ENTRY_RESERVED) | set(_RESERVED))}）")
-        stray = [f for f in required if f not in fields]
-        if stray:
-            raise RegistryError(f"{point}: __required__ 里的 {stray} 不在 __fields__ 中")
-        overlap = [f for f in built if f in fields]
-        if overlap:
-            raise RegistryError(
-                f"{point}: {overlap} 同时出现在 __fields__ 和产物槽位里；"
-                f"登记字段与构建产物必须分开"
-            )
-
-        block = {
-            "__registrant__": registrant or _namespace_of(point) or point,
-            "__kind__": kind,
-            "__fields__": fields,
-            "__required__": required,
-            "__built_fields__": built,
-            "__doc__": doc,
-        }
-
-        cur = self.data.get(point)
-        if cur is not None:
-            diff = [k for k, v in block.items() if cur.get(k) != v]
-            if diff:
-                raise RegistryError(
-                    f"扩展点 {point!r} 已声明且 schema 不同（{', '.join(diff)}）"
-                )
-            return point
-
-        # 会话中声明的新点先落暂存区：abort 时它要跟着一起消失
-        #（否则会留下一个没人用的空扩展点，重试时还撞「已声明」）。
-        target = self._stage if self._stage is not None else self.data
-        if point in target:
-            diff = [k for k, v in block.items() if target[point].get(k) != v]
-            if diff:
-                raise RegistryError(
-                    f"扩展点 {point!r} 已声明且 schema 不同（{', '.join(diff)}）"
-                )
-            return point
-        target[point] = block
-        return point
-
-    def declared(self, point):
-        return point in self.data or (
-            self._stage is not None and point in self._stage)
-
-    def points(self):
-        """所有已声明的扩展点名（含会话中新声明的）。"""
-        return sorted(set(self.data) | set(self._stage or ()))
-
-    def meta(self, point):
-        """扩展点自身的元信息（副本，改它不影响注册表）。"""
-        return {k: v for k, v in self._block(point).items() if k in self.RESERVED}
-
-    # ─────────────────────────── 登记条目 ───────────────────────────
-
-    def add(self, point, key, **fields):
-        """往扩展点里登记一个条目，返回 Entry。
-
-        未声明就先报错，而不是顺手新建一个 —— 那样会把「扩展点名拼错」
-        变成「多出一个没人读的空扩展点」，最难查。
-
-        撞上同名 key 直接报错（不允许静默覆盖）：要顶掉已有那条，用 set()。
-        """
-        block = self._block(point)
-        self._check_key(point, key)
-        # 查重要看两张表：正表里已有的、以及本次会话里刚加的
-        if self._find_entry(point, key) is not None:
-            raise RegistryError(f"{point} 里已存在条目 {key!r}（要顶掉它用 set）")
-        self._check_fields(point, key, block, fields)
-        self._write_block(point)[key] = dict(fields)
-        return Entry(point, key, block["__registrant__"], dict(fields),
-                     block.get("__built_fields__", ()))
-
-    def set(self, point, key, *, by=None, **fields):
-        """写一条条目：已有就**顶掉**，没有就新建。返回 Entry。
-
-        与 add() 的分工：add 是「登记」（撞名报错，防手滑、也防两条内置条目
-        悄悄互相顶掉），set 是「就这么定」（同名一律顶掉）。它的用处是留出
-        **可替换的位子**：想换掉内置的某一条（比如关闭询问 core.closeAsk），
-        按同名 set 一下就行 —— 打开它的地方只认 key，一行都不用改。
-
-        会话里（插件加载期）同样成立：写进暂存区把正表那条盖住，abort 就什么
-        都没发生，commit 才真落到正表。
-
-        覆盖记录（by）
-        --------------
-        被顶掉的那条**不丢**，整条记在新条目的 __over__ 里（连同它自己压着的那些），
-        新条目再用 __owner__ 记下这条现在归谁：
-
-            registry.set("core.overlays", "core.closeAsk", by="example_x", …)
-
-        by 省略时按 key 的命名空间算 —— 宿主登记自己的条目就是这种。于是
-        remove_namespace("example_x") 既摘得掉插件顶上去的那条（key 是
-        core.* 也算他的），又把被顶掉的宿主条目**放回原位**，界面于是回到
-        上一个提供者的控件。在此之前谁 set 谁得自己负责 set 回来，忘了就是
-        宿主的条目永久消失、只留一个连着已卸载实例的控件。
-        """
-        block = self._block(point)
-        self._check_key(point, key)
-        self._check_fields(point, key, block, fields)
-        owner = by or self._session_owner or _namespace_of(key)
-        entry = dict(fields)
-        entry[_OWNER] = owner
-        cur = self._find_entry(point, key)
-        if isinstance(cur, dict):
-            # 自己再设一次：只更新自己那层，不往栈里堆 —— 重载插件会把同一批
-            # key 再写一遍，堆下去是无界增长。
-            chain = list(cur.get(_OVER) or [])
-            if cur.get(_OWNER, _namespace_of(key)) != owner:
-                # 换人了：把被顶掉的这条（不含产物，界面要按回退后的条目重建）
-                # 压进栈里；它自己压着的那些跟着一起留着。
-                displaced = {k: v for k, v in cur.items() if k != _BUILT}
-                chain.append(displaced)
-            entry[_OVER] = chain
-        self._write_block(point)[key] = entry
-        return Entry(point, key, block["__registrant__"], entry,
-                     block.get("__built_fields__", ()))
-
-    def _check_key(self, point, key):
-        """条目 key：`<namespace>.<name>`，每段都是标识符。
-
-        段规约与插件 id 同一套（字母开头，只有字母/数字/下划线）：key 会进报错
-        文本、也会当命名空间前缀用，带空格或中文的 key 事后根本认不出来是哪条。
-        """
-        if not _is_entry_key(key):
-            raise RegistryError(
-                f"{point}: 条目 key {key!r} 不合法，必须是 <namespace>.<name>"
-                f"（如 core.start / example_hello.main）"
-            )
-        bad = [seg for seg in key.split(".") if not _SEG_RE.match(seg)]
-        if bad:
-            raise RegistryError(
-                f"{point}: 条目 key {key!r} 里有不合规的段 {bad} —— "
-                f"每一段都只能用字母、数字与下划线，且首字符是字母"
-                f"（key 会当命名空间前缀用，也出现在报错文本里）"
-            )
-
-    def _check_order(self, point, key, fields):
-        """order 必须是数值（或没写）。
-
-        为什么非查不可：entries() 的排序键直接把 order 塞进元组比较，一个字符串
-        order 会让整整一页的装配在排序时抛 TypeError，而那个报错既不是
-        RegistryError、也说不清是哪条登记的问题；validate() 也查不出来。
-        """
-        if "order" not in fields:
-            return
-        value = fields["order"]
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise RegistryError(
-                f"{point}.{key}: order 必须是数字，收到 "
-                f"{type(value).__name__}（{value!r}）"
-            )
-
-    def _check_fields(self, point, key, block, fields):
-        """字段校验（add 与 set 共用）：认得的字段、必填的字段、字段值本身。"""
-        allowed = set(block["__fields__"])
-        unknown = sorted(set(fields) - allowed)
-        if unknown:
-            raise RegistryError(
-                f"{point}.{key}: 未知字段 {unknown}；该扩展点只接受 {sorted(allowed)}"
-            )
-        missing = sorted(set(block["__required__"]) - set(fields))
-        if missing:
-            raise RegistryError(f"{point}.{key}: 缺必填字段 {missing}")
-        self._check_order(point, key, fields)
-
-    def provide(self, point, key, obj, **meta):
-        """登记一个**已经存在**的对象，登记完立刻可查。
-
-        宿主体（三栏页容器）这类「本来就只有一个实例、而且先于使用者就建好」的
-        东西用它。与 add() 的分工：add 登记「怎么造」（构建期才调 init），
-        provide 登记「就是这个」（对象已经在手上）。
-        需要该扩展点先 declare(built=("obj",)) 声明好产物槽位。
-        """
-        self.add(point, key, init=lambda b: obj, **meta)
-        return self.bind(point, key, obj=obj)
-
-    def bind(self, point, key, **built):
-        """回填构建产物（页面实例 main、导航按钮 btn…），返回带产物的 Entry。
-
-        单独一个方法而不是并进 add()：add 是「谁登记谁提供」，bind 是「谁构建谁回填」，
-        责任人不同、时机也不同 —— 插件可以在启动早期就登记完，而界面要等宿主建好
-        才开始构建。产物走 __built__，不参与 __fields__ 校验。
-        """
-        self._guard_built(point, key, "bind（回填构建产物）")
-        block = self._block(point)
-        raw = self._find_entry(point, key)
-        if not isinstance(raw, dict) or key in self.RESERVED:
-            raise RegistryError(f"{point} 里没有条目 {key!r}，无法回填构建产物")
-        slots = block.get("__built_fields__") or ()
-        unknown = sorted(set(built) - set(slots))
-        if unknown:
-            raise RegistryError(
-                f"{point}.{key}: 未声明的产物 {unknown}；"
-                f"该扩展点声明的产物槽位是 {list(slots) or '（无）'}"
-            )
-        raw.setdefault(_BUILT, {}).update(built)
-        return Entry(point, key, block["__registrant__"], raw, slots)
-
-    def unbind(self, point, key, *names):
-        """摘掉构建产物（界面重建 / 卸载前）。不带 names 则清空该条目的全部产物。"""
-        self._guard_built(point, key, "unbind（摘构建产物）")
-        block = self._block(point)
-        raw = self._find_entry(point, key)
-        if not isinstance(raw, dict) or key in self.RESERVED:
-            raise RegistryError(f"{point} 里没有条目 {key!r}，无法摘除构建产物")
-        slot = raw.get(_BUILT)
-        if not slot:
-            return 0
-        if not names:
-            n = len(slot)
-            raw[_BUILT] = {}
-            return n
-        n = 0
-        for name in names:
-            if name in slot:
-                del slot[name]
-                n += 1
-        return n
-
-    # ─────────────────────────── 查询 ───────────────────────────
-
-    def entries(self, point, *, where=None, order_by=_ANY_TOKEN):
-        """按 order 取条目；where 做等值筛选（如 where={"group": "preferences"}）。
-
-        排序键是 (order, key)：同一 order 下按 key 定序，保证每次构建顺序一致 ——
-        界面元素顺序随字典迭代顺序漂移，是最难复现的那类问题。
-
-        返回的 Entry 是**只读视图**（字段为副本）：界面拿着它构造控件即可，
-        要改登记内容请走 add()/remove_namespace()，别改快照。
-
-        where / order_by 的字段名写错**当场报错**，而不是静默降级：错一个字
-        （where={"gropu": …}）会安静地过滤掉整组条目，界面上表现为「那一块
-        凭空消失」，比一条报错难查得多。
-        """
-        block = self._block(point)
-        allowed = set(block.get("__fields__", ()))
-        if order_by is _ANY_TOKEN:
-            order_by = "order" if "order" in allowed else None
-        for name, keys in (("where", where or {}), ("order_by", (order_by,) if order_by else ())):
-            unknown = sorted(k for k in keys if k not in allowed)
-            if unknown:
-                raise RegistryError(
-                    f"{point}: {name} 里的 {unknown} 不是这个扩展点的字段；"
-                    f"可用字段：{sorted(allowed)}")
-        out = []
-        seen = set()
-        # 暂存区在前、正表在后：会话里 set 过的以暂存区为准（同 key 只出面一次，
-        # 出的就是新那份）。
-        for src in reversed(self._blocks_of(point)):
-            for key, fields in src.items():
-                if key in self.RESERVED or key in seen:
-                    continue
-                seen.add(key)
-                e = Entry(point, key, block["__registrant__"], dict(fields),
-                          block.get("__built_fields__", ()))
-                if where and any(e.fields.get(k) != v for k, v in where.items()):
-                    continue
-                out.append(e)
-        if order_by:
-            # 排序键写成不会抛 TypeError 的形式：order 已经在 add/set 时校验过是数值，
-            # 但正表里的老数据（或别人手改过的）不该让整整一页的装配死在排序上。
-            out.sort(key=lambda e: (_sort_key(e.fields.get(order_by)), e.key))
-        return out
-
-    def entry(self, point, key):
-        """取单个条目；不存在时给出「这个扩展点有哪些条目」的提示。"""
-        block = self._block(point)
-        fields = self._find_entry(point, key)
-        if not isinstance(fields, dict) or key in self.RESERVED:
-            have = sorted(k for src in self._blocks_of(point)
-                          for k in src if k not in self.RESERVED)
-            raise RegistryError(f"{point} 里没有条目 {key!r}；现有：{have or '（空）'}")
-        return Entry(point, key, block["__registrant__"], dict(fields),
-                     block.get("__built_fields__", ()))
-
-    # ─────────────────────────── 校验 / 维护 ───────────────────────────
-
-    def validate(self):
-        """全表扫一遍，返回问题清单（空列表 = 通过）。
-
-        与 add() 的即时校验互补：这里是「构建前再确认一次」，把问题一次报全，
-        而不是让界面构建到第 3 个条目才炸。
-        """
+    def _validate_stage(self, stage):
         problems = []
-        for point in self.points():
-            block = self._block(point)
-            allowed = set(block.get("__fields__", ()))
-            required = set(block.get("__required__", ()))
-            entries = {}
-            for src in self._blocks_of(point):
-                entries.update({k: v for k, v in src.items() if k not in self.RESERVED})
-            for key, fields in entries.items():
-                if not _is_entry_key(key):
-                    problems.append(f"{point}: 条目 key {key!r} 不是 <namespace>.<name> 形式")
-                if not isinstance(fields, dict):
-                    problems.append(f"{point}.{key}: 条目内容不是 dict")
-                    continue
-                unknown = sorted(set(fields) - allowed - set(_ENTRY_RESERVED))
-                if unknown:
-                    problems.append(f"{point}.{key}: 未知字段 {unknown}")
-                missing = sorted(required - set(fields))
-                if missing:
-                    problems.append(f"{point}.{key}: 缺必填字段 {missing}")
+        for owner, sb in stage.items():
+            for name, contract in sb["declares"].items():
+                path = _path(owner, name)
+                if not contract.get("callingMode"):
+                    problems.append(f"{path}: callingMode 必须显式声明")
+            for iface_owner, ifaces in sb["registers"].items():
+                for iface_name, entries in ifaces.items():
+                    path = _path(iface_owner, iface_name)
+                    if not self._declared_in(iface_owner, iface_name, stage):
+                        problems.append(f"{path}: 接口未声明（{owner} 往它登记了东西）")
+                        continue
+                    contract = self._contract_of(iface_owner, iface_name, stage)
+                    allowed = set(contract["fields"])
+                    for key, stack in entries.items():
+                        top = stack[-1]
+                        unknown = sorted(set(top) - allowed - set(_INTERNAL))
+                        if unknown:
+                            problems.append(f"{path}#{key}: 未知字段 {unknown}")
+                        missing = sorted(set(contract["required"]) - set(top))
+                        if missing:
+                            problems.append(f"{path}#{key}: 缺必填字段 {missing}")
         return problems
 
+    def _declared_in(self, owner, name, stage):
+        for table in list(reversed(self._tables())) + [stage]:
+            b = table.get(owner)
+            if b and name in b["declares"]:
+                return True
+        return False
+
+    def _contract_of(self, owner, name, stage):
+        for table in list(reversed(self._tables())) + [stage]:
+            b = table.get(owner)
+            if b and name in b["declares"]:
+                return b["declares"][name]
+        return {"fields": (), "required": (), "built": ()}
+
+    # ── 卸载 / 清空 ──
+
     def remove_namespace(self, ns):
-        """摘掉某个提供者的条目（插件卸载 / 加载失败回滚），返回改动过的条数。
-
-        谁算「它的条目」看两处：key 的命名空间，以及条目上的 __owner__（它 set
-        顶掉别人条目时写的那个）—— 于是插件顶掉宿主内置的 `core.*` 条目也摘得掉。
-
-        摘一条时先看它的 __over__：
-          * 栈里还有被顶掉的 → 把栈顶那条**放回原位**（产物不带回来：控件得由
-            界面按回退后的条目重建），它自己压着的那些继续留在栈里；
-          * 栈空了 → 这条整个删掉（它本来没有前身）。
-
-        剔层与回退是**两步**，顺序要紧：先把全表所有条目的 __over__ 链里属于 ns
-        的层剔掉，再处理「这条归 ns」的条目。倒过来的话，「A 顶内置、B 顶 A、先卸 A
-        再卸 B」这条最常见的顺序（卸载顺序 = 加载顺序）就会把已经卸载的 A 放回正表
-        —— 界面重建时那条幽灵条目又回来了，它的闭包还攥着卸掉的实例。
-
-        另外把**它自己声明的扩展点**一并撤掉（连带那个点里的条目，包括别人往它那儿登记的）：
-        契约是它带来的，它走了契约不该留着 —— 留着的话，插件下次带着改过的字段表回来
-        会撞「已声明且 schema 不同」，界面上的表现是「重载插件失败」，非得重启启动器才能
-        再装上。
-
-        宿主命名空间（core / src / main / …）一律拒绝：内置扩展点的声明只在启动时
-        声明一次，删掉之后进程内没有恢复路径，而插件拿得到 host.registry。
-        """
-        self._guard_session("remove_namespace（摘条目）")
+        """摘掉某个 owner 的全部痕迹：它自己的桶 + 别人桶里「往它接口登记」的部分。"""
+        if self._stage is not None:
+            raise RegistryError("加载会话里不能 remove_namespace（它直接改正表）")
         if ns in HOST_NAMESPACES:
             raise RegistryError(
-                f"不能按命名空间摘宿主的条目（{ns!r}）：内置扩展点的声明只在启动时"
-                f"做一次，删掉之后恢复不了。要撤插件请传它的 id")
-        removed = 0
-        for table in (self.data, self._stage or {}):
-            # ① 先剔层：谁的身上压着 ns 的层都要剔（不论那条现在归谁）
-            for block in table.values():
-                for key, fields in list(block.items()):
-                    if key in self.RESERVED or not isinstance(fields, dict):
-                        continue
-                    chain = fields.get(_OVER)
-                    if not chain:
-                        continue
-                    kept = self._strip_layers(chain, ns)
-                    if len(kept) != len(chain):
-                        if kept:
-                            fields[_OVER] = kept
-                        else:
-                            fields.pop(_OVER, None)
-            # ② 再撤它声明的点：连点带条目一起（那些条目指向一个正在消失的契约）
-            for point in [p for p, block in table.items()
-                          if _owned_by(p, block.get("__registrant__", ""), ns)]:
-                removed += sum(1 for k in table[point] if k not in self.RESERVED)
-                del table[point]
-            # ③ 最后处理条目本身：回退或删除
-            for point, block in list(table.items()):
-                for key in [k for k in block if k not in self.RESERVED]:
-                    fields = block[key]
-                    if not isinstance(fields, dict):
-                        continue
-                    if not _owned_by(key, self._owner_of(key, fields), ns):
-                        continue
-                    removed += 1
-                    chain = list(fields.get(_OVER) or [])
-                    if chain:
-                        back = chain.pop()
-                        back.pop(_BUILT, None)          # 产物是上一次构建的，重建才有
-                        if chain:
-                            back[_OVER] = chain
-                        else:
-                            back.pop(_OVER, None)       # 回到最底下那条：记录清干净
-                        block[key] = back
-                    else:
-                        del block[key]
-        return removed
+                f"不能按 owner 摘宿主的条目（{ns!r}）：内置接口只在启动时声明一次")
+        n = 0
+        b = self.data.pop(ns, None)
+        if b is not None:
+            n += sum(len(entries) for ifaces in b["registers"].values()
+                     for entries in ifaces.values())
+            n += len(b["declares"])
+        # 别人挂在它接口上的条目：随接口一起撤（孤儿策略）；
+        # 同时在所有桶里剔掉「by == ns」的层（它顶掉别人的那些）
+        for owner, ob in list(self.data.items()):
+            regs = ob["registers"]
+            gone = regs.pop(ns, None)
+            if gone:
+                n += sum(len(entries) for entries in gone.values())
+            for ifaces in regs.values():
+                for entries in ifaces.values():
+                    for key in list(entries):
+                        kept = [x for x in entries[key] if x.get("by") != ns]
+                        if kept != entries[key]:
+                            entries[key] = kept
+                            if not kept:
+                                entries.pop(key, None)
+            for iface_owner in [k for k, v in regs.items() if not v]:
+                regs.pop(iface_owner, None)
+        self._notify_owner(ns)
+        return n
 
-    @staticmethod
-    def _owner_of(key, fields):
-        """条目现在归谁（没记过就是 key 的命名空间）。"""
-        return fields.get(_OWNER) or _namespace_of(key)
-
-    @staticmethod
-    def _strip_layers(chain, ns):
-        """把栈里属于 ns 的层剔掉，其余原样保留（顺序不变）。"""
-        return [layer for layer in chain
-                if not (isinstance(layer, dict) and layer.get(_OWNER) == ns)]
+    def _notify_owner(self, owner):
+        for point in self.points():
+            if point.split("/", 1)[0] == owner:
+                self._notify(point)
 
     def clear(self):
-        """清空整表（测试隔离用）：连会话一起收掉，免得清完还留着一个半开的暂存区。"""
         self.data.clear()
         self._stage = None
         self._session_owner = None
         self._session_token = None
+        self._watchers = []
 
-    def table(self):
-        """可用扩展点查询表：{扩展点: {fields, required, built, registrant, doc}}。
+    # ── 校验 / 转储 ──
 
-        契约声明本来就存在注册表里，这里只是把它摊成一张可查的表 ——
-        写给插件作者与工具用（「有哪些块、各要什么字段」），不必另抄一份
-        （手抄的那份一定会漂）。按扩展点名排序，输出稳定。
-        """
-        out = {}
-        for point in self.points():
-            block = self._block(point)
-            out[point] = {
-                "fields": list(block.get("__fields__", ())),
-                "required": list(block.get("__required__", ())),
-                "built": list(block.get("__built_fields__", ())),
-                "registrant": block.get("__registrant__", ""),
-                "doc": (block.get("__doc__") or "").strip(),
-            }
-        return out
+    def validate(self):
+        """全表扫一遍，返回问题清单（空列表 = 通过）。"""
+        problems = []
+        for owner, b in self.data.items():
+            for name, contract in b["declares"].items():
+                path = _path(owner, name)
+                if not contract.get("callingMode"):
+                    problems.append(f"{path}: callingMode 缺失")
+            for iface_owner, ifaces in b["registers"].items():
+                for iface_name, entries in ifaces.items():
+                    path = _path(iface_owner, iface_name)
+                    if not self.declared(path):
+                        problems.append(f"{path}: 接口未声明（{owner} 往它登记了东西）")
+                        continue
+                    contract = self.contract(path)
+                    allowed = set(contract["fields"])
+                    for key, stack in entries.items():
+                        if "/" not in key:
+                            problems.append(f"{path}#{key}: key 不是 <owner>/<名字> 形式")
+                        top = stack[-1]
+                        unknown = sorted(set(top) - allowed - set(_INTERNAL))
+                        if unknown:
+                            problems.append(f"{path}#{key}: 未知字段 {unknown}")
+                        missing = sorted(set(contract["required"]) - set(top))
+                        if missing:
+                            problems.append(f"{path}#{key}: 缺必填字段 {missing}")
+                        order = top.get("order")
+                        if order is not None and (isinstance(order, bool)
+                                                  or not isinstance(order, (int, float))):
+                            problems.append(f"{path}#{key}: order 不是数字")
+        return problems
 
     def dump(self):
-        """当前结构的快照，供排查时直接打印。
-
-        条目也复制一层：dump 出来的东西要是能被随手改坏注册表，
-        那它就不是快照而是后门了。**要深拷贝**：条目里的 __over__（栈）与
-        __built__（产物）是可变容器，浅拷贝只换外壳 —— 往 dump 出来的
-        __over__ 里塞一层，就能让 remove_namespace 把一条假条目「回退」进正表。
-        """
+        """深拷贝一份（改它不会影响注册表；__ 开头的内部键也一并给出）。"""
         return copy.deepcopy(self.data)
 
-    # ─────────────────────────── 内部 ───────────────────────────
 
-    def _block(self, point):
-        # schema 优先看正表：正表有这块说明这个点早就声明过；正表没有才看暂存区
-        # （本次会话刚 declare 的新点）。暂存区里为「正表已有的点」建的块只装
-        # 新条目、不带 RESERVED，所以不能拿它当 schema 用。
-        block = self.data.get(point)
-        if block is None and self._stage is not None:
-            block = self._stage.get(point)
-        if block is None:
-            known = ", ".join(sorted(set(self.data) | set(self._stage or ()))) \
-                or "（尚未声明任何扩展点）"
-            raise RegistryError(
-                f"扩展点 {point!r} 尚未声明，请先 registry.declare(...)；已声明：{known}"
-            )
-        return block
+def _path(owner, name):
+    return f"{owner}/{name}"
 
 
-# 全局单例：与 src/utils/bus.py 的 bus 同一风格
+# 全局单例：与 src/utils/bus.py 的 bus、src/utils/events.py 的 events 同一风格
 registry = Registry()
 
 
-def page(key, *, point="core.pages", **meta):
-    """把一个 Page 子类登记进扩展点（装饰器）。
+def page(key, *, point="core/pages", **meta):
+    """把一个 Page 子类登记进接口（装饰器）。
 
-        @page("core.start")
+        @page("core/start")
         class Start(Page):
             name    = "core.wid.pages.start"
             icon    = BTN_START
             order   = 10
             default = True
-
-    元信息从**类属性**读，装饰器只补 key —— 「我是谁」和实现待在一起，
-    而不是散在另一处的 add(...) 里。构造只传 btn：参数全在类上，
-    装配方不必知道这个类怎么造；插件写一个页面也就是一个类的事。
-
-    point 可以指向同类扩展点（core.setting.pages / core.gameManager.pages…），
-    它们要的字段一样（init / title / icon / order / …），只是声明在不同地方。
-    default 只有声明了它的扩展点才带上（core.pages 有，别处没有）。
     """
     def deco(cls):
-        fields = registry.meta(point).get("__fields__", ())
-        kw = dict(meta)          # 额外字段原样带上，也可以覆盖下面几项
+        fields = registry.meta(point).get("fields", ())
+        kw = dict(meta)
         kw.setdefault("init", lambda b: cls(btn=getattr(b, "btn", None)))
         kw.setdefault("title", cls.name)
         if "icon" in fields:
             kw.setdefault("icon", cls.icon)
-        kw.setdefault("order", getattr(cls, "order", 100))
+        kw.setdefault("order", getattr(cls, "order", DEFAULT_ORDER))
         if "default" in fields:
             kw.setdefault("default", getattr(cls, "default", False))
         registry.add(point, key, **kw)

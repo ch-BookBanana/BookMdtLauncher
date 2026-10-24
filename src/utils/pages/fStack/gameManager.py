@@ -206,7 +206,7 @@ class GameSettings(Scroll):
         # 第二次构建会直接撞「已存在条目」。
         for e in registry.entries("core.gameSettings.sections"):
             wid = e.init(Box(parent=self, entry=e))
-            f = _FIELDS.get(e.key, {})
+            f = _FIELDS.get(e.key.replace("/", "."), {})
             setattr(self, f.get("attr", ""), self.add(wid, f.get("spacing", 0)))
 
         # 顶部信息填真实数据（图标/名称/分组/版本），并订阅实例事件：

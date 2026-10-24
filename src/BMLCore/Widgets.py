@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         会把 (parent, 语言键) 拼好传进来，主题与语言由控件自己跟总线。
 
     Section(page, title, items, fields=None)
-        设置页里的一个分组容器（`@registrar.section` 的构建函数用它，
+        设置页里的一个分组容器（`registrar("core/setting/sections").new` 的构建函数用它，
         `ctx.items` 是这一组容纳的条目）。
 
     Scroll(parent, horizontal=False, …)
