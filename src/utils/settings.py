@@ -185,10 +185,6 @@ class _Section(dict):
     def __setitem__(self, key, value):
         old = dict.get(self, key, _MISSING)
         wrapped = self._wrap(value, key)
-        # 值没变就不通知：变更通知的唯一订阅者是「防抖存盘」，写同样的值
-        # 也触发一次原子写盘纯属浪费（曾有 3 秒周期定时器无脑赋值同一值，
-        # 导致日志被 "Settings saved" 刷屏、每天两万多次无谓写盘）。
-        # 注意要比较 wrapped 而不是 value：包装后才是最终落盘的东西。
         if old is not _MISSING and old == wrapped:
             return
         dict.__setitem__(self, key, wrapped)

@@ -451,9 +451,6 @@ class DlListPage(QWidget):
             # 待续传：请求页面删除
             if self.task_info.get("kind") == "active":
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
-                    # 形参别叫 t：模块级 t 是翻译函数，重名会让下面
-                    # 那句 t(events.lang.get(...)) 变成「给下载器对象加括号」，
-                    # 抛 TypeError: 'QDownloader' object is not callable。
                     def _do_cancel(e, task=self.task, dest=self.task_info.get("dest") or ""):
                         try:
                             stopped = task.cancel(timeout=8)
