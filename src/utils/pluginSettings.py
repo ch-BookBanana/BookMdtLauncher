@@ -106,6 +106,8 @@ class PluginSettings(MutableMapping):
             cell = settings.get(CORE) if hasattr(settings, "get") else None
             if isinstance(cell, dict):
                 return cell
+            if isinstance(settings, dict):
+                return settings.setdefault(CORE, {})
             raise KeyError(f"没有 {CORE!r} 桶：宿主 settings 还没建起来就取？")
         bucket = getattr(settings, "bucket", None)
         cell = bucket(owner, create=False) if bucket is not None else (

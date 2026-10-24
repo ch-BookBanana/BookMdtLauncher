@@ -255,28 +255,6 @@ class Plugin:
 
         return self.add("core.tray.menu", name, init=_init, title=title, order=order)
 
-    # ── 事件 ──
-
-    def on(self, event, callback):
-        """订阅事件（宿主的事件、别的插件的事件都能订）。
-
-        订阅记在自己名下（owner = 插件 id）：卸载时连**订别人的**那些事件一起摘，
-        否则卸载之后回调还在被叫（那会儿控件已经销毁），而且每重载一次多挂一份。
-        """
-        return events.on(event, callback, owner=self.id)
-
-    @property
-    def signals(self):
-        """全局信号总线（就是 events）：信号全走它，别再自定义 Signals 类。
-
-            self.signals.emit("example_hello.progress", 0.5)   # 发
-            self.signals.on("example_hello.progress", self._cb)  # 订
-
-        走 self.register("signals") 更省事：名字自动加 "<id>." 前缀，
-        订阅也记在自己名下（卸载自动摘）。
-        """
-        return events
-
     # ── 能力句柄：宿主替你收拾 ──
 
     def every(self, interval, callback, *, immediate=False):
@@ -354,10 +332,6 @@ class Plugin:
                 t.join(5)
             except Exception:
                 pass
-
-    def emit(self, event, *args):
-        """广播自己的事件，名字自动加 `<id>.` 前缀。"""
-        events.emit(f"{self.id}.{event}", *args)
 
     # ── 只读助手（转发 host）──
 

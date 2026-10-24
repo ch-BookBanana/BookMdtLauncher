@@ -142,6 +142,12 @@ try:
             self.githubAPI = GithubAPI()
             self.mdtManager = mdtManager(self.settings, parent=None, root=self)
             self.mdtManager.on_game_changed.connect(self._on_game_changed)
+            # 宿主工具登记到 core/tools：插件用 register("core/tools&mdtManager").get()
+            # 取活对象（卸载/重载跟着走，不用自己存引用）
+            self._register_tools()
+            # 设置点逐层注册：core/settings&launcher → &launcher&{…} 之后，
+            # 插件才能往 &launcher&java&<键> 这种注册项上登记/读写
+            self._register_settings_points()
             if self.settings["github"]["token_enc"]:
                 token = githubAPI.read_token(self.settings)
                 if token:
@@ -179,6 +185,42 @@ try:
             _attach_java_ui(self)
 
             startup.register(self)
+
+        def _register_tools(self):
+            """宿主工具登记到 core/tools（插件侧：register("core/tools&<名字>").get()）。
+
+            登记的产物是活工具对象（Entry.obj），卸载/重载跟着宿主走；插件拿到
+            的东西在宿主重载之后仍然有效（拿的是现查的句柄）。
+            """
+            from src.utils.registry import registry
+            if not registry.declared("core/tools"):
+                registry.declare("core/tools", registrant="core",
+                                 fields=("init",), required=("init",),
+                                 built=("obj",),
+                                 doc="宿主工具：mdtManager / launcher / githubAPI …")
+            for name, tool in (("mdtManager", self.mdtManager),
+                               ("launcher", self.launcher),
+                               ("githubAPI", self.githubAPI)):
+                try:
+                    registry.provide("core/tools", f"core/{name}", tool)
+                except Exception as e:
+                    self.logger.warning(f"工具 {name} 登记失败：{e}")
+
+        def _register_settings_points(self):
+            """设置点逐层注册：settings → launcher → preferences/general/java。
+
+            之后插件才能用 register("core/settings&launcher&java&<键>") 读写、
+            或用 @registrar("core/settings&launcher&java").new(name=…) 登记设置项。
+            """
+            from src.BMLCore import registrar
+            for path in ("core/settings&launcher",
+                         "core/settings&launcher&preferences",
+                         "core/settings&launcher&general",
+                         "core/settings&launcher&java"):
+                try:
+                    registrar(path).contract()
+                except Exception as e:
+                    self.logger.warning(f"设置点 {path} 注册失败：{e}")
 
         def _on_game_changed(self, data):
             """mdtManager 事件回调（主线程）。

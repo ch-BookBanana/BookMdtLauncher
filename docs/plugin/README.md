@@ -53,7 +53,7 @@ class Hello(BMLPlugin):
     settings_defaults = {"greet": True}                     # 设置默认值
 
     # 自己的信号：声明在全局总线上（名字自动加 "example_hello." 前缀）
-    hello = registrar("signals").new("hello")
+    hello = registrar("signals#hello").new()
 
     @registrar("core/pages").new(title="hello.page", order=50)   # 左栏新增一页
     def page(self, ctx):
@@ -62,7 +62,7 @@ class Hello(BMLPlugin):
     def on_ready(self):
         # 所有插件加载完成、界面尚未构建
         self.log("就绪，greet = %s" % self.get_config("greet"))
-        self.register("signals").set("hello", "ready")           # 发信号
+        self.register("signals#hello").emit("ready")           # 发信号
 ```
 
 启动后日志中出现 `[example_hello]开始加载` 与 `[example_hello]加载完成`（加载器打的），
@@ -78,7 +78,7 @@ class Hello(BMLPlugin):
 | 游戏管理功能页 | `registrar("core/gameManager/pages")` |
 | 托盘项 | `registrar("core/tray/menu").new(title=…)`，构建方法返回 `QAction` |
 | css 片段 | 类属性 `css = registrar("core/qss").new("hello.css", qss="…", theme=None)` |
-| 信号声明 / 发送 / 订阅 | `register("signals").new / set / watch` |
+| 信号声明 / 发送 / 订阅 | `register("signals#名").new / emit / connect` |
 | 设置读写 | `self.settings["k"]` / `self.get_config("k", 默认)` / `self.set_config("k", v)` / `self.watch_config("k", cb)` |
 | 私有目录 / 插件内文件 | `self.workspace` / `self.path("assets/icon.png")` |
 | 周期回调 / 后台任务 / 下载 / 线程 | `self.every(...)` / `self.task(...)` / `self.download(...)` / `self.thread(...)` |
