@@ -30,25 +30,25 @@
         self.register("core/signals&on_game_start").emit()             # 发宿主信号
         self.register("core/tools&mdtManager").get()   # 取宿主工具（活对象）
 
-路径语法：`/` 只分隔 owner 与 ns；条目用 `&` / `#` 接在 ns 后面
+路径语法：`&` / `#` 只补全「条目那一段的 owner」
 ------------------------------------------------------------
-    <owner>/<ns>[&seg|#seg]…
+    <owner>/<point>[&seg|#seg]…
 
-`/` 只出现一次（分开 owner 和 ns，不是目录分隔符）；条目链由 `&` / `#`
-接替目录的职责，同时携带归属语义：
+一条路径只描述两样东西：**接口**（owner/point）和**条目 key**（owner/name）。
+`&` / `#` 不改变接口，只决定条目 key 里的 owner 取谁：
 
-    "main/a&b"      条目 b 归 **接口 owner**（main） → key = main/b
-    "main/a#b"      条目 b 归 **自己**（当前插件）   → key = <id>/b
-    "main/a&b&c"    c 归上一段（b 的归属 main）      → key = main/b/c
-    "signals#p"     自己的信号：总线名 <id>.p
-    "signals&p"     接口 owner 的信号：总线名就是 p（宿主信号）
-    "core/settings&launcher&java"  读 core 桶里 launcher/java 这个嵌套键
+    &seg   沿用前一节点的 owner（第一段就用接口 owner）
+    #seg   回到调用方（当前插件）的 owner
 
-条目即子注册点：条目链也可以是一段**已声明的子接口**
-    register("core/tools&mdtManager").contract(fields=("obj",), built=("obj",))
-        → 把 core/tools/mdtManager 声明成接口；之后
-    register("core/tools&mdtManager").new("x", …) / .list() / .contract()
-        都作用在子接口上（键不再加 owner 前缀）
+    "core/tools&mdtManager"  接口 core/tools，条目 key = core/mdtManager
+                             （& ⇒ 条目归接口 owner core）
+    "signals#hello"          接口 <id>/signals，条目 key = <id>/hello
+                             （# ⇒ 条目归调用方）
+    "main/a&b&c"             接口 main/a，条目 key = main/b/c
+    "core/settings&launcher&java"
+                             接口 core/settings，条目 key = launcher/java
+
+条目链**不会**把路径变成子接口 —— 接口永远是 `<owner>/<point>` 那两段。
 
 九个动词，每个命名空间都认同一套：
 
@@ -270,12 +270,23 @@ class Scope:
         return f"{self.owner}/{self.name}" if self.owner else f"{actor}/{self.name}"
 
     def _chain(self, actor):
-        """条目链 → [(owner, seg)]：& 接上一段的 owner，# 回到自己。"""
+        """条目链 → [(owner, seg)]。
+
+        `&seg` 沿用**前一节点**的 owner，`#seg` 用**调用方**的 owner ——
+        两者都是在「这一段没写 owner」时把 owner 补全。所以 mode 决定的是
+        **当前这一段**的 owner，不是下一段的。
+
+            core/tools&shared     → [("core", "shared")]        接接口 owner
+            core/tools#private    → [("myplugin", "private")]   回调用方
+            main/a&b&c            → [("main","b"), ("main","c")]
+            main/a#b&c            → [("myplugin","b"), ("myplugin","c")]
+        """
         out = []
         cur = self.owner or actor
         for mode, seg in self.entries:
-            out.append((cur, seg))
-            cur = cur if mode == "&" else actor
+            owner = cur if mode == "&" else actor   # 当前段自己决定
+            out.append((owner, seg))
+            cur = owner                              # 下一段接的是这一段
         return out
 
     def _key(self, actor):
@@ -284,17 +295,6 @@ class Scope:
             return None
         first = chain[0][0]
         return "/".join([first] + [seg for _o, seg in chain])
-
-    def _sub_point(self, actor):
-        """条目链对应的子接口路径（"core/tools/mdtManager"）；没声明就是 None。"""
-        if not self.entries:
-            return None
-        sub = f"{self.owner or actor}/{self.name}/" + "/".join(
-            seg for _m, seg in self.entries)
-        try:
-            return sub if registry.declared(sub) else None
-        except Exception:
-            return None
 
     def _exec(self, verb, name, fields, fn):
         actor = self._actor()
@@ -503,9 +503,6 @@ class Scope:
     # 工具：宿主把 mdtManager / launcher / githubAPI … 登记到 core/tools
     def _tools(self, verb, name, fields, actor, fn=None):
         point = self._base_point(actor)
-        sub = self._sub_point(actor)
-        if sub is not None and verb not in ("contract",):
-            point = sub
         key = self._key(actor)
         if verb == "get":
             entry = registry.entry(point, key) if key else None
@@ -516,8 +513,6 @@ class Scope:
             return [e.key for e in registry.entries(point)
                     if e.key.startswith(f"{actor}/")]
         if verb == "contract":
-            if self.entries:
-                return registry.declare(sub, registrant=actor, **fields)
             return registry.declare(point, registrant=actor, **fields)
         if verb == "new":
             return registry.add(point, key, **fields)
@@ -529,16 +524,12 @@ class Scope:
             return registry.remove(point, key)
         raise ValueError(f"tools 不支持动词 {verb!r}")
 
-    # 普通扩展点：registry 那套（条目链若已声明成子接口，就按接口操作）
+    # 普通扩展点：registry 那套。接口永远是 owner/point，条目永远是 owner/name。
+    # 条目链只补全「条目 key 里那段 owner」，不改变接口。
     def _registry(self, verb, name, fields, fn, actor):
         point = self._base_point(actor)
         key = self._key(actor)
-        sub = self._sub_point(actor)
-        if sub is not None and verb not in ("contract",):
-            point, key = sub, None
         if verb == "contract":
-            if self.entries:
-                return registry.declare(sub, registrant=actor, **fields)
             return registry.declare(point, registrant=actor, **fields)
         if key is None and name:
             key = f"{actor}/{name}"
