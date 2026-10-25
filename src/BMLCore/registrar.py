@@ -558,12 +558,16 @@ class Scope:
         if verb == "list":
             return [e.key for e in registry.entries(point)]
         if verb == "owned":
-            return registry.owned(actor)
+            # owned(point, owner=None)：第一个位置参数是接口路径，不是发起方。
+            # 只传 actor 会被当成接口名去解析（"接口 'core' 不合法"）。
+            return registry.owned(point, actor)
         if verb == "watch":
             cb = fields.get("callback")
             if cb is None:
                 raise ValueError("watch 需要一个回调")
-            return registry.watch(cb)
+            # watch(point=None, callback=None)：回调必须走关键字，
+            # 否则会被当成 point，_notify 里拿函数去比路径，永远不触发。
+            return registry.watch(point, cb)
         raise ValueError(f"不支持动词 {verb!r}")
 
 
