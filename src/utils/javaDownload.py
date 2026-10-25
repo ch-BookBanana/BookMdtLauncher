@@ -341,8 +341,12 @@ class JavaDownloadFlow(QObject):
         self._downloader = None
         if dl is not None:
             try:
-                dl.cancel(timeout=1.0, discard=discard)
-                dl.deleteLater()
+                # 只有确认线程已退出才 deleteLater：销毁仍在运行的 QThread
+                # 会触发 "QThread: Destroyed while thread is still running"
+                # 并直接崩进程。没退出的留到进程退出兜底（句柄随进程释放），
+                # 反正退不掉的线程本来也只剩这一条路。
+                if dl.cancel(timeout=1.0, discard=discard):
+                    dl.deleteLater()
             except Exception:
                 pass
         # 2. 解压线程
