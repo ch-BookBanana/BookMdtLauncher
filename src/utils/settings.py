@@ -69,6 +69,12 @@ BAD_DIR = "BML/badSettings"          # 损坏 settings 的备份目录
 BAD_KEEP = 5                         # 损坏备份最多保留份数
 _MISSING = object()
 
+# 顶层键的分法（v2）：宿主自己的设置在 "core" 桶里，每个插件各占一格，
+# 键就是插件 id。盘上的形状：
+#     {"core": {...language/theme/...}, "example_hello": {...}}
+# 宿主代码仍按老写法 settings["language"] 取 —— 见 __getitem__ 的分流。
+CORE = "core"
+
 
 # ─────────────────────────── 默认值表（= schema）───────────────────────────
 
@@ -82,6 +88,14 @@ DEFAULT_SCHEMA = {
     "defaultGame": None,
     "javaPath": None,
     "github": {
+        # 授权包（access + refresh + 两个到期时间 + scope）整块加密后的密文与
+        # 密钥。为什么只留这两个键：refresh_token 是单次使用的，跟 access 分开
+        # 存迟早配错一次（配错就是永久失效），一块进一块出最不容易错。
+        "auth_enc": None,
+        "auth_key": None,
+        # 老格式（一个裸 token）的两个键：读路径已经不看了，只为了让 logout
+        # 还能把历史遗留的值抹掉 —— 删掉这两行会让老用户的 token 永远留在
+        # settings.json 里，谁也不知道那份东西还有没有效。
         "token_enc": None,
         "token_key": None,
         "useful": None,
@@ -96,10 +110,8 @@ DEFAULT_SCHEMA = {
     },
     "javaPaths": [],
     "gameList": {"<:|default|:>": []},
-    # 插件设置：一格一个插件（example_hello: {...}）。
-    # 空 dict 是「开放映射」—— 键由插件自己定，宿主没法定 schema，
-    # 见 _merge 里对空 dict 默认值的处理。
-    "pluginSettings": {},
+    # 插件设置不在这儿：每个插件是**顶层**的一格（"example_hello": {...}），
+    # 见模块顶部 CORE 的说明。宿主代码按老写法 settings["language"] 读 core 桶。
     # 上次加载失败、已被标注停用的插件 id（下次启动不再加载它们）
     "disabledPlugins": []
 }
@@ -280,22 +292,76 @@ class Settings(MutableMapping):
     def path(self):
         return self._path_override or getPath(SETTINGS_PATH)
 
+    # ── 桶（顶层分法）──
+
+    @property
+    def core(self):
+        """宿主自己的那桶设置（settings.json 里的 "core"）。"""
+        return self.data[CORE]
+
+    def bucket(self, owner, create=False):
+        """取某个插件的设置桶（owner 是插件 id）；create=True 时不存在就补出来。
+
+        读路径默认不创建：读一个没有设置格的插件不该改宿主 settings。
+        """
+        if owner == CORE:
+            return self.core
+        cell = self.data.get(owner, _MISSING)
+        if cell is _MISSING or not isinstance(cell, dict):
+            if not create:
+                return {}
+            self.data[owner] = {}
+            cell = self.data[owner]
+        return cell
+
+    def drop_bucket(self, owner):
+        """删掉某插件的整桶设置（彻底卸载 / 重置时用）。"core" 桶删不得。"""
+        if owner != CORE and owner in self.data:
+            del self.data[owner]
+
+    def buckets(self):
+        """盘上现有的桶名（core + 各插件 id）。"""
+        return list(self.data)
+
     # ── MutableMapping ──
+    #
+    # 顶层键分流：`settings["core"]` / `settings["<插件id>"]` 取整桶；
+    # 其余键按老写法在 core 桶里找 —— 宿主的 138 处 `settings["x"]` 因此
+    # 一行都不用改。插件自己的键要走 self.settings 视图（见 pluginSettings）。
 
     def __getitem__(self, key):
-        return self.data[key]
+        if key == CORE:
+            return self.core
+        if key in self.data:
+            return self.data[key]
+        if key in self.schema:
+            return self.core[key]
+        raise KeyError(key)
 
     def __setitem__(self, key, value):
-        self.data[key] = value
+        if key == CORE:
+            self.data[CORE] = value
+        elif key in self.schema:
+            self.core[key] = value
+        else:
+            # 插件桶（或调试时手写的新格子）：落在顶层
+            self.data[key] = value
 
     def __delitem__(self, key):
-        del self.data[key]
+        if key == CORE:
+            raise KeyError(f"删不掉 {CORE!r}：宿主设置桶不能整桶删")
+        if key in self.data:
+            del self.data[key]
+        elif key in self.schema:
+            del self.core[key]
+        else:
+            raise KeyError(key)
 
     def __iter__(self):
-        return iter(self.data)
+        return iter(self.schema)
 
     def __len__(self):
-        return len(self.data)
+        return len(self.schema)
 
     def __repr__(self):
         return "<Settings %s keys=%d>" % (self.path, len(self.data))
@@ -325,8 +391,8 @@ class Settings(MutableMapping):
     # ── 读盘 / 写盘 ──
 
     def _fresh(self):
-        """按 schema 造一份干净的（子对象也包好）。"""
-        return _Section(self.schema, root=self)
+        """按 schema 造一份干净的：顶层只有 core 桶（子对象也包好）。"""
+        return _Section({CORE: copy.deepcopy(self.schema)}, root=self)
 
     def reset(self):
         """回到默认值（损坏回退 / 测试用）。"""
@@ -334,7 +400,16 @@ class Settings(MutableMapping):
         return self
 
     def load(self):
-        """从文件读进来，按 schema 合并；读不了或值非法就备份原文件再回默认值。"""
+        """从文件读进来，按 schema 合并；读不了或值非法就备份原文件再回默认值。
+
+        盘上两种形状都认：
+
+            v2  {"core": {...}, "example_hello": {...}}
+            v1  平铺的宿主键（可带 "pluginSettings": {id: {...}}）
+
+        v1 文件就地迁移：宿主键进 core 桶，老的 pluginSettings 里各插件的格子
+        提成顶层桶 —— 下次 save() 写出去就是 v2 形状，不用单独跑迁移脚本。
+        """
         self._clean_tmp()
         path = self.path
         if not os.path.exists(path):
@@ -352,12 +427,45 @@ class Settings(MutableMapping):
             return self
 
         self.reset()
-        issues = self._merge(self.data, raw)
+        core_raw, buckets = self._split_buckets(raw)
+        issues = self._merge(self.data[CORE], core_raw)
+        for owner, value in buckets.items():
+            if owner == CORE:
+                continue
+            if isinstance(value, dict):
+                self.data[owner] = value
+            else:
+                issues.append(f"{owner}: object -> {type(value).__name__}")
         if issues:
             self._log("warning",
                       "settings has invalid values, fallback to default: " + "; ".join(issues))
             self._backup(path, "invalid values")
         return self
+
+    def _split_buckets(self, raw):
+        """把读到的结构拆成（core 桶的原始 dict, 各插件桶）。
+
+        v2 文件：顶层 "core" 是宿主设置，其余顶层 dict 都是插件桶，原样收下。
+        v1 文件：没有 "core"，宿主键平铺；老的 "pluginSettings" 里就是一个
+        {id: {...}} 表，提成顶层桶。剩下不认识的顶层 dict 也按桶留着
+        （它们通常是某个插件提前写进去的格子，丢掉就是丢数据）。
+        """
+        if isinstance(raw.get(CORE), dict):
+            buckets = {k: v for k, v in raw.items() if k != CORE}
+            return raw[CORE], buckets
+        plugins = raw.pop("pluginSettings", None)
+        core = {}
+        buckets = {}
+        for key, value in raw.items():
+            if key in self.schema:
+                core[key] = value
+            elif isinstance(value, dict):
+                buckets[key] = value
+        if isinstance(plugins, dict):
+            for pid, cell in plugins.items():
+                if isinstance(cell, dict):
+                    buckets.setdefault(pid, cell)
+        return core, buckets
 
     def save(self):
         """原子写盘。写不进去只记日志 —— 设置存不下去不该把正在做的事一起弄崩。"""
@@ -698,5 +806,4 @@ def register():
     调用处也一行都不用动。
     """
     registry.set("core.overlays", "core.closeAsk",
-                 init=lambda b: AskClose(b.parent),
-                 order=30, title="core.wid.closeAsk.title")
+                 init=lambda b: AskClose(b.parent), title="core.wid.closeAsk.title")

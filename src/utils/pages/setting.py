@@ -33,27 +33,12 @@ from ..options.sections import Section
 from ..path_utils import getPath
 from ..utils import change_color, t
 from ..resources import (ACT_UNITS, BTN_SETTING, FILE_FOLDER, TBT_CLOSE)
-from ..registry import page, Box, registry, simple
+from ...BMLCore.btypes import BPoint, register as register_point
+from ..registry import page, Box, registry
 
 from ._init import *
 
-# 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
-_FIELDS = {
-    "core.setting.preferences": {'spacing': 30},
-    "core.setting.general": {'spacing': 30},
-    "core.setting.java": {'attr': 'sec_java', 'spacing': 30},
-    "core.setting.plugins": {'spacing': 30},
-    "core.setting.theme": {'attr': '_t1_theme'},
-    "core.setting.lang": {'attr': '_t1_lang'},
-    "core.setting.close": {'attr': '_t2_close'},
-    "core.setting.java.select": {'attr': '_t3_select'},
-}
-
-
-
 @page("core.setting")
-
-
 class Setting(Page):
     name = "core.wid.pages.setting"
     icon = BTN_SETTING
@@ -175,26 +160,27 @@ class Setting(Page):
             def _plan(self):
                 """当前该摆哪几组、每组哪几项。
 
-                分组容器从注册表取，每个容器再取自己那几项（条目用 section 指着
-                容器 key）：加一组 = 登记一条容器 + 条目写它的 key，本页一行都不用改。
-                空容器不摆 —— 插件的组在没装插件时就是空的，那块标题也就不出现。
+                分组 = core/setting 下的子点，条目 = 子点上的设置项：加一组就是
+                `register("core/setting").add("xxx", type="core/setting", title=…)`，
+                加一项就是往那个子点上 add(…, build=…, default=…)，本页一行都不用改。
+                空组不摆 —— 插件那一组没装插件时就是空的，那块标题也就不出现。
                 """
-                items_all = registry.entries("core.setting.items")
+                point = register_point("core/setting")
                 out = []
-                for sec in registry.entries("core.setting.sections"):
-                    items = [e for e in items_all if e.get("section") == sec.key]
+                for sec in (e for e in point.entries() if isinstance(e, BPoint)):
+                    items = [e for e in sec.entries() if callable(getattr(e, "build", None))]
                     if items:
                         out.append((sec, items))
                 return out
 
             @staticmethod
             def _sig(sec, items):
-                """一组的签名：容器的 init 工厂 + 每项的 key 与 init 工厂。
+                """一组的签名：分组点 + 每项的名字与控件工厂。
 
-                为什么要带上 init：插件重载之后键还是那些键，但工厂是新的一份
+                为什么要带上工厂：插件重载之后键还是那些键，但工厂是新的一份
                 （闭包连着新实例）。签名就是用来认出「同一批键、换了实例」的。
                 """
-                return (sec.init, tuple((e.key, e.init) for e in items))
+                return (id(sec), tuple((e.key, getattr(e, "build", None)) for e in items))
 
             def init_wid(self):
                 for sec, items in self._plan():
@@ -209,11 +195,12 @@ class Setting(Page):
                 events.on("plugins_changed", self.sync_registry_parts)
 
             def _add_section(self, sec, items, index=None):
-                f = _FIELDS.get(sec.key, {})
-                wid = sec.init(Box(parent=self, entry=sec, items=items, fields=_FIELDS))
-                if f.get("attr"):
-                    setattr(self, f["attr"], wid)
-                spacing = f.get("spacing", 0)
+                wid = Section(self, getattr(sec, "title", None), items)
+                # 分组点自己可以声明 attr=（挂到页面上）和 spacing=（与上一组的间距）
+                attr = getattr(sec, "attr", None)
+                if attr:
+                    setattr(self, attr, wid)
+                spacing = getattr(sec, "spacing", 0)
                 if index is None:
                     self.add(wid, spacing)
                 else:
@@ -560,48 +547,55 @@ class Setting(Page):
 
 
 def register():
-    """设置子页与条目的登记。由 pages/builtin.py 调用一次。
+    """设置页的登记：分组是 core/setting 的子点，条目是子点上的设置项。
 
-    原先这两段写在 init_wid 里：第二次构建设置页就会撞「已存在条目」。
-    init 从 Box.parent 取宿主（子页是 Main 实例，条目是 Launcher 实例）。
+        group = register("core/setting")                      # 宿主点
+        group.add("core.setting.java", type="core/setting",    # 分组 = 子点
+                  title="…")
+        group.get("core.setting.java").add(                    # 条目 = 设置项
+            "core.setting.java.select", title="…",
+            build=lambda ctx: Combo(ctx.parent, ctx.title))
+
+    分组为空时设置页不摆（插件那一组没装插件就是空的）；插件条目落在
+    core.setting.plugins（Plugin.add_setting 的默认分组）。本页不认识任何具体
+    条目，加减一项都不用动这里。
     """
-
+    # 设置页自己的子页（左栏 -> 设置 -> 各分组页），还是 v2 的页面注册表；
+    # 页面这套迁移是另一件事，和设置项无关。
     registry.add("core.setting.pages", "core.setting.launcher",
                  init=lambda b: b.parent.Launcher(b.parent, b.title, b.icon),
-                 order=10,
                  title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
-    # 分组容器：条目用 section 字段指向它。空容器设置页不摆（插件的组没装插件时
-    # 就是空的，那块标题也就不出现）。spacing 是加在容器上方的空隙。
-    registry.add("core.setting.sections", "core.setting.preferences",
-                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
-                 order=10,
-                 title="core.wid.pages.setting.launcher.preferences")
-    registry.add("core.setting.sections", "core.setting.general",
-                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
-                 order=40,
-                 title="core.wid.pages.setting.launcher.general")
-    registry.add("core.setting.sections", "core.setting.java",
-                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
-                 order=50,
-                 title="core.wid.pages.setting.launcher.java")
-    # 插件那些设置项的落脚处（Plugin.add_setting 的默认 section）。插件想自己开
-    # 一组就照上面这样再登记一条容器。
-    registry.add("core.setting.sections", "core.setting.plugins",
-                 init=lambda b: Section(b.parent, b.title, b.items, _FIELDS),
-                 order=900,
-                 title="core.wid.pages.setting.plugins")
-    # 标准条目：attr 是绑回 Launcher 的老名字，下面的行为绑定代码仍按这些名字
-    # 引用控件；section 指着上面那几个容器。
-    registry.add("core.setting.items", "core.setting.theme",
-                 init=simple(Bool), section="core.setting.preferences", order=20,
-                 title="core.wid.pages.setting.launcher.preferences.theme")
-    registry.add("core.setting.items", "core.setting.lang",
-                 init=simple(Combo), section="core.setting.preferences", order=30,
-                 title="core.wid.pages.setting.launcher.preferences.lang")
-    # 通用：关闭窗口时怎么办（和点 × 弹的那一层是同一个设置）
-    registry.add("core.setting.items", "core.setting.close",
-                 init=simple(Combo), section="core.setting.general", order=10,
-                 title="core.wid.pages.setting.launcher.general.close")
-    registry.add("core.setting.items", "core.setting.java.select",
-                 init=simple(Combo), section="core.setting.java", order=60,
-                 title="core.wid.pages.setting.launcher.java.select")
+
+    try:
+        group = register_point("core/setting")
+    except KeyError:                        # 宿主还没登记这个点：就地补上
+        group = register_point().add("core/setting", type="core/setting")
+
+    for key, title, order, extra in (
+            ("core.setting.preferences", "core.wid.pages.setting.launcher.preferences", 10, {}),
+            ("core.setting.general", "core.wid.pages.setting.launcher.general", 40, {}),
+            ("core.setting.java", "core.wid.pages.setting.launcher.java", 50,
+             {"attr": "sec_java"}),
+            ("core.setting.plugins", "core.wid.pages.setting.plugins", 900, {})):
+        if not group.has(key):
+            group.add(key, type="core/setting", title=title, spacing=30,
+                      **extra)
+
+    def _bool(ctx):
+        return Bool(ctx.parent, ctx.title)
+
+    def _combo(ctx):
+        return Combo(ctx.parent, ctx.title)
+
+    # 标准条目：attr 是绑回 Launcher 的名字，下面的行为绑定仍按这些名字取控件。
+    # 这几项的值都在宿主设置里，界面由本页手工接线（build 只负责把控件建出来）。
+    group.get("core.setting.preferences").add(
+        "core.setting.theme", title="core.wid.pages.setting.launcher.preferences.theme", default=False, build=_bool, attr="_t1_theme")
+    group.get("core.setting.preferences").add(
+        "core.setting.lang", title="core.wid.pages.setting.launcher.preferences.lang", build=_combo, attr="_t1_lang")
+    group.get("core.setting.general").add(
+        "core.setting.close", title="core.wid.pages.setting.launcher.general.close", build=_combo, attr="_t2_close")
+    group.get("core.setting.java").add(
+        "core.setting.java.select", title="core.wid.pages.setting.launcher.java.select", build=_combo, attr="_t3_select")
+
+

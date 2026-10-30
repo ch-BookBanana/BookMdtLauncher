@@ -18,16 +18,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 一个插件长这样：
 
-    from BMLCore import Plugin
+    from BMLCore import BMLPlugin, registrar
 
-    class Hello(Plugin):
+    class Hello(BMLPlugin):
         id = "you_hello"              # 标识符，建议带作者名；同时是注册表命名空间
         name = "Hello"
 
-        def __init__(self, host):
-            super().__init__(host)
-            self.add("core.setting.items", "greet",
-                     init=..., section="core.setting.plugins", title="you_hello.greet")
+        @registrar("core/pages").new(title="you_hello.page")
+        def page(self, ctx):
+            return MyPage(ctx.parent)
 
 为什么中间要有这一层
 --------------------
@@ -41,15 +40,17 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
 门面越薄越守得住：塞进来的每个名字都是一份长期承诺。所以宁可少放、以后再补，
 也不要先图方便把内部结构一股脑转出来。现在有这几样：
 
-    API_VERSION  宿主 API 版本（插件按它声明自己兼容的范围）
-    Plugin       插件基类（元信息 + 生命周期 + 便捷动作 + 自己的设置）
+    API_VERSION  宿主 API 版本（插件按它声明自己兼容的范围；semver）
+    Plugin       插件基类（元信息 + 生命周期 + 便捷动作 + 能力句柄）
+    BMLPlugin    再加上 settings 视图与 workspace
+    registrar    注册 DSL：registrar("命名空间").new/set/…（register 是同一件事）
     Widgets      现成控件（Bool / Combo / Title…，和内置界面同一套）
-    events       事件总线（on / emit，插件间的通知与命令都走它）
-    registry     扩展点登记（一般用 Plugin.add 就够了，需要直连时再用）
+    events       事件总线（signals 全走它，插件间的通知都走它）
+    registry     扩展点登记（一般用 registrar("ns") 就够了，需要直连时再用）
     simple       把「签名是 (parent, root, title) 的控件类」变成 init 工厂
     getPath      取自己的资源（${plugin}/…），换 id、换安装位置都不用改代码
-    Signal       PySide6 的 Signal，转一道手：插件自定义信号不必自己 import Qt
-                 （将来换掉 Qt 绑定，这一层的名字也还在）
+    Signal       PySide6 的 Signal 转一道手（插件模块内部自定义 Qt 信号时用；
+                 插件间通信统一走 events/registrar("signals")）
 
 另外三个「往宿主界面里伸」的动作挂在插件实例上，不占门面的名字：
 
@@ -58,7 +59,7 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
     self.add_tray(...)      往系统托盘右键菜单加一项
 
 插件设置不用单独记一个名字：它挂在插件实例上 —— self.settings["key"]，
-存进宿主 settings.json 的 "pluginSettings" 里自己那一格（见 utils/pluginSettings.py）。
+落在宿主 settings.json 顶层自己那一格（见 utils/pluginSettings.py）。
 
 边界提醒（写插件前务必分清）
 ----------------------------
@@ -69,11 +70,77 @@ BMLCore 是**承诺稳定**的那一层：里面怎么挪都行，这层的名�
 
 from PySide6.QtCore import Signal
 
-from . import Widgets, registrar
+from . import Widgets, registrar as _registrar_mod
 from .Plugin import API_VERSION, BMLPlugin, Ctx, Plugin, Service
 from ..utils.events import events
 from ..utils.path_utils import getPath
 from ..utils.registry import registry, simple
 
+
+from . import btypes as _btypes  # noqa: E402
+
+
+class _DualScope:
+    """registrar(path) 的作用域：先试 v3（装饰器语法），解析不到回退旧 v2。
+
+    v3：`@registrar("settings$a$b$c.value_changed").connect()`、
+        `registrar("core/log").info(…)`
+    v2（过渡）：`@registrar("core/pages").new(title=…)` 这类旧动词原样可用。
+    """
+
+    def __init__(self, path):
+        self.path = path
+
+    def _v3(self):
+        return _btypes._resolve_dsl(self.path)
+
+    def connect(self, callback=None):
+        try:
+            target, _name = self._v3()
+        except Exception:
+            return _registrar_mod.registrar(self.path).connect(callback)
+        if callback is None:
+            def deco(fn):
+                target.connect(fn)
+                return fn
+            return deco
+        target.connect(callback)
+        return callback
+
+    def emit(self, *args):
+        try:
+            target, _name = self._v3()
+        except Exception:
+            return _registrar_mod.registrar(self.path).emit(*args)
+        target.emit(*args)
+        return None
+
+    def __getattr__(self, item):
+        try:
+            target, _name = self._v3()
+            return getattr(target, item)
+        except Exception:
+            return getattr(_registrar_mod.registrar(self.path), item)
+
+
+class _Registrar:
+    """`registrar` 既当模块（registrar.apply / registrar.collect…），又当工厂。"""
+
+    def __call__(self, path):
+        return _DualScope(path)
+
+    def __getattr__(self, name):
+        return getattr(_registrar_mod, name)
+
+
+registrar = _Registrar()
+
+# ── v3：万物皆 BType（旧格式不再兼容，见 docs/plugin/13）──
+# `register` 直接是 v3 的入口（旧版 registrar("ns") 仍挂在 registrar 代理上做过渡）
+from .btypes import BPoint, BSignal, BType, BTypes, BValue  # noqa: E402
+from .btypes import register  # noqa: E402
+
 __all__ = ["API_VERSION", "Plugin", "BMLPlugin", "Ctx", "Service", "registrar",
-           "Widgets", "events", "registry", "simple", "getPath", "Signal"]
+           "register", "Widgets", "events", "registry", "simple",
+           "getPath", "Signal",
+           "BTypes", "BType", "BPoint", "BSignal", "BValue"]

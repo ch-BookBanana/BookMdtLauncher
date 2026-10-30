@@ -16,11 +16,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from ._init import *
+from .base import SettingItem
 from ..events import events
 from ..resources import (ACT_INTRO, ACT_OFF, ACT_ON, ACT_TIPS)
 
 
-class Bool(QWidget):
+class Bool(SettingItem, QWidget):
     push = Signal(bool)
     def __init__(self, parent=None, text=None):
         super().__init__()
@@ -83,6 +84,20 @@ class Bool(QWidget):
         self.push.emit(booll)
         self.btn.setIcon(QIcon(self.btnpix[1 if booll else 0]))
 
+    # ── 设置项接口（options/base.py）：开关的值就是勾没勾 ──
+    def value(self):
+        return bool(self.btn.isChecked())
+
+    def set_value(self, value):
+        checked = bool(value)
+        if self.btn.isChecked() != checked:
+            # 静音改：外部灌值不该再发一次 push（否则回写绕成环）
+            self.btn.blockSignals(True)
+            self.btn.setChecked(checked)
+            self.btn.blockSignals(False)
+            self.btn.setIcon(QIcon(self.btnpix[1 if checked else 0]))
+        return checked
+
     def setToolBar(self,wid,shown=None,text=None):
         if wid == "intro":
             if shown is not None:
@@ -110,7 +125,7 @@ class Bool(QWidget):
             self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
 
 
-class Slider(QWidget):
+class Slider(SettingItem, QWidget):
     push = Signal(int)
     def __init__(self, parent=None, text=None):
         super().__init__()
@@ -209,13 +224,13 @@ class Slider(QWidget):
 
         self.lay2.addStretch(1)
 
-        self.value = QLabel()
-        self.value.setProperty("wid","text")
-        self.value.setStyleSheet("font-size: 17px;")
-        self.value.setAlignment(Qt.AlignVCenter)
-        self.value.setFixedHeight(30)
-        self.lay2.addWidget(self.value)
-        self.value.setAttribute(Qt.WA_TranslucentBackground)
+        self.lbl_value = QLabel()
+        self.lbl_value.setProperty("wid","text")
+        self.lbl_value.setStyleSheet("font-size: 17px;")
+        self.lbl_value.setAlignment(Qt.AlignVCenter)
+        self.lbl_value.setFixedHeight(30)
+        self.lay2.addWidget(self.lbl_value)
+        self.lbl_value.setAttribute(Qt.WA_TranslucentBackground)
 
         self.langing()
 
@@ -229,11 +244,28 @@ class Slider(QWidget):
         self.text.setText(events.lang.get(self.text_))
         self.intro.setToolTip(events.lang.get(self.intro_))
         self.tips.setToolTip(events.lang.get(self.tips_))
-        self.value.setText(self.val(self.scroll.value()))
+        self.lbl_value.setText(self.val(self.scroll.value()))
 
     def pushEvent(self, i):
         self.push.emit(i)
-        self.value.setText(self.val(i))
+        self.lbl_value.setText(self.val(i))
+
+    # ── 设置项接口（options/base.py）：滑块的值是整数 ──
+    def value(self):
+        return int(self.scroll.value())
+
+    def set_value(self, value):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            number = self.scroll.minimum()
+        number = max(self.scroll.minimum(), min(self.scroll.maximum(), number))
+        if self.scroll.value() != number:
+            self.scroll.blockSignals(True)
+            self.scroll.setValue(number)
+            self.scroll.blockSignals(False)
+        self.lbl_value.setText(self.val(number))
+        return number
 
     def setToolBar(self,wid,shown=None,text=None):
         if wid == "intro":
@@ -264,7 +296,7 @@ class DropBtnCombo(QComboBox):
             super().mousePressEvent(event)
 
 
-class Combo(QWidget):
+class Combo(SettingItem, QWidget):
     push = Signal(str)
 
     class _QComboBox(QComboBox):
@@ -356,3 +388,19 @@ class Combo(QWidget):
             self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
         if self.tipsable:
             self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+
+    # ── 设置项接口（options/base.py）：值取 itemData，认不出再按文字找 ──
+    def value(self):
+        data = self.combo.currentData()
+        return self.combo.currentText() if data is None else data
+
+    def set_value(self, value):
+        index = self.combo.findData(value)
+        if index < 0:
+            index = self.combo.findText(str(value))
+        if index >= 0 and index != self.combo.currentIndex():
+            self.combo.blockSignals(True)
+            self.combo.setCurrentIndex(index)
+            self.combo.blockSignals(False)
+        return self.value()
+

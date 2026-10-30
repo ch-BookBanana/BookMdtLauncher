@@ -119,8 +119,10 @@ PLUGIN_DATA = "BML/pluginData"
 _PLUGIN_PATHS = {}
 # 上次加载失败、已标注停用的插件 id 列表（存在设置里，要活过一次启动）
 DISABLED_KEY = "disabledPlugins"
-MANIFEST = "manifest.toml"        # 首选（NcatBot 那套）
-MANIFEST_JSON = "plugin.json"     # 旧格式，继续认
+# 清单文件：三选一，按优先级**静默取第一个存在的**（多份不报错，取最高的）
+MANIFESTS = ("data.hjson", "data.json", "data.toml")
+# 2.0 不再认的旧名：发现它们就报「请改名」，不静默忽略（否则表现为「插件凭空没装」）
+LEGACY_MANIFESTS = ("manifest.toml", "plugin.json")
 
 # 插件 id 的字符规约：与 Python 的包 / 模块名同一套 —— 字母、数字、下划线，
 # 且首字符是字母（数字开头不是合法标识符，当不了包名）。
@@ -179,11 +181,11 @@ class PluginInfo:
     name: str = ""
     version: str = "0.0.0"
     api: str = "1.x"
-    entry: str = "main.py"
-    entry_class: str = ""          # 清单里的 entry_class（缺省自动发现）
+    entry: str = "main"              # 入口：模块名，或 "模块.类名"（如 main.ExampleV3）
     author: str = ""
     description: str = ""
     dependencies: tuple = ()         # 依赖的插件 id（清单里的 dependencies）
+    dep_specs: dict = field(default_factory=dict)   # id -> (原文, [(op, 版本), …])
 
     source: str = ""                # 来自目录还是 zip 文件（界面显示/排查用）
     disabled: bool = False           # 被标注停用（上次加载失败，见 disabled_ids）
@@ -265,32 +267,127 @@ def _prepare_zip(zip_path, cache_root):
 
 
 def manifest_path(folder):
-    """清单文件在哪：manifest.toml 优先，退回 plugin.json；都没有返回 None。"""
-    for name in (MANIFEST, MANIFEST_JSON):
+    """清单文件在哪：data.hjson > data.json > data.toml，取第一个存在的。
+
+    只剩旧名（manifest.toml / plugin.json）时当场报错要求改名 —— 2.0 不向下兼容，
+    但也不能让它悄无声息地「没装」。
+    """
+    for name in MANIFESTS:
         p = os.path.join(folder, name)
         if os.path.isfile(p):
             return p
+    for name in LEGACY_MANIFESTS:
+        if os.path.isfile(os.path.join(folder, name)):
+            raise PluginLoadError(
+                f"旧清单 {name} 不再识别：请改名为 data.hjson（或 data.json / data.toml）")
     return None
 
 
+def _load_manifest_data(path):
+    """按扩展名解析清单：hjson / json / toml。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".hjson":
+        import hjson
+        with open(path, "r", encoding="utf-8") as f:
+            return hjson.load(f)
+    if ext == ".toml":
+        import tomllib
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+# 依赖约束表达式的几种写法：
+#   "example_base"              只要装着
+#   "example_base>=1.2,<2.0"    单边 / 多条件
+#   "1.2<=example_base<=1.5"    两边夹（名字在中间）
+_DEP_OPS = ("<=", ">=", "==", "!=", "<", ">")
+_VER_RE = re.compile(r"\d+(?:\.\d+)*")
+
+
+def _ver_tuple(text):
+    """semver → 三位整数元组（1.2 → (1,2,0)；1.2.3-rc1 → (1,2,3)）。
+
+    预发布/构建元数据不参与比较（semver 里它们只比值排序，这里不比）。
+    """
+    core = str(text or "0").split("-")[0].split("+")[0]
+    parts = []
+    for piece in core.split("."):
+        try:
+            parts.append(int(piece))
+        except ValueError:
+            break
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def _ver_cmp(op, have, want):
+    a, b = _ver_tuple(have), _ver_tuple(want)
+    return {"<=": a <= b, ">=": a >= b, "<": a < b, ">": a > b,
+            "==": a == b, "!=": a != b}[op]
+
+
+def parse_dependency(expr, where=""):
+    """解析一条依赖约束 → (插件 id, [(op, 版本), …])。报错带原文。"""
+    raw = expr.strip()
+    m = re.search(r"[A-Za-z][A-Za-z0-9_]*", raw)
+    if not m:
+        raise PluginLoadError(f"依赖约束 {expr!r} 解析不出来：找不到合法的插件 id")
+    dep_id = m.group(0)
+    left, right = raw[:m.start()], raw[m.end():]
+    ranges = []
+
+    def _take(text, before):
+        """从一段文本里切出 (op, 版本)；before=True 表示它是名字左边那一段。"""
+        text = text.strip().strip(",").strip()
+        if not text:
+            return
+        for op in _DEP_OPS:
+            if text.startswith(op) or text.endswith(op):
+                op_txt = op if text.startswith(op) else text[-len(op):]
+                ver_txt = text[len(op_txt):].strip() if text.startswith(op_txt) \
+                    else text[:-len(op_txt)].strip()
+                if not _VER_RE.fullmatch(ver_txt):
+                    raise PluginLoadError(
+                        f"依赖约束 {expr!r} 里的版本 {ver_txt!r} 不合法")
+                # 名字在右边（1.2<=name）时，比较方向要翻过来
+                if before:
+                    op_txt = {"<": ">", "<=": ">=", ">": "<", ">=": "<="}.get(op_txt, op_txt)
+                ranges.append((op_txt, ver_txt))
+                return
+        raise PluginLoadError(
+            f"依赖约束 {expr!r} 解析不出来：{text!r} 不是 <op><版本> 形式"
+            f"（可用 {', '.join(_DEP_OPS)}）")
+
+    for piece in left.split(","):
+        _take(piece, before=True)
+    for piece in right.split(","):
+        _take(piece, before=False)
+    return dep_id, ranges
+
+
+def dep_satisfied(ranges, have_version):
+    """已装版本满足全部约束吗（没有约束 = 恒真）。"""
+    for op, want in ranges:
+        if not _ver_cmp(op, have_version or "0.0.0", want):
+            return False
+    return True
+
+
 def _read_manifest(folder):
-    """读 plugin.json 并校验必填项。"""
+    """读清单（data.hjson / data.json / data.toml）并校验必填项。"""
     path = manifest_path(folder)
     if path is None:
-        raise PluginLoadError(f"缺少 {MANIFEST}（或旧的 {MANIFEST_JSON}）")
+        raise PluginLoadError(f"缺少清单：{MANIFESTS[0]}（或 data.json / data.toml）")
     try:
-        if path.endswith(".toml"):
-            import tomllib
-            with open(path, "rb") as f:
-                data = tomllib.load(f)
-        else:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        data = _load_manifest_data(path)
     except Exception as e:
         raise PluginLoadError(
             f"{os.path.basename(path)} 读不了或不是合法清单：{e}") from None
     if not isinstance(data, dict):
-        raise PluginLoadError(f"{MANIFEST} 顶层必须是一个对象")
+        raise PluginLoadError(f"{os.path.basename(path)} 顶层必须是一个对象")
 
     # 每个字段都过一遍 _text()：清单是**别人写的文件**，里面出现什么类型都不奇怪
     # （id 写成数字、name 写成数组…）。这里一律收成字符串或当场报 PluginLoadError ——
@@ -309,36 +406,50 @@ def _read_manifest(folder):
     if pid.lower() in RESERVED_IDS:
         raise PluginLoadError(f"id {pid!r} 是保留名（{'、'.join(RESERVED_IDS)}）")
 
-    deps = data.get("dependencies") or []
-    if isinstance(deps, str):
-        deps = [deps]                      # 只依赖一个时写字符串也认
-    if not isinstance(deps, list):
+    deps_raw = data.get("dependencies") or []
+    if isinstance(deps_raw, str):
+        deps_raw = [deps_raw]              # 只依赖一个时写字符串也认
+    if not isinstance(deps_raw, list):
         raise PluginLoadError(f"{base} 的 dependencies 必须是数组")
-    bad = [d for d in deps if not isinstance(d, str)]
+    bad = [d for d in deps_raw if not isinstance(d, str)]
     if bad:
-        # 不能 str() 了事：null 会变成 "None"、数字会变成 "123"，
-        # 而它们都是「查不到的依赖名」—— 失败会发生在很远的地方
         raise PluginLoadError(f"{base} 的 dependencies 里只能是字符串，收到 {bad!r}")
-    deps = tuple(dict.fromkeys(d.strip() for d in deps if d.strip()))
+    deps, dep_specs = [], {}
+    for expr in deps_raw:
+        if not expr.strip():
+            continue
+        dep_id, ranges = parse_dependency(expr, base)
+        if dep_id in dep_specs:
+            continue          # 同一个依赖写两遍没有意义：去重（以后写的那条为准）
+        dep_specs[dep_id] = (expr.strip(), ranges)
+        deps.append(dep_id)
+    deps = tuple(deps)
     if pid in deps:
         raise PluginLoadError(f"依赖了自己：{pid}")
 
     entry = _text(data.get("entry"), "entry", base) or \
-        _text(data.get("main"), "main", base) or "main.py"
-    # 入口必须是插件目录里的裸文件名：带路径分隔符就可能是「跑到目录外面去」
-    if entry != os.path.basename(entry) or entry.startswith("."):
+        _text(data.get("main"), "main", base) or "main"
+    # 入口两种写法：模块名（main）或「模块.类名」（main.ExampleV3）。
+    # 都不允许出现路径分隔符/以点开头 —— 那意味着可能跑出插件目录去。
+    if "/" in entry or "\\" in entry or entry.startswith("."):
         raise PluginLoadError(
-            f"{base} 的入口文件名 {entry!r} 不合法：只能是插件目录里的文件名")
+            f"{base} 的入口文件名 {entry!r} 不合法：只能是模块名（main）"
+            f"或 模块.类名（main.ExampleV3）")
+    module, _, cls_name = entry.partition(".")
+    module = module or "main"
+    if not module.isidentifier():
+        raise PluginLoadError(f"{base} 的入口模块 {module!r} 不是合法标识符")
+    if cls_name and not cls_name.isidentifier():
+        raise PluginLoadError(f"{base} 的入口类名 {cls_name!r} 不是合法标识符")
     return PluginInfo(
         id=pid, path=folder, entry=entry,
-        entry_class=_text(data.get("entry_class"), "entry_class", base),
         name=_text(data.get("name"), "name", base) or pid,
         version=_text(data.get("version"), "version", base) or "0.0.0",
-        api=_text(data.get("api"), "api", base) or "1.x",
+        api=_text(data.get("api"), "api", base),
         author=_text(data.get("author"), "author", base),
         description=_text(data.get("description"), "description", base),
         dependencies=deps,
-    )
+        dep_specs=dep_specs)
 
 
 def _text(value, field, where):
@@ -720,26 +831,27 @@ def discover(base=None, cache=None):
     return found
 
 
-def _find_plugin_class(mod, entry_name, entry_class=""):
+def _find_plugin_class(mod, module_name, cls_name=""):
     """在入口模块里找插件类：只认**本文件自己定义**的，多个时取最派生那个。
 
     为什么要卡 `__module__`：插件里写了 `from BMLCore import BMLPlugin` 之后，
     BMLPlugin 本身就是「模块里的一个 Plugin 子类」—— 照 vars(mod) 顺序取第一个，
     拿到的是它，插件本体的装饰器一个都收不到（曾经真踩过）。
+
+    入口写成 `main.ExampleV3` 时（cls_name 非空）直接取那个类。
     """
     from ..BMLCore import Plugin
-    if entry_class:                       # 清单点名的就直接取它
-        obj = getattr(mod, entry_class, None)
+    if cls_name:                       # 清单点名的就直接取它
+        obj = getattr(mod, cls_name, None)
         if not (isinstance(obj, type) and issubclass(obj, Plugin)):
             raise PluginLoadError(
-                f"{entry_name} 里找不到 entry_class = {entry_class!r}"
-                f"（要是 Plugin 子类）")
+                f"{module_name} 里找不到 {cls_name!r}（要定义在本文件里、且是 Plugin 子类）")
         return obj
     cands = [obj for obj in vars(mod).values()
              if isinstance(obj, type) and issubclass(obj, Plugin)
              and obj is not Plugin and obj.__module__ == mod.__name__]
     if not cands:
-        raise PluginLoadError(f"{entry_name} 里找不到 Plugin 子类（要定义在本文件里）")
+        raise PluginLoadError(f"{module_name} 里找不到 Plugin 子类（要定义在本文件里）")
     cands.sort(key=lambda c: len(c.__mro__), reverse=True)      # 最派生
     return cands[0]
 
@@ -833,14 +945,19 @@ def load_one(info):
     if info.error:
         return info
 
-    if not _api_ok(info.api, API_VERSION):
+    # api 没填就不判断（清单里不写 api = 不声明兼容范围，直接尝试加载）
+    if info.api and not _api_ok(info.api, API_VERSION):
         info.error = (f"要求 API {info.api}，当前宿主是 {API_VERSION}；"
                       f"请更新插件或改用兼容的 api 声明")
         return info
 
-    entry_path = os.path.join(info.path, info.entry)
+    # 入口：`entry` 可以是模块名（main）或「模块.类名」（main.ExampleV3）
+    entry_module, _, entry_cls = info.entry.partition(".")
+    entry_module = entry_module or "main"
+    entry_path = os.path.join(
+        info.path, entry_module if entry_module.endswith(".py") else entry_module + ".py")
     if not os.path.isfile(entry_path):
-        info.error = f"入口文件不存在：{info.entry}"
+        info.error = f"入口文件不存在：{os.path.basename(entry_path)}"
         return info
 
     # 同一个 id 已经装着一份，就别再装第二份：第二次会因为「条目已存在」失败，
@@ -867,6 +984,8 @@ def load_one(info):
     # 插件在构造里随手 registry.abort() 是关不掉的（关掉了的话，这里「失败整块
     # 舍弃」的那一下就成了空操作，半截条目会留在正表里）。
     token = registry.begin(info.id)
+    from ..BMLCore import btypes
+    btoken = btypes.begin(info.id)
     try:
         _add_plugin_paths(info)
         with _SrcImportGuard(), _PluginDir(info.path):
@@ -880,7 +999,7 @@ def load_one(info):
             # 先登记进 sys.modules：插件自己的模块级代码里若互相 import 才找得到
             sys.modules[mod_name] = mod
             spec.loader.exec_module(mod)
-            cls = _find_plugin_class(mod, info.entry, info.entry_class)
+            cls = _find_plugin_class(mod, entry_module, entry_cls)
             host = _Host(info)
             inst = cls(host) if _accepts_host(cls) else cls()
             # 构造里没把 host 存下来（旧写法的无参构造、或忘了 super().__init__）
@@ -901,6 +1020,10 @@ def load_one(info):
         _drop_plugin_modules(info)       # 连它的子模块一起，别留半份代码在 sys.modules 里
         _drop_plugin_paths(info)
         _abort_session(info, token)
+        try:
+            btypes.abort(btoken)
+        except Exception:
+            pass
         # on_ready 的回调不在注册表里，abort 滚不到（否则重载成功时会把
         # 上一次那个已经回滚掉的旧实例一起叫起来）
         from ..BMLCore import registrar as _reg
@@ -911,6 +1034,10 @@ def load_one(info):
         # 上面不接的那些（比如 Ctrl+C）：会话必须关掉，否则下一个插件会注册进
         # 一个没人提交的陈旧暂存区
         _abort_session(info, token)
+        try:
+            btypes.abort(btoken)
+        except Exception:
+            pass
         raise
     else:
         # 跑完了：暂存区并进正表。插件登记到这一刻才对别人可见 ——
@@ -922,9 +1049,14 @@ def load_one(info):
         # 现在失败一律当成「这个插件没加载起来」处理。
         try:
             registry.commit(token)
+            btypes.commit(btoken)
         except BaseException as e:
             info.error = f"登记并进正表失败：{type(e).__name__}: {e}"
             _abort_session(info, token, why="commit 失败")
+            try:
+                btypes.abort(btoken)
+            except Exception:
+                pass
             sys.modules.pop(mod_name, None)
             _drop_plugin_modules(info)
             _drop_plugin_paths(info)
@@ -1026,6 +1158,11 @@ def _cleanup_failed(info, inst=None, widgets_before=None):
             inst.on_close()
         except (Exception, SystemExit):
             events.logger.warning(f"回滚时 on_close 抛异常（已忽略）：{info.id}",
+                                  name="Plugin")
+        try:
+            inst.cleanup()          # 计时器 / 下载 / 线程：宿主替你收
+        except (Exception, SystemExit):
+            events.logger.warning(f"回滚时 cleanup 抛异常（已忽略）：{info.id}",
                                   name="Plugin")
     _OWNED_WIDGETS.pop(info.id, None)
     n = _destroy_widgets(_widgets_since(widgets_before))
@@ -1233,15 +1370,18 @@ def _run_ready():
     Exception，表现成「启动器不出声地退了」。一个插件的坏习惯不该有这个权力。
     KeyboardInterrupt 照旧让它出去（那是用户在按 Ctrl+C）。
     """
-    from ..BMLCore import registrar
+    from .events import events
+    from ..BMLCore import btypes
     for info in list(_STATE["loaded"]):
-        for cb in registrar.ready(info.id):
-            try:
-                cb()
-            except (Exception, SystemExit):
-                from .events import events
-                events.logger.error(f"[{info.id}]on_ready 抛异常：{_fmt_exc(limit=4)}",
-                                    name="Plugin")
+        inst = info.instance
+        if inst is None:
+            continue
+        try:
+            with btypes.actor_context(info.id):
+                inst.on_ready()
+        except (Exception, SystemExit):
+            events.logger.error(f"[{info.id}]on_ready 抛异常：{_fmt_exc(limit=4)}",
+                                name="Plugin")
 
 
 def _load_tree(info, by_id):
@@ -1290,6 +1430,12 @@ def _load_tree(info, by_id):
                 _load_tree(dep, by_id)
             if not dep.ok:
                 _fail(info, f"依赖加载失败：{dep_id}")
+                return
+            # 依赖的版本约束（清单里写的 `1.2<=example<=1.5` 那种）：不满足就整个插件失败
+            spec = info.dep_specs.get(dep_id)
+            if spec and not dep_satisfied(spec[1], dep.version):
+                _fail(info, f"依赖版本不满足：{spec[0]}"
+                             f"（实际装的是 {dep.version}）")
                 return
 
         load_one(info)
@@ -1371,6 +1517,8 @@ def unload(info):
         return False
     try:
         registry.remove_namespace(info.id)
+        from ..BMLCore import btypes
+        btypes.unload(info.id)
         _drop_plugin_events(info)
     except Exception:
         events.logger.error(f"插件卸载时摘登记失败：{info.id}\n{_fmt_exc(limit=4)}",
@@ -1382,6 +1530,7 @@ def unload(info):
         inst = info.instance
 
         inst.on_close()
+        inst.cleanup()          # 宿主替插件收拾：计时器停 / 下载取消 / 线程 join
     except (Exception, SystemExit):
         # 同 load_one：SystemExit 也得接住，卸载一个插件不该把启动器带走
         events.logger.error(f"插件 teardown 抛异常：{info.id}\n{_fmt_exc(limit=4)}",

@@ -27,12 +27,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 目录按「这一页活在哪一层」分
 ----------------------------
     *.py            主窗口左栏的导航页（core.pages）
-    fOverlay/       叠加层：盖在窗口上、带遮罩居中的卡片／面板
-    fStack/         浮层栈：整页导航，一页压一页
+    Modal/         叠加层：盖在窗口上、带遮罩居中的卡片／面板
+    Stack/         浮层栈：整页导航，一页压一页
     downloads/      下载页内部：各下载源的页签
 
 文件夹不是摆设：浮层按「在哪一层」分开登记 —— 叠加层进 core.overlays
-（带遮罩居中，fOverlay/），整页浮层栈进 core.stacks（一页压一页，fStack/）。
+（带遮罩居中，Modal/），整页浮层栈进 core.stacks（一页压一页，Stack/）。
 open_overlay 两个点都找，照条目所在的点发对应请求，调用方只给 key。
 
 为什么契约集中在这里声明
@@ -50,19 +50,19 @@ from ..registry import registry
 # ─────────────────────────── 契约声明 ───────────────────────────
 
 registry.declare("core.pages", registrant="core",
-                 fields=("init", "title", "icon", "order", "default"),
+                 fields=("init", "title", "icon", "default"),
                  required=("init", "title"),
                  built=("main", "btn"),
                  doc="主窗口左栏导航页（顺序由各条目的 order 决定）。"
                      "default=True 的那条是启动默认页（没有就取第一页）。")
 
 registry.declare("core.setting.pages", registrant="core.setting",
-                 fields=("init", "title", "icon", "order"),
+                 fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  doc="设置页左栏的子页")
 
 registry.declare("core.qss", registrant="core",
-                 fields=("qss", "theme", "order"),
+                 fields=("qss", "theme"),
                  required=("qss",),
                  doc="追加到全局样式表末尾的 css 片段。theme: None = 两套主题都加，"
                      "False = 只在深色，True = 只在浅色。片段排在主题文件之后，"
@@ -70,42 +70,42 @@ registry.declare("core.qss", registrant="core",
                      "换主题时会重新收一遍，不用自己监听。")
 
 registry.declare("core.tray.menu", registrant="core",
-                 fields=("init", "title", "order"),
+                 fields=("init", "title"),
                  required=("init", "title"),
                  doc="系统托盘右键菜单里的一项：init 收到构建上下文，返回 QAction。"
                      "title 是语言键，语言切换时托盘照它重设文案。")
 
 registry.declare("core.setting.sections", registrant="core.setting",
-                 fields=("init", "title", "order"),
+                 fields=("init", "title"),
                  required=("init", "title"),
                  doc="设置子页里的分组容器（标题 + 它容纳的条目）。"
                      "init 收到构建上下文，其中 items 是这一组容纳的条目表。")
 
 registry.declare("core.setting.items", registrant="core.setting",
-                 fields=("init", "section", "order", "title"),
+                 fields=("init", "section", "title"),
                  required=("init", "section", "title"),
                  doc="设置子页里的条目（Bool / Combo / 插件自绘的控件…）。"
                      "section 指向所属的分组容器 key（core.setting.sections 里的条目）。")
 
 registry.declare("core.start.bottom", registrant="core.start",
-                 fields=("init", "order"),
+                 fields=("init",),
                  required=("init",),
                  doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
 
 registry.declare("core.download.tabs", registrant="core.download",
-                 fields=("init", "title", "icon", "order"),
+                 fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  built=("main", "btn"),
                  doc="下载页左栏的页签")
 
 registry.declare("core.download.sources", registrant="core.download",
-                 fields=("init", "title", "icon", "order"),
+                 fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  built=("main", "btn"),
                  doc="下载页顶部页签的游戏来源")
 
 registry.declare("core.download.item.actions", registrant="core.download",
-                 fields=("init", "title", "icon", "order"),
+                 fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
@@ -113,26 +113,26 @@ registry.declare("core.download.item.actions", registrant="core.download",
 # 浮层页面：盖在窗口上的整页界面，由 FloatingStack 承载。
 # 与 core.pages 的区别是它不进左栏、而是弹出来；条目形态一样。
 registry.declare("core.overlays", registrant="core",
-                 fields=("init", "title", "order"),
+                 fields=("init", "title"),
                  required=("init", "title"),
-                 doc="叠加层页面：盖在窗口上、带遮罩、内容居中（见 pages/fOverlay/）。"
-                     "整页浮层栈是另一个点：core.stacks（见 pages/fStack/）。"
+                 doc="叠加层页面：盖在窗口上、带遮罩、内容居中（见 pages/Modal/）。"
+                     "整页浮层栈是另一个点：core.stacks（见 pages/Stack/）。"
                      "open_overlay 两个点都找，按 key 决定发哪个请求 —— "
                      "发错请求的表现是「点了没反应」，所以别让调用方自己记着。")
 
 registry.declare("core.stacks", registrant="core",
-                 fields=("init", "title", "order"),
+                 fields=("init", "title"),
                  required=("init", "title"),
-                 doc="整页浮层栈：一页压一页、可逐级返回（见 pages/fStack/）。")
+                 doc="整页浮层栈：一页压一页、可逐级返回（见 pages/Stack/）。")
 
 registry.declare("core.gameManager.pages", registrant="core.gameManager",
-                 fields=("init", "title", "icon", "order"),
+                 fields=("init", "title", "icon"),
                  required=("init", "title"),
                  built=("main", "btn"),
                  doc="游戏管理浮层左栏的功能页（设置 / Mods / …）。icon 可省")
 
 registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
-                 fields=("init", "order", "spacing"),
+                 fields=("init", "spacing"),
                  required=("init",),
                  doc="游戏管理页的区块（文件夹 / Java …）")
 
@@ -145,10 +145,10 @@ from . import start                # noqa: E402,F401
 from . import download             # noqa: E402,F401
 from . import game                 # noqa: E402,F401
 from . import setting              # noqa: E402,F401
-from .fOverlay import githubSetting    # noqa: E402,F401
-from .fStack import dlList             # noqa: E402,F401
+from .Modal import githubSetting    # noqa: E402,F401
+from .Stack import dlList             # noqa: E402,F401
 from .downloads import game as _download_sources   # noqa: E402,F401
-from .fStack import gameManager    # noqa: E402,F401
+from .Stack import gameManager    # noqa: E402,F401
 # 关闭询问浮层住在基层（settings.py）—— 它问的就是基层那个字段，控件跟着字段
 # 走；登记仍然由这里统一叫（register 见那个文件的第二级）。
 from ..settings import register as _register_close_ask    # noqa: E402,F401

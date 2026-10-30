@@ -37,26 +37,28 @@ from ..registry import Box
 class Section(QWidget):
     """一个设置分组：标题那一行（Title）+ 下面容纳的条目。
 
-    条目由设置页按 section 字段挑好、连 Box 的本次上下文一起递进来；这里只负责
-    「按条目自己的 init 建出来、摆进 body」。容器不替条目决定它长什么样 ——
+    条目由设置页从分组点里挑好、连 Box 的本次上下文一起递进来；这里只负责
+    「按条目自己的 build 工厂建出来、摆进 body」。容器不替条目决定它长什么样 ——
     那是条目自己的事（Bool / Combo / 插件自绘的控件都行）。
 
     摆法照 Scroll.add 的规矩：spacing 是加在**这一项上方**的空隙。
     """
 
-    def __init__(self, page=None, title=None, items=(), fields=None):
+    def __init__(self, page=None, title=None, items=()):
         super().__init__()
         self.page = page
         self.title_ = title
-        self.fields = fields or {}
         self.wids = []
         self.init_wid()
         for e in items:
-            wid = e.init(Box(parent=page, entry=e))
-            f = self.fields.get(e.key, {})
-            if f.get("attr"):
-                setattr(page, f["attr"], wid)
-            self.add_wid(wid, f.get("spacing", 0))
+            # 条目自带控件工厂（core/setting 的 add(…, build=…)）：控件怎么建、
+            # 怎么和条目接上，都是条目自己的事，容器只管摆。
+            wid = e.build(Box(parent=page, entry=e))
+            # 条目可以声明 attr=（挂到页面上给手写的接线代码用）、spacing=（上边距）
+            attr = getattr(e, "attr", None)
+            if attr:
+                setattr(page, attr, wid)
+            self.add_wid(wid, getattr(e, "spacing", 0))
 
     def init_wid(self):
         self.layout = QVBoxLayout(self)

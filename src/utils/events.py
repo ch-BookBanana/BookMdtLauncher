@@ -213,8 +213,10 @@ class EventBus(QObject):
         """触发事件。名字没声明过就静默跳过 —— 广播方不该关心有没有听众。
 
         参数个数与声明的签名不符时**不让异常打进广播方**（那可能是宿主的一次
-        点击、一个工作线程的收尾），只记一条 error 日志：广播方崩掉的现场
-        离原因太远，而日志里直接写着是哪个事件名、几个参数。
+        点击、一个工作线程的收尾）。例外是「没声明就自动补的无参信号」：
+        它本来就没有签名，带参广播时按参数个数换成真签名再发一次
+        （订阅者原样接过去）—— registrar("signals").new("x") 之后
+        .set("x", 值) 的写法因此不用先声明签名。
         """
         holder = self._holders.get(name)
         if holder is None:
@@ -222,7 +224,27 @@ class EventBus(QObject):
         try:
             holder.signal.emit(*args)
         except TypeError as e:
+            if name in self._implicit:
+                self._upgrade(name, Signal(*([object] * len(args))))
+                self._holders[name].signal.emit(*args)
+                return
             self._log("error", f"事件 {name!r} 的参数与声明不符（传了 {len(args)} 个）：{e}")
+
+    def _upgrade(self, name, sig):
+        """把隐式的无参信号换成带签名的真信号，已有订阅一并接过去。"""
+        old = self._holders.get(name)
+        holder = self._new_holder(sig)
+        self._holders[name] = holder
+        self._implicit.discard(name)
+        for _owner, cb in self._subs.get(name, []):
+            try:
+                holder.signal.connect(cb)
+            except Exception:
+                pass
+        try:
+            old.deleteLater()
+        except Exception:
+            pass
 
     # ─────────────────────── 退订 / 清理 ───────────────────────
 

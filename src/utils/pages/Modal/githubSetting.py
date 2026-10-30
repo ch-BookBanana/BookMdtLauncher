@@ -14,7 +14,16 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-GitHub 设置浮层：token 的增删改测、账号信息、rate 余量。
+GitHub 设置浮层：登录/退出、账号信息、rate 余量、延迟测试。
+
+登录方式换成了 GitHub App 授权（OAuth 授权码 + PKCE + 本地回环，见
+api/githubAuth.py）：用户点一下「登录 GitHub」，浏览器里点授权，凭据由回环
+端口带回启动器。这里没有、也不该有「粘贴 token」的输入框 —— 手输长期凭据
+既有泄漏风险，又会让用户在权限上做没必要的取舍。
+
+需要用户在 GitHub App 后台配的两件事写在面板顶部的提示条里
+（Authorization callback URL = http://127.0.0.1，端口任意；client_id 填进
+BML/githubApp.json）。
 
 原先长在 main.py 里（Window.GithubSetting，约 690 行），由 Window 在启动时
 **建好并一直攥着**，打开它的按钮直接点 Window 的方法 —— 窗口因此认识这个类，
@@ -24,12 +33,15 @@ GitHub 设置浮层：token 的增删改测、账号信息、rate 余量。
 面板尺寸 520x365：它是浮在窗口上的小卡片，跟设置页那条 600px 正文列不是一个口径。
 """
 
+import time
+
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton,
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
-from ...api import githubAPI
+from shiboken6 import isValid
+
 from ...bus import bus
 from ...events import events
 from ...options.scrolls import Scroll
@@ -58,14 +70,30 @@ def sync_rate_from_api():
     }
 
 
+def fmt_expires(expires_at):
+    """把 epoch 秒换成本地时间的「YYYY-MM-DD HH:MM」；没有到期时间返回空串。
+
+    access token 只有 8 小时，面板上必须让人一眼看到「到什么时候为止」——
+    否则「昨天还能搜，今天要重登」看起来就像凭空掉线。
+    只在打开面板与每次请求失败后刷新显示，不做秒级倒计时：那需要一个常驻
+    定时器，而这块信息一分钟内也不会变。
+    """
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(expires_at)))
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
 def clear_token_data():
-    """清除 settings 里所有 token 相关数据（仅在 token 确认无效时调用）。"""
-    events.githubAPI.setToken(None)
+    """退出登录：授权包（内存 + settings）与上一个账号的 rate/用户信息一起清掉。
+
+    只在两种时候调：用户自己点「退出登录」，或 token 被 GitHub 明确判为
+    无效（401/403）。网络不通时要保留 token —— 那不是凭据的问题。
+    """
+    events.githubAPI.logout(events.settings)
     s = events.settings["github"]
-    s["token_enc"] = None
-    s["token_key"] = None
-    s["useful"] = None
-    s["user"] = {"name": None, "headurl": None}
+    s["rate"]["core"] = {"remaining": None, "reset": []}
+    s["rate"]["search"] = {"remaining": None, "reset": []}
 
 
 class GithubSetting(QWidget):
@@ -100,7 +128,14 @@ class GithubSetting(QWidget):
 
         不再留着实例复用（原先传 deletable=False）—— 现在每次打开都是现建的，
         留个旧实例在叠外只会让面板停在过期数据上。
+
+        顺手取消还在等浏览器的那次授权：面板都关了，用户不会再看到结果，
+        监听端口没有理由继续开着等满三分钟。
         """
+        try:
+            events.githubAPI.cancel_authorize()
+        except Exception:
+            pass
         events.emit("overlayClosed", self, True)
 
     class Panel(QWidget):
@@ -111,6 +146,11 @@ class GithubSetting(QWidget):
             self.init_ui()
             self.init_wid()
             self.githubAPI.refreshed.connect(self._on_rate_refreshed)
+            # 续期走的是 githubAPI 的后台刷新：刷新成功要立刻重画到期时间，
+            # 被判死要立刻切回未登录页。这两个都得由信号送上来 —— 面板自己
+            # 不知道 8 小时什么时候到，也不该挂一个常驻定时器去猜。
+            self.githubAPI.authChanged.connect(self.body.content._on_auth_changed)
+            self.githubAPI.authExpired.connect(self.body.content._on_auth_expired)
 
 
         def init_ui(self):
@@ -209,7 +249,9 @@ class GithubSetting(QWidget):
                     # （滚轮也转成了横向滚动）。去掉那个位置参数即恢复竖排。
                     super().__init__(parent, margins=(20, 20, 20, 20), spacing=10)
                     self.parent = parent
-                    self._editing = False
+                    # 授权流程在等浏览器时为 True：按钮禁用、提示行常驻，
+                    # 期间不允许再点一次（会开第二个回环端口）。
+                    self._authing = False
                     self.init_wid()
                     self.langing()
                     bus.bind(self)
@@ -302,82 +344,66 @@ class GithubSetting(QWidget):
 
                     self.layout.addSpacing(8)
 
-                    self.tokenTitle = QLabel()
-                    self.tokenTitle.setProperty("wid","text")
-                    self.tokenTitle.setStyleSheet("font-size: 13px;font-weight:bold;")
-                    self.tokenTitle.setFixedHeight(18)
-                    self.layout.addWidget(self.tokenTitle,0)
-
+                    # 两页：未登录 = 一颗登录按钮；已登录 = 脱敏 token + 退出。
+                    # 用栈而不是「按钮显隐」，是为了让两种状态占同一块地方，
+                    # 切换时后面的 rate 区不会跳一下。
                     self.tokenStack = QStackedWidget()
                     self.tokenStack.setFixedHeight(32)
                     self.layout.addWidget(self.tokenStack,0)
 
-                    self.tokenInputW = QWidget()
-                    self.tokenInputL = QHBoxLayout(self.tokenInputW)
-                    self.tokenInputL.setContentsMargins(0, 0, 0, 0)
-                    self.tokenInputL.setSpacing(5)
+                    self.loginW = QWidget()
+                    self.loginL = QHBoxLayout(self.loginW)
+                    self.loginL.setContentsMargins(0, 0, 0, 0)
+                    self.loginL.setSpacing(5)
 
-                    self.tokenInput = QLineEdit()
-                    self.tokenInput.setProperty("wid","input")
-                    self.tokenInput.setFixedHeight(28)
-                    self.tokenInputL.addWidget(self.tokenInput,1)
+                    self.loginBtn = QPushButton()
+                    self.loginBtn.setProperty("wid","btn")
+                    self.loginBtn.setFixedSize(110,28)
+                    self.loginBtn.clicked.connect(self._login)
+                    self.loginL.addWidget(self.loginBtn,0)
 
-                    self.tokenSaveBtn = QPushButton()
-                    self.tokenSaveBtn.setProperty("wid","btn")
-                    self.tokenSaveBtn.setFixedSize(44,28)
-                    self.tokenSaveBtn.clicked.connect(self._save_token)
-                    self.tokenInputL.addWidget(self.tokenSaveBtn,0)
-
-                    self.tokenCancelBtn = QPushButton()
-                    self.tokenCancelBtn.setProperty("wid","btn")
-                    self.tokenCancelBtn.setFixedSize(54,28)
-                    self.tokenCancelBtn.clicked.connect(self._cancel_edit)
-                    self.tokenCancelBtn.setVisible(False)
-                    self.tokenInputL.addWidget(self.tokenCancelBtn,0)
-
-                    self.tokenStack.addWidget(self.tokenInputW)
+                    self.loginL.addStretch(1)
+                    self.tokenStack.addWidget(self.loginW)
 
                     self.tokenDisplayW = QWidget()
                     self.tokenDisplayL = QHBoxLayout(self.tokenDisplayW)
                     self.tokenDisplayL.setContentsMargins(0, 0, 0, 0)
                     self.tokenDisplayL.setSpacing(5)
 
-                    self.tokenMaskedLabel = QLabel()
-                    self.tokenMaskedLabel.setProperty("wid","title")
-                    self.tokenMaskedLabel.setStyleSheet("font-size: 12px;")
-                    self.tokenMaskedLabel.setFixedHeight(28)
-                    self.tokenDisplayL.addWidget(self.tokenMaskedLabel,1)
-
-                    self.tokenEditBtn = QPushButton()
-                    self.tokenEditBtn.setProperty("wid","btn")
-                    self.tokenEditBtn.setFixedSize(60,28)
-                    self.tokenEditBtn.clicked.connect(self._start_edit)
-                    self.tokenDisplayL.addWidget(self.tokenEditBtn,0)
-
-                    self.tokenClearBtn = QPushButton()
-                    self.tokenClearBtn.setProperty("wid","btn")
-                    self.tokenClearBtn.setFixedSize(60,28)
-                    self.tokenClearBtn.clicked.connect(self._clear_token)
-                    self.tokenDisplayL.addWidget(self.tokenClearBtn,0)
+                    # 不再外显（脱敏）token：它既不能读也不能改，摆出来只是噪音。
+                    # 按钮大小写死，两个状态切换时下面的内容不会跳。
+                    self.logoutBtn = QPushButton()
+                    self.logoutBtn.setProperty("wid","btn")
+                    self.logoutBtn.setFixedSize(110,28)
+                    self.logoutBtn.clicked.connect(self._logout)
+                    self.tokenDisplayL.addWidget(self.logoutBtn,0)
+                    self.tokenDisplayL.addStretch(1)
 
                     self.tokenStack.addWidget(self.tokenDisplayW)
 
+                    # access token 的到期时间（本地时间）：紧跟按钮，
+                    # 「这枚 token 还能用多久」和「要不要重新登录」是同一件事。
+                    self.expiresLabel = QLabel()
+                    self.expiresLabel.setProperty("wid","title")
+                    self.expiresLabel.setStyleSheet("font-size: 11px;")
+                    self.expiresLabel.setFixedHeight(18)
+                    self.layout.addWidget(self.expiresLabel,0)
+
+                    # 面板上唯一的反馈行：正在等授权 / 登录失败原因 / 已退出。
+                    # 用现成的 title 小字样式，不另起一套提示控件；要换行是
+                    # 因为失败原因可能很长（比如「打不开浏览器」那条会把授权
+                    # 地址整串带上，让用户能手动打开）。
                     self.tokenMsg = QLabel()
                     self.tokenMsg.setProperty("wid","title")
                     self.tokenMsg.setStyleSheet("font-size: 10px;")
-                    self.tokenMsg.setFixedHeight(14)
+                    self.tokenMsg.setFixedHeight(30)
+                    self.tokenMsg.setWordWrap(True)
                     self.layout.addWidget(self.tokenMsg,0)
 
                     self.tokenTestBtnW = QWidget()
                     self.tokenTestBtnL = QHBoxLayout(self.tokenTestBtnW)
                     self.tokenTestBtnL.setContentsMargins(0, 0, 0, 0)
                     self.tokenTestBtnL.setSpacing(5)
-
-                    self.tokenTestBtn = QPushButton()
-                    self.tokenTestBtn.setProperty("wid","btn")
-                    self.tokenTestBtn.setFixedSize(90,26)
-                    self.tokenTestBtn.clicked.connect(self._test_token)
-                    self.tokenTestBtnL.addWidget(self.tokenTestBtn,0)
 
                     self.tokenLatencyBtn = QPushButton()
                     self.tokenLatencyBtn.setProperty("wid","btn")
@@ -439,12 +465,8 @@ class GithubSetting(QWidget):
                 def langing(self):
                     self.tokenTipsIcon.setPixmap(change_color(getPath(ACT_TIPS), QColor(255, 165, 0)).pixmap(QSize(18, 18)))
                     self.tokenTipsText.setText(events.lang.get("core.github.settings.tokenTips"))
-                    self.tokenTitle.setText(events.lang.get("core.github.settings.tokenTitle"))
-                    self.tokenSaveBtn.setText(events.lang.get("core.text.save"))
-                    self.tokenCancelBtn.setText(events.lang.get("core.text.cancel"))
-                    self.tokenEditBtn.setText(events.lang.get("core.text.edit"))
-                    self.tokenClearBtn.setText(events.lang.get("core.text.clear"))
-                    self.tokenTestBtn.setText(events.lang.get("core.github.settings.testToken"))
+                    self.loginBtn.setText(events.lang.get("core.github.settings.login"))
+                    self.logoutBtn.setText(events.lang.get("core.github.settings.logout"))
                     self.tokenLatencyBtn.setText(events.lang.get("core.github.settings.testLatency"))
                     self.rateTitle.setText(events.lang.get("core.github.settings.rateTitle"))
                     self.rateCoreLabel.setText(events.lang.get("core.github.settings.rateCore"))
@@ -456,9 +478,10 @@ class GithubSetting(QWidget):
                     self._refresh_ui()
 
                 def _refresh_ui(self):
-                    token = events.settings["github"]["token_enc"]
+                    # 「有没有登录」以 githubAPI 内存里的授权包为准：settings 里
+                    # 那份是加密的，而且刚刷新出来的新包可能还没落盘。
                     self._update_user_section()
-                    self._update_token_section(token)
+                    self._update_token_section()
                     self._update_rate_section()
 
                 def _update_user_section(self):
@@ -468,16 +491,17 @@ class GithubSetting(QWidget):
 
                     if name:
                         self.userName.setText(name)
-                        self.tokenStatus.setText(events.lang.get("core.github.settings.tokenStatus.valid"))
+                        self.tokenStatus.setText(
+                            events.lang.get("core.github.settings.loggedInAs").replace("$1", name))
                         if headurl:
                             self._load_avatar(headurl)
                         else:
                             self.headIcon.clear()
-                    elif events.settings["github"]["token_enc"] and events.settings["github"]["useful"] is False:
+                    elif events.githubAPI.hasToken() and events.settings["github"]["useful"] is False:
                         self.userName.setText(events.lang.get("core.github.settings.notLoggedIn"))
                         self.tokenStatus.setText(events.lang.get("core.github.settings.tokenStatus.invalid"))
                         self.headIcon.clear()
-                    elif events.settings["github"]["token_enc"]:
+                    elif events.githubAPI.hasToken():
                         self.userName.setText(events.lang.get("core.text.loading"))
                         self.tokenStatus.setText("")
                         self.headIcon.clear()
@@ -504,6 +528,10 @@ class GithubSetting(QWidget):
                             pass
                         return None
                     def _set_round(data):
+                        # 网络任务回来时面板可能已经关了（控件被 deleteLater 掉）：
+                        # 先确认控件还活着，否则 setPixmap 会撞 already deleted。
+                        if not isValid(self.headIcon):
+                            return
                         # 主线程创建 QPixmap（QPixmap 是 GUI 类，禁止在子线程创建）
                         if not data:
                             return
@@ -525,18 +553,47 @@ class GithubSetting(QWidget):
                         self.headIcon.setPixmap(round_pix)
                     QThTimer.task(0, lambda e,_url=url: _fetch(), result_callback=_set_round, dedicated=True)
 
-                def _update_token_section(self, token):
-                    if self._editing:
-                        return
-                    if token:
+                def _update_token_section(self):
+                    if events.githubAPI.hasToken():
                         self.tokenStack.setCurrentIndex(1)
-                        masked = events.githubAPI.getMaskedToken()
-                        self.tokenMaskedLabel.setText(masked if masked else "****")
                         self.tokenMsg.setText("")
+                        # 到期时间：refresh 成功一次就换一次，所以每次重画都
+                        # 重新问一遍，不要自己算「上次看到的是几点 + 8 小时」
+                        when = fmt_expires(events.githubAPI.authExpiresAt())
+                        self.expiresLabel.setText(
+                            events.lang.get("core.github.settings.tokenExpires").replace("$1", when)
+                            if when else "")
                     else:
                         self.tokenStack.setCurrentIndex(0)
-                        self.tokenInput.clear()
                         self.tokenMsg.setText("")
+                        self.expiresLabel.setText("")
+
+                def _on_auth_changed(self):
+                    """授权包变了（续期成功 / 被清空）：只重画，不写提示行。
+
+                    续期发生在后台（可能是用户根本没打开面板的时候），这里
+                    不用弹任何东西 —— 但到期时间必须跟着变，否则面板还挂着
+                    上一块 access 的时间。
+                    """
+                    if not isValid(self.tokenMsg):
+                        return
+                    self._refresh_ui()
+
+                def _on_auth_expired(self):
+                    """凭据被判死：切回未登录页 + 提示重新登录，按钮恢复可点。
+
+                    authExpired 会在任意一次请求里触发（不一定是面板里的操作），
+                    所以这里要把「正在等待授权」也一起复位 —— 否则按钮会一直
+                    停在禁用态，用户连重登都点不了。
+                    """
+                    if not isValid(self.tokenMsg):
+                        return
+                    self._authing = False
+                    self.loginBtn.setEnabled(True)
+                    self._refresh_ui()
+                    # 放在 _refresh_ui 之后：那一步会把提示行清空
+                    self.tokenMsg.setText(
+                        events.lang.get("core.github.settings.authExpired"))
 
                 def _update_rate_section(self):
                     rate = events.githubAPI.rate
@@ -576,55 +633,84 @@ class GithubSetting(QWidget):
                         self.searchBadge.setVisible(False)
                         self.rateSearchValue.setText("")
 
-                def _start_edit(self):
-                    self._editing = True
-                    self.tokenStack.setCurrentIndex(0)
-                    self.tokenCancelBtn.setVisible(True)
-                    self.tokenInput.clear()
+                def _login(self):
+                    """点「登录 GitHub」：开浏览器授权，回来刷新面板。
 
-                def _cancel_edit(self):
-                    self._editing = False
-                    token = events.settings["github"]["token_enc"]
-                    if token:
-                        self.tokenStack.setCurrentIndex(1)
-                    self.tokenInput.clear()
-
-                def _save_token(self):
-                    new_token = self.tokenInput.text().strip()
-                    if not new_token:
-                        self.tokenMsg.setText(events.lang.get("core.github.settings.tokenEmpty"))
+                    authorize() 要一直阻塞到用户在浏览器里点完（最多三分钟），
+                    所以整段丢给后台线程；主线程只负责把「正在等待」画出来。
+                    """
+                    if self._authing:
                         return
+                    self._authing = True
+                    self.loginBtn.setEnabled(False)
+                    self.tokenMsg.setText(events.lang.get("core.github.settings.authWaiting"))
 
-                    events.githubAPI.setToken(new_token)
-                    githubAPI.store_token(events.settings, new_token)
-                    new_token = None
+                    def _done(result):
+                        # 面板可能在等待期间被关掉（控件已 deleteLater）：先确认它还活着
+                        if not isValid(self.loginBtn):
+                            return
+                        self._authing = False
+                        self.loginBtn.setEnabled(True)
+                        # 第三个元素现在是整块授权包（含 refresh 与到期时间），
+                        # 面板不用它 —— 落盘在 githubAPI.authorize 里已经做完
+                        ok, message, _blob = (result if isinstance(result, tuple)
+                                              and len(result) == 3
+                                              else (False, "授权流程返回了意外的结果", None))
+                        if not ok:
+                            # 失败原因直接给用户看：可能是「没配 githubApp.json」
+                            # 「回调地址对不上」「超时」——每一种的下一步都不一样，
+                            # 统一成「登录失败」等于让他自己猜。
+                            self.tokenMsg.setText(
+                                events.lang.get("core.github.settings.authFailed")
+                                .replace("$1", str(message)))
+                            return
+                        # 成功后先按新 token 重取一遍余量与用户信息：这两样才是
+                        # 面板上看得见的「登录成功了」
+                        self._check_after_login()
 
-                    self.tokenSaveBtn.setEnabled(False)
-                    self.tokenMsg.setText(events.lang.get("core.github.settings.tokenChecking"))
+                    QThTimer.task(
+                        0,
+                        lambda e: events.githubAPI.authorize(events.settings),
+                        result_callback=_done,
+                        dedicated=True
+                    )
 
+                def _check_after_login(self):
+                    """登录后补一次 checkToken（拿余量）再取用户信息（头像/用户名）。"""
                     def _on_checked(result):
                         ok, error_type, data = result
-                        self.tokenSaveBtn.setEnabled(True)
+                        # 先把数据写完再碰界面：面板可能在请求回来前就被关了，
+                        # 而「登录成功了没有」这件事不该取决于窗口还开着。
                         if ok:
                             sync_rate_from_api()
                             events.settings["github"]["useful"] = True
                             events.saveSettings()
-                            self._editing = False
-                            self._refresh_ui()
-                            self._fetch_user()
-                            # 最后设置，避免被 _refresh_ui 清空（tokenMsg 会随验证结果显性显示）
-                            self.tokenMsg.setText(events.lang.get("core.github.settings.tokenStatus.valid"))
                         elif error_type == "auth":
-                            events.settings["github"]["useful"] = False
-                            self.tokenMsg.setText(
-                                f"{events.lang.get('core.github.settings.tokenStatus.invalid')}: {data}"
-                            )
+                            # 换到凭据了却验不过（连 refresh 都换不动）：不算
+                            # 登录成功，回退成未登录。授权包已经由 checkToken
+                            # 侧清掉了，这里只补上 rate / 用户信息那一半。
+                            clear_token_data()
+                            events.saveSettings()
+
+                        if not isValid(self.tokenMsg):
+                            return
+                        self._refresh_ui()
+                        if ok:
+                            self._fetch_user()
+                            # 放在 _refresh_ui 之后：那一步会把提示行清空
+                            self.tokenMsg.setText(events.lang.get("core.github.settings.authSuccess"))
                         elif error_type == "network":
+                            # 网络不通不代表凭据有问题 —— 保留登录状态
                             self.tokenMsg.setText(
-                                f"{events.lang.get('core.github.settings.latencyConnError')}: {data}"
-                            )
+                                f"{events.lang.get('core.github.settings.latencyConnError')}: {data}")
+                        elif error_type == "auth":
+                            # 续期也救不回来：直接说「重新登录」，
+                            # 别让用户对着 Invalid token 自己猜下一步
+                            self.tokenMsg.setText(
+                                events.lang.get("core.github.settings.authExpired"))
                         else:
-                            self.tokenMsg.setText(f"{events.lang.get('core.github.settings.tokenStatus.invalid')}: {data}")
+                            self.tokenMsg.setText(
+                                f"{events.lang.get('core.github.settings.tokenStatus.invalid')}: {data}")
 
                     QThTimer.task(
                         0,
@@ -633,53 +719,15 @@ class GithubSetting(QWidget):
                         dedicated=True
                     )
 
-                def _clear_token(self):
+                def _logout(self):
+                    """退出登录：清 token（含 settings 落盘），面板回到未登录态。"""
                     clear_token_data()
                     events.saveSettings()
-                    self._editing = False
+                    self._authing = False
                     self._refresh_ui()
 
-                def _test_token(self):
-                    if not events.settings["github"]["token_enc"]:
-                        self.tokenMsg.setText(events.lang.get("core.github.settings.tokenEmpty"))
-                        return
-                    self.tokenTestBtn.setEnabled(False)
-                    self.tokenMsg.setText(events.lang.get("core.github.settings.tokenChecking"))
-                    def _done(result):
-                        self.tokenTestBtn.setEnabled(True)
-                        ok, error_type, data = result
-                        if ok:
-                            sync_rate_from_api()
-                            events.settings["github"]["useful"] = True
-                            self._refresh_ui()
-                            # 最后设置，避免被 _refresh_ui 清空（tokenMsg 会随验证结果显性显示）
-                            self.tokenMsg.setText(events.lang.get("core.github.settings.tokenStatus.valid"))
-                        elif error_type == "auth":
-                            # 仅明确的认证失败才清除 token
-                            clear_token_data()
-                            events.saveSettings()
-                            self._refresh_ui()
-                            self.tokenMsg.setText(
-                                f"{events.lang.get('core.github.settings.tokenStatus.invalid')}: {data}"
-                            )
-                        elif error_type == "network":
-                            # 网络不通，保留 token
-                            self.tokenMsg.setText(
-                                f"{events.lang.get('core.github.settings.latencyConnError')}: {data}"
-                            )
-                        else:
-                            self.tokenMsg.setText(f"{events.lang.get('core.github.settings.tokenStatus.invalid')}: {data}")
-                    QThTimer.task(
-                        0,
-                        lambda e: events.githubAPI.checkToken(),
-                        result_callback=_done,
-                        dedicated=True
-                    )
-
                 def _test_latency(self):
-                    if not events.settings["github"]["token_enc"]:
-                        self.tokenMsg.setText(events.lang.get("core.github.settings.tokenEmpty"))
-                        return
+                    # 延迟测试跟登录无关：没登录也能测到 GitHub 的网络延迟
                     self.tokenLatencyBtn.setEnabled(False)
                     self.tokenMsg.setText(events.lang.get("core.github.settings.latencyChecking"))
                     def _done(latency):
@@ -715,11 +763,18 @@ class GithubSetting(QWidget):
                                 "headurl": body.get("avatar_url")
                             }
                             events.saveSettings()
-                            self._refresh_ui()
                         else:
                             # 获取用户信息失败，但不影响 token 有效性
                             events.settings["github"]["user"] = {"name": None, "headurl": None}
-                            self._refresh_ui()
+                        # 数据已经落盘了；界面这一步先确认面板还在 —— 头像请求
+                        # 可能回来得比用户关面板晚，那时控件已经 deleteLater。
+                        if not isValid(self.tokenMsg):
+                            return
+                        self._refresh_ui()
+                        if ok:
+                            # 头像/用户名到位后把「登录成功」写回去：_refresh_ui
+                            # 会清空那一行，用户刚点的按钮就白点了（没有任何反馈）
+                            self.tokenMsg.setText(events.lang.get("core.github.settings.authSuccess"))
                     QThTimer.task(
                         0,
                         lambda e: events.githubAPI.getUser(),
@@ -735,5 +790,4 @@ def register():
     QLabel("GitHub") 一个口径。
     """
     registry.add("core.overlays", "core.githubSetting",
-                 init=lambda b: GithubSetting(b.parent),
-                 order=20, title="GitHub")
+                 init=lambda b: GithubSetting(b.parent), title="GitHub")

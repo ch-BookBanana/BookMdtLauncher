@@ -33,7 +33,7 @@ from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING,
 from ..registry import page, Box, registry
 
 from ._init import *
-from .fStack.gameManager import GameManager
+from .Stack.gameManager import GameManager
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
 _FIELDS = {
@@ -347,7 +347,7 @@ class Start(Page):
                 # 从注册表取：本模块的 register() 登记一次（由 pages/builtin.py 调）。
                 # 登记写在这里的话，第二次构建就会撞「已存在条目」。
                 for e in registry.entries("core.start.bottom"):
-                    setattr(self, _FIELDS.get(e.key, {}).get("attr", ""),
+                    setattr(self, _FIELDS.get(e.key.replace("/", "."), {}).get("attr", ""),
                             e.init(Box(parent=self, entry=e)))
 
             def set_have_game(self, have: bool):
@@ -1116,12 +1116,12 @@ def register():
     """
 
     registry.add("core.start.bottom", "core.start.bottom.start",
-                 init=lambda b: b.parent.Start(b.parent), order=10)
+                 init=lambda b: b.parent.Start(b.parent))
     registry.add("core.start.bottom", "core.start.bottom.mod",
-                 init=lambda b: b.parent.Mod(b.parent), order=20)
+                 init=lambda b: b.parent.Mod(b.parent))
     registry.add("core.start.bottom", "core.start.bottom.world",
-                 init=lambda b: b.parent.World(b.parent), order=30)
+                 init=lambda b: b.parent.World(b.parent))
     registry.add("core.start.bottom", "core.start.bottom.launch",
-                 init=lambda b: b.parent.Launch(b.parent), order=40)
+                 init=lambda b: b.parent.Launch(b.parent))
     registry.add("core.start.bottom", "core.start.bottom.suspend",
-                 init=lambda b: b.parent.Suspend(b.parent), order=50)
+                 init=lambda b: b.parent.Suspend(b.parent))
