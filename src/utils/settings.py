@@ -88,6 +88,14 @@ DEFAULT_SCHEMA = {
     "defaultGame": None,
     "javaPath": None,
     "github": {
+        # 授权包（access + refresh + 两个到期时间 + scope）整块加密后的密文与
+        # 密钥。为什么只留这两个键：refresh_token 是单次使用的，跟 access 分开
+        # 存迟早配错一次（配错就是永久失效），一块进一块出最不容易错。
+        "auth_enc": None,
+        "auth_key": None,
+        # 老格式（一个裸 token）的两个键：读路径已经不看了，只为了让 logout
+        # 还能把历史遗留的值抹掉 —— 删掉这两行会让老用户的 token 永远留在
+        # settings.json 里，谁也不知道那份东西还有没有效。
         "token_enc": None,
         "token_key": None,
         "useful": None,

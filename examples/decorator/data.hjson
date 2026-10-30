@@ -1,7 +1,0 @@
-{
-  id: example_decorator
-  name: 装饰器示例
-  version: 1.0.0
-  api: 2.x
-  entry: main.Decor
-}

@@ -1,7 +1,0 @@
-{
-  id: example_hello
-  name: 你好世界
-  version: 1.0.0
-  api: 2.x
-  entry: main.Hello
-}

@@ -140,6 +140,9 @@ try:
 
             self.launcher = mdtLauncher(self, self.settings)
             self.githubAPI = GithubAPI()
+            # 挂上 settings：access token 8 小时一过，刷新出来的新授权包要写回
+            # 磁盘（refresh_token 单次使用，只留在内存里一次重启就丢了）
+            self.githubAPI.bindSettings(self.settings)
             self.mdtManager = mdtManager(self.settings, parent=None, root=self)
             self.mdtManager.on_game_changed.connect(self._on_game_changed)
             # 宿主工具登记到 core/tools：插件用 register("core/tools&mdtManager").get()
@@ -148,10 +151,17 @@ try:
             # 设置点逐层注册：core/settings&launcher → &launcher&{…} 之后，
             # 插件才能往 &launcher&java&<键> 这种注册项上登记/读写
             self._register_settings_points()
-            if self.settings["github"]["token_enc"]:
-                token = githubAPI.read_token(self.settings)
-                if token:
-                    self.githubAPI.setToken(token)
+            # GitHub 是可选功能：没登录就什么都不做 —— 启动时不需要用户先有
+            # 凭据，也不该为「没登录」发请求或提示。有授权包才顺手校验一次，
+            # 顺带把 rate 余量填上（设置面板打开时就有数）。
+            # 登录走 GitHub App 授权（src/utils/api/githubAuth.py）：用户在
+            # GitHub App 后台把 Authorization callback URL 设为
+            # http://127.0.0.1（端口任意），client_id 填进 BML/githubApp.json。
+            # access token 只有 8 小时，关机一晚上基本必然过期 —— 这里不用
+            # 自己判断：checkToken 走的是 _request，它会先拿 refresh_token 续上。
+            auth_blob = githubAPI.read_auth(self.settings)
+            if auth_blob:
+                self.githubAPI.setAuth(auth_blob)
                 QThTimer.task(
                     0,
                     lambda e: self.githubAPI.checkToken(),
@@ -299,10 +309,18 @@ try:
             except Exception:
                 pass
 
-        # token 的加密与落盘在 api/githubAPI.py 里（store_token / read_token），
+        # 授权包的加密与落盘在 api/githubAPI.py 里（store_auth / read_auth），
         # 不在这里 —— 用到它的是 GitHub 设置页和启动流程，跟宿主没关系。
 
         def _on_startup_rate_check(self, result):
+            """启动时那一次凭据校验的结果（只在真的有授权包时才走到）。
+
+            error_type == "auth" 说明这份凭据已经不能用了 —— 注意 checkToken
+            在报 auth 之前已经试过「用 refresh_token 换一块新的再重试」，
+            所以这里不需要再猜「是不是过期了」：能让它走到这一步的，只有
+            refresh 也被 GitHub 拒了（或被撤销/超过 6 个月）。清掉授权包，
+            界面上回到「未登录」，用户去设置面板重新授权即可。
+            """
             ok, error_type, data = result
             if ok:
                 rate = self.githubAPI.rate
@@ -311,12 +329,15 @@ try:
                 s["rate"]["search"] = {"remaining": rate["search"]["remaining"], "reset": rate["search"]["reset"]}
                 s["useful"] = True
             elif error_type == "auth":
-                self.githubAPI.setToken(None)
-                s = self.settings["github"]
-                s["token_enc"] = None
-                s["token_key"] = None
-                s["useful"] = None
-                s["user"] = {"name": None, "headurl": None}
+                # logout 把授权包（含老格式的 token 键）、rate、user 一次清干净
+                self.githubAPI.logout(self.settings)
+                # useful=False 是给托盘 tooltip 的信号：凭据已经不能用了，
+                # 那句话会直接告诉用户「去设置面板重新登录」
+                self.settings["github"]["useful"] = False
+                try:
+                    self.logger.warning("GitHub 登录已过期，请重新登录")
+                except Exception:
+                    pass
             self.saveSettings()
             self.signals.emit("tokenVerified", ok, error_type, data)
 
@@ -1177,8 +1198,12 @@ try:
                             self.init_ui()
                             bus.bind(self)
                             self.clicked.connect(self.root.window.openGithubSetting)
-                            # refreshed 仅更新 tooltip，不触发后台请求
+                            # refreshed / authChanged 仅更新 tooltip，不触发后台请求；
+                            # authExpired 同理 —— 登录过期后 tooltip 也该立刻变成
+                            # 「登录已失效，请重新登录」，不必等用户 hover 回来
                             self.root.githubAPI.refreshed.connect(self._update_tooltip)
+                            self.root.githubAPI.authChanged.connect(self._update_tooltip)
+                            self.root.githubAPI.authExpired.connect(self._update_tooltip)
 
                         def init_ui(self):
                             self.setFixedSize(28, 28)
@@ -1191,7 +1216,9 @@ try:
 
                         def _update_tooltip(self):
                             """仅更新 tooltip 文本，不触发网络请求。"""
-                            token = self.root.settings["github"]["token_enc"]
+                            # 以内存里的授权包为准（settings 里那份是加密的，
+                            # 而且刷新出来的新包可能还没落盘）
+                            has_auth = self.root.githubAPI.hasToken()
                             live_rate = self.root.githubAPI.rate
                             rate = self.root.settings["github"]["rate"]
 
@@ -1220,10 +1247,12 @@ try:
                                 rate["search"] if rate["search"].get("reset") else live_rate["search"]
                             )
 
-                            if token is None:
-                                key = "core.github.token.none"
-                            elif self.root.settings["github"]["useful"] is False:
+                            # useful is False 优先：「凭据已经不能用了」比「未登录」
+                            # 多说一句话，用户才知道下一步该去点登录
+                            if self.root.settings["github"]["useful"] is False:
                                 key = "core.github.token.error"
+                            elif not has_auth:
+                                key = "core.github.token.none"
                             else:
                                 key = "core.github.token"
                             #   $1=通用剩余 $2=通用刷新 $3=搜索剩余 $4=搜索刷新（与文案顺序一致）
@@ -1249,7 +1278,7 @@ try:
                         def enterEvent(self, event):
                             super().enterEvent(event)
                             self._update_tooltip()
-                            if self.root.settings["github"]["token_enc"] is not None:
+                            if self.root.githubAPI.hasToken():
                                 self._maybe_fetch_rate()
 
                     class DlList(QPushButton):
