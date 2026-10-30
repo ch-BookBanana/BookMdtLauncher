@@ -181,8 +181,7 @@ class PluginInfo:
     name: str = ""
     version: str = "0.0.0"
     api: str = "1.x"
-    entry: str = "main.py"
-    entry_class: str = ""          # 清单里的 entry_class（缺省自动发现）
+    entry: str = "main"              # 入口：模块名，或 "模块.类名"（如 main.ExampleV3）
     author: str = ""
     description: str = ""
     dependencies: tuple = ()         # 依赖的插件 id（清单里的 dependencies）
@@ -429,22 +428,28 @@ def _read_manifest(folder):
         raise PluginLoadError(f"依赖了自己：{pid}")
 
     entry = _text(data.get("entry"), "entry", base) or \
-        _text(data.get("main"), "main", base) or "main.py"
-    # 入口必须是插件目录里的裸文件名：带路径分隔符就可能是「跑到目录外面去」
-    if entry != os.path.basename(entry) or entry.startswith("."):
+        _text(data.get("main"), "main", base) or "main"
+    # 入口两种写法：模块名（main）或「模块.类名」（main.ExampleV3）。
+    # 都不允许出现路径分隔符/以点开头 —— 那意味着可能跑出插件目录去。
+    if "/" in entry or "\\" in entry or entry.startswith("."):
         raise PluginLoadError(
-            f"{base} 的入口文件名 {entry!r} 不合法：只能是插件目录里的文件名")
+            f"{base} 的入口文件名 {entry!r} 不合法：只能是模块名（main）"
+            f"或 模块.类名（main.ExampleV3）")
+    module, _, cls_name = entry.partition(".")
+    module = module or "main"
+    if not module.isidentifier():
+        raise PluginLoadError(f"{base} 的入口模块 {module!r} 不是合法标识符")
+    if cls_name and not cls_name.isidentifier():
+        raise PluginLoadError(f"{base} 的入口类名 {cls_name!r} 不是合法标识符")
     return PluginInfo(
         id=pid, path=folder, entry=entry,
-        entry_class=_text(data.get("entry_class"), "entry_class", base),
         name=_text(data.get("name"), "name", base) or pid,
         version=_text(data.get("version"), "version", base) or "0.0.0",
         api=_text(data.get("api"), "api", base),
         author=_text(data.get("author"), "author", base),
         description=_text(data.get("description"), "description", base),
         dependencies=deps,
-        dep_specs=dep_specs,
-    )
+        dep_specs=dep_specs)
 
 
 def _text(value, field, where):
@@ -826,26 +831,27 @@ def discover(base=None, cache=None):
     return found
 
 
-def _find_plugin_class(mod, entry_name, entry_class=""):
+def _find_plugin_class(mod, module_name, cls_name=""):
     """在入口模块里找插件类：只认**本文件自己定义**的，多个时取最派生那个。
 
     为什么要卡 `__module__`：插件里写了 `from BMLCore import BMLPlugin` 之后，
     BMLPlugin 本身就是「模块里的一个 Plugin 子类」—— 照 vars(mod) 顺序取第一个，
     拿到的是它，插件本体的装饰器一个都收不到（曾经真踩过）。
+
+    入口写成 `main.ExampleV3` 时（cls_name 非空）直接取那个类。
     """
     from ..BMLCore import Plugin
-    if entry_class:                       # 清单点名的就直接取它
-        obj = getattr(mod, entry_class, None)
+    if cls_name:                       # 清单点名的就直接取它
+        obj = getattr(mod, cls_name, None)
         if not (isinstance(obj, type) and issubclass(obj, Plugin)):
             raise PluginLoadError(
-                f"{entry_name} 里找不到 entry_class = {entry_class!r}"
-                f"（要是 Plugin 子类）")
+                f"{module_name} 里找不到 {cls_name!r}（要定义在本文件里、且是 Plugin 子类）")
         return obj
     cands = [obj for obj in vars(mod).values()
              if isinstance(obj, type) and issubclass(obj, Plugin)
              and obj is not Plugin and obj.__module__ == mod.__name__]
     if not cands:
-        raise PluginLoadError(f"{entry_name} 里找不到 Plugin 子类（要定义在本文件里）")
+        raise PluginLoadError(f"{module_name} 里找不到 Plugin 子类（要定义在本文件里）")
     cands.sort(key=lambda c: len(c.__mro__), reverse=True)      # 最派生
     return cands[0]
 
@@ -945,9 +951,13 @@ def load_one(info):
                       f"请更新插件或改用兼容的 api 声明")
         return info
 
-    entry_path = os.path.join(info.path, info.entry)
+    # 入口：`entry` 可以是模块名（main）或「模块.类名」（main.ExampleV3）
+    entry_module, _, entry_cls = info.entry.partition(".")
+    entry_module = entry_module or "main"
+    entry_path = os.path.join(
+        info.path, entry_module if entry_module.endswith(".py") else entry_module + ".py")
     if not os.path.isfile(entry_path):
-        info.error = f"入口文件不存在：{info.entry}"
+        info.error = f"入口文件不存在：{os.path.basename(entry_path)}"
         return info
 
     # 同一个 id 已经装着一份，就别再装第二份：第二次会因为「条目已存在」失败，
@@ -974,6 +984,8 @@ def load_one(info):
     # 插件在构造里随手 registry.abort() 是关不掉的（关掉了的话，这里「失败整块
     # 舍弃」的那一下就成了空操作，半截条目会留在正表里）。
     token = registry.begin(info.id)
+    from ..BMLCore import btypes
+    btoken = btypes.begin(info.id)
     try:
         _add_plugin_paths(info)
         with _SrcImportGuard(), _PluginDir(info.path):
@@ -987,7 +999,7 @@ def load_one(info):
             # 先登记进 sys.modules：插件自己的模块级代码里若互相 import 才找得到
             sys.modules[mod_name] = mod
             spec.loader.exec_module(mod)
-            cls = _find_plugin_class(mod, info.entry, info.entry_class)
+            cls = _find_plugin_class(mod, entry_module, entry_cls)
             host = _Host(info)
             inst = cls(host) if _accepts_host(cls) else cls()
             # 构造里没把 host 存下来（旧写法的无参构造、或忘了 super().__init__）
@@ -1008,6 +1020,10 @@ def load_one(info):
         _drop_plugin_modules(info)       # 连它的子模块一起，别留半份代码在 sys.modules 里
         _drop_plugin_paths(info)
         _abort_session(info, token)
+        try:
+            btypes.abort(btoken)
+        except Exception:
+            pass
         # on_ready 的回调不在注册表里，abort 滚不到（否则重载成功时会把
         # 上一次那个已经回滚掉的旧实例一起叫起来）
         from ..BMLCore import registrar as _reg
@@ -1018,6 +1034,10 @@ def load_one(info):
         # 上面不接的那些（比如 Ctrl+C）：会话必须关掉，否则下一个插件会注册进
         # 一个没人提交的陈旧暂存区
         _abort_session(info, token)
+        try:
+            btypes.abort(btoken)
+        except Exception:
+            pass
         raise
     else:
         # 跑完了：暂存区并进正表。插件登记到这一刻才对别人可见 ——
@@ -1029,9 +1049,14 @@ def load_one(info):
         # 现在失败一律当成「这个插件没加载起来」处理。
         try:
             registry.commit(token)
+            btypes.commit(btoken)
         except BaseException as e:
             info.error = f"登记并进正表失败：{type(e).__name__}: {e}"
             _abort_session(info, token, why="commit 失败")
+            try:
+                btypes.abort(btoken)
+            except Exception:
+                pass
             sys.modules.pop(mod_name, None)
             _drop_plugin_modules(info)
             _drop_plugin_paths(info)
@@ -1346,12 +1371,14 @@ def _run_ready():
     KeyboardInterrupt 照旧让它出去（那是用户在按 Ctrl+C）。
     """
     from .events import events
+    from ..BMLCore import btypes
     for info in list(_STATE["loaded"]):
         inst = info.instance
         if inst is None:
             continue
         try:
-            inst.on_ready()
+            with btypes.actor_context(info.id):
+                inst.on_ready()
         except (Exception, SystemExit):
             events.logger.error(f"[{info.id}]on_ready 抛异常：{_fmt_exc(limit=4)}",
                                 name="Plugin")
@@ -1490,6 +1517,8 @@ def unload(info):
         return False
     try:
         registry.remove_namespace(info.id)
+        from ..BMLCore import btypes
+        btypes.unload(info.id)
         _drop_plugin_events(info)
     except Exception:
         events.logger.error(f"插件卸载时摘登记失败：{info.id}\n{_fmt_exc(limit=4)}",

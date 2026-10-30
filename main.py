@@ -87,8 +87,8 @@ try:
     from src.utils.on_start.java import attach as _attach_java_ui
     from src.utils.registry import Box, registry
     from src.utils import pluginLoader
-    from src.utils.pages.fOverlay._init import FloatingOverlay
-    from src.utils.pages.fStack._init import FloatingStack
+    from src.utils.pages.Modal._init import FloatingOverlay
+    from src.utils.pages.Stack._init import FloatingStack
     from src.utils.pages import builtin as _builtin_pages
     _builtin_pages.install()    # 契约声明 + 内置条目登记都在这儿，删了启动就崩
 
@@ -172,6 +172,8 @@ try:
             self.signals.on("plugins_changed", self._on_plugins_changed)
             self.signals.register("closeRequested", Signal(str))
             self.signals.on("closeRequested", self._on_close_requested)
+            # 宿主信号桥进 v3 的 core/signals（插件侧：@registrar("core/signals&名字").connect()）
+            self._bridge_signals()
             self.plugins = pluginLoader.load_all()
             self.langer.load(self.langer.current_lang)
 
@@ -187,40 +189,63 @@ try:
             startup.register(self)
 
         def _register_tools(self):
-            """宿主工具登记到 core/tools（插件侧：register("core/tools&<名字>").get()）。
+            """宿主工具登记到 v3 注册点 core/tools。
 
-            登记的产物是活工具对象（Entry.obj），卸载/重载跟着宿主走；插件拿到
-            的东西在宿主重载之后仍然有效（拿的是现查的句柄）。
+            插件侧：register().get("core/tools").get("mdtManager").get() 拿活对象。
             """
-            from src.utils.registry import registry
-            if not registry.declared("core/tools"):
-                registry.declare("core/tools", registrant="core",
-                                 fields=("init",), required=("init",),
-                                 built=("obj",),
-                                 doc="宿主工具：mdtManager / launcher / githubAPI …")
+            from src.BMLCore import register
+            point = register().add("core/tools", type="core/point",
+                                   entry="core/value")
             for name, tool in (("mdtManager", self.mdtManager),
                                ("launcher", self.launcher),
                                ("githubAPI", self.githubAPI)):
                 try:
-                    registry.provide("core/tools", f"core/{name}", tool)
+                    entry = point.add(name)
+                    entry.set(tool)
                 except Exception as e:
                     self.logger.warning(f"工具 {name} 登记失败：{e}")
 
         def _register_settings_points(self):
-            """设置点逐层注册：settings → launcher → preferences/general/java。
+            """启动器内置功能登记到 v3 点体系。
 
-            之后插件才能用 register("core/settings&launcher&java&<键>") 读写、
-            或用 @registrar("core/settings&launcher&java").new(name=…) 登记设置项。
+            插件侧直接用：
+                register("core/log").info("…")
+                register("core/lang").get("键")
+                register("core/settings").get("theme")
+            过渡期旧 registrar 的设置点也补上（内置示例插件还在用旧写法）。
             """
-            from src.BMLCore import registrar
-            for path in ("core/settings&launcher",
-                         "core/settings&launcher&preferences",
-                         "core/settings&launcher&general",
-                         "core/settings&launcher&java"):
+            from src.BMLCore import register
+            root = register()          # 宿主自己的点（core）
+            # log / lang / settings：单实例，直接当条目登记
+            try:
+                root.add("core/log", type="core/log", logger=self.logger)
+                root.add("core/lang", type="core/lang", tr=self.langer.get)
+                root.add("core/settings", type="core/settings", settings=self.settings)
+            except Exception as e:
+                self.logger.warning(f"内置服务登记失败：{e}")
+            # signals：多条子项，留一个子点
+            try:
+                root.add("core/signals", type="core/point", entry="core/signal")
+            except Exception as e:
+                self.logger.warning(f"注册点 core/signals 登记失败：{e}")
+            # 设置页的分组/条目都登记在 core/setting（见 pages/setting.py 的
+            # register()），v2 的 core/settings&… 设置点已经不需要了。
+
+        def _bridge_signals(self):
+            """把宿主事件总线上的信号桥进 core/signals（核心信号名 → BEventSignal 条目）。"""
+            from src.BMLCore import register
+            try:
+                point = register().get("core/signals")
+            except Exception:
+                return
+            point.point = tuple(dict.fromkeys(tuple(point.point) + ("core/eventsignal",)))
+            for name in self.signals.names():
+                if point.has(name):
+                    continue
                 try:
-                    registrar(path).contract()
+                    point.add(name, type="core/eventsignal", events_name=name)
                 except Exception as e:
-                    self.logger.warning(f"设置点 {path} 注册失败：{e}")
+                    self.logger.debug(f"信号 {name} 桥接失败：{e}")
 
         def _on_game_changed(self, data):
             """mdtManager 事件回调（主线程）。
@@ -1352,7 +1377,11 @@ try:
                         # 没有标记（或注册表为空）时退回第一个。
                         default = self.default_page or (self.pages[0] if self.pages else None)
                         if default is not None:
-                            default.click()
+                            default_btn = self._page_btn(default)
+                            if default_btn is not None:
+                                default_btn.click()
+                            else:
+                                self._apply_page(default)
 
                     def init_wid(self):
                         self.layout = QHBoxLayout(self)
@@ -1371,12 +1400,11 @@ try:
                         # parent.parent 猜「我的祖父有三栏」。这也是插件页能独立
                         # 构造的前提 —— 它只认注册表里的具名条目，不认窗口结构。
                         registry.declare("core.shell", registrant="core",
-                                         fields=("init", "order"),
+                                         fields=("init",),
                                          required=("init",),
                                          built=("obj",),
                                          doc="宿主体（三栏页容器）：left / main / right")
-                        registry.provide("core.shell", "core.shell.workspace", self,
-                                         order=1)
+                        registry.provide("core.shell", "core.shell.workspace", self)
 
                         # 页面本身不在这里登记：各页面模块在自己末尾往 core.pages
                         # 加条目（契约声明在 pages/builtin.py），装配方只负责构建 ——
@@ -1400,7 +1428,7 @@ try:
                         （见 registry 的覆盖记录），这时 key 没变而提供者换了 ——
                         照 key 对账会继续用着上一个提供者建的那一页。
                         """
-                        return (e.init, e.get("title"), e.get("icon"), e.get("order"))
+                        return (e.init, e.get("title"), e.get("icon"))
 
                     def sync_pages(self):
                         """按 core.pages 对账：没建的补上、不在表里的摘掉、换过提供者的重建。
@@ -1444,11 +1472,39 @@ try:
                         self.pages.insert(index, page)
                         self.btns.insert(index, btn)
                         self._page_keys[e.key] = (page, btn, self._page_sig(e))
-                        btn.clicked.connect(page.changePage)
+                        # 装配方对页面只有两条要求：按钮能切过去、内容能摆出来。
+                        # 三栏页自己实现 changePage()（内置页都继承 pages.Page）；
+                        # 实现不了的就当「整页控件」——塞进主栏栈，切到它就完事。
+                        if (not callable(getattr(page, "changePage", None))
+                                and getattr(page, "main", None) is None):
+                            self.main.addWidget(page)
+                        btn.clicked.connect(lambda _=False, p=page: self._apply_page(p))
                         setattr(self, e.name, page)
                         # 页面与配套按钮在注册表里有唯一出处，后续按 key 就能取到
                         registry.bind("core.pages", e.key, main=page, btn=btn)
                         return page
+
+                    def _page_btn(self, page):
+                        """页面 -> 左栏按钮（对账表里存着，不用页面自己反过来找）。"""
+                        for built, btn, _sig in self._page_keys.values():
+                            if built is page:
+                                return btn
+                        return None
+
+                    def _apply_page(self, page):
+                        """把某一页摆到界面上（按钮的点击也走这里）。
+
+                        页面的能力只有两种协议：
+                          - 有 changePage()：三栏页（内置页 / 插件自实现），
+                            它自己负责把 left/main/right 切到当前；
+                          - 没有：就是一张普通控件，装配方已经把它放进主栏栈，
+                            这里切主栏即可，左右两栏保持不动。
+                        """
+                        change = getattr(page, "changePage", None)
+                        if callable(change):
+                            change()
+                            return
+                        self.main.setCurrentWidget(page)
 
                     def _drop_page(self, key):
                         """拆一页：三栏控件、左栏按钮、挂在本容器上的属性一起摘。
@@ -1457,10 +1513,14 @@ try:
                         所以这里拿不到（也不需要）Entry。
                         """
                         page, btn = self._page_keys.pop(key)[:2]
-                        was_current = self.main.currentWidget() is getattr(page, "main", None)
+                        # 三栏页有 main；整页控件就是它自己（见 _build_page）
+                        main_wid = getattr(page, "main", None)
+                        if main_wid is None and not callable(getattr(page, "changePage", None)):
+                            main_wid = page
+                        was_current = main_wid is not None and self.main.currentWidget() is main_wid
 
                         for stack, wid in ((self.left, getattr(page, "left", None)),
-                                           (self.main, getattr(page, "main", None)),
+                                           (self.main, main_wid),
                                            (self.right, getattr(page, "right", None))):
                             if wid is None:
                                 continue
@@ -1479,7 +1539,12 @@ try:
 
                         # 当前页被拆了：切到还在的第一页，别停在一个已经删掉的控件上
                         if was_current and self.pages:
-                            self.pages[0].changePage()
+                            fallback = self.pages[0]
+                            fallback_btn = self._page_btn(fallback)
+                            if fallback_btn is not None:
+                                fallback_btn.click()
+                            else:
+                                self._apply_page(fallback)
 
                     class Left_(QStackedWidget):
                         def __init__(self, parent=None, root=None):

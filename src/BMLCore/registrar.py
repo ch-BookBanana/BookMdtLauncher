@@ -7,7 +7,7 @@
         id = "example_hello"
 
         # ① 方法上挂（装饰器）：先记标记，加载器 apply(plugin) 时真正登记
-        @registrar("core/pages").new(title="hello.page", order=50)
+        @registrar("core/pages").new(title="hello.page")
         def page(self, ctx):
             return MyPage(ctx.parent)
 
@@ -453,10 +453,10 @@ class Scope:
                     break
 
         init = _builder(self.plugin, fn, dict(fields))
-        item_order = fields.get("order", 900)
+
         return registry.add("core/setting/items", f"{actor}/{name}",
                             init=init, section=section,
-                            title=title, order=item_order)
+                            title=title)
 
     # 信号：全局总线
     def _signals(self, verb, name, fields, actor, fn=None):

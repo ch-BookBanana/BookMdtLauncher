@@ -372,8 +372,7 @@ class Game(QWidget):
                 for cls_key in sorted(
                     versions.keys(),
                     key=lambda k: max((cls._time_of(v) for v in versions[k].values()), default=""),
-                    reverse=True,
-                ):
+                    reverse=True):
                     bucket = versions[cls_key]
                     out[cls_key] = {
                         n: bucket[n]
@@ -423,8 +422,7 @@ class Game(QWidget):
                     if self.introUrl:
                         pool.submit(
                             events.githubAPI._session.get, self.introUrl,
-                            timeout=self.introTimeout,
-                        ).add_done_callback(self._on_intro_fetched)
+                            timeout=self.introTimeout).add_done_callback(self._on_intro_fetched)
 
                     for f in as_completed(futures):
                         try:
@@ -1403,8 +1401,7 @@ class Game(QWidget):
                             base_url=base_url,
                             session=events.githubAPI._session,
                             cache_dir=getPath("BML/.tmp/mdimg"),
-                            on_image=on_image,
-                        )
+                            on_image=on_image)
 
                     def _done(result):
                         try:
@@ -1926,13 +1923,13 @@ def register():
     def _src_init(cls):
         return lambda b: cls(b.parent, b.title, b.icon)
     registry.add("core.download.sources", "core.origin",
-                 init=_src_init(Game.Main.Origin), order=10,
+                 init=_src_init(Game.Main.Origin),
                  title=Game.Main.Origin.title_key, icon=Game.Main.Origin.iconPath)
     registry.add("core.download.sources", "core.mindustryx",
-                 init=_src_init(Game.Main.MindustryX), order=20,
+                 init=_src_init(Game.Main.MindustryX),
                  title=Game.Main.MindustryX.title_key, icon=Game.Main.MindustryX.iconPath)
     registry.add("core.download.sources", "core.mindustryarc",
-                 init=_src_init(Game.Main.MindustryARC), order=30,
+                 init=_src_init(Game.Main.MindustryARC),
                  title=Game.Main.MindustryARC.title_key, icon=Game.Main.MindustryARC.iconPath)
 
     # 列表项右侧的操作按钮：init 用 b.parent（那个 Item）现取宿主，
@@ -1940,11 +1937,11 @@ def register():
     # 里懒登记，现在条目在这就位，Item 只管摆位置。
     point = "core.download.item.actions"
     registry.add(point, "core.download.item.download",
-                 init=_item_action_download, order=10,
+                 init=_item_action_download,
                  title="core.wid.pages.download.item.download", icon=BTN_DOWNLOAD)
     registry.add(point, "core.download.item.repoInfo",
-                 init=_item_action_repo, order=20,
+                 init=_item_action_repo,
                  title="core.wid.pages.download.item.repoInfo", icon=NAV_MENU)
     registry.add(point, "core.download.item.link",
-                 init=_item_action_link, order=30,
+                 init=_item_action_link,
                  title="core.wid.pages.download.item.link", icon=NAV_LINK)

@@ -114,5 +114,4 @@ def register():
 
     registry.add("core.download.tabs", "core.download.game",
                  init=lambda b: Game(b.parent, b.title, b.icon),
-                 order=10,
                  title="core.wid.pages.download.game", icon=NAV_MENU)

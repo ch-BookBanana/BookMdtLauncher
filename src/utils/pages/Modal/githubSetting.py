@@ -29,6 +29,8 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
+from shiboken6 import isValid
+
 from ...api import githubAPI
 from ...bus import bus
 from ...events import events
@@ -504,6 +506,10 @@ class GithubSetting(QWidget):
                             pass
                         return None
                     def _set_round(data):
+                        # 网络任务回来时面板可能已经关了（控件被 deleteLater 掉）：
+                        # 先确认控件还活着，否则 setPixmap 会撞 already deleted。
+                        if not isValid(self.headIcon):
+                            return
                         # 主线程创建 QPixmap（QPixmap 是 GUI 类，禁止在子线程创建）
                         if not data:
                             return
@@ -735,5 +741,4 @@ def register():
     QLabel("GitHub") 一个口径。
     """
     registry.add("core.overlays", "core.githubSetting",
-                 init=lambda b: GithubSetting(b.parent),
-                 order=20, title="GitHub")
+                 init=lambda b: GithubSetting(b.parent), title="GitHub")

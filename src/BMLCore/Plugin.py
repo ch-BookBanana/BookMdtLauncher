@@ -99,9 +99,7 @@ class Plugin:
     """最小插件：只登记条目的话，继承它就够。"""
 
     id = ""                 # 标识符（字母开头），建议带作者名：you_hello
-    name = ""               # 显示名
-    version = "0.0.0"
-    api = "1.x"             # 兼容的宿主 API 范围
+    name = ""               # 显示名（清单没填时兜底；版本/API 范围只认清单）
 
     def __init__(self, host=None):
         self.host = host
@@ -189,8 +187,7 @@ class Plugin:
         `by=self.id` 会把这条记在自己名下，并且把被顶掉的那条压进覆盖记录：
 
             self.override("core.overlays", "core.closeAsk",
-                          init=lambda b: MyCloseAsk(b.parent),
-                          order=30, title="example_x.close")
+                          init=lambda b: MyCloseAsk(b.parent), title="example_x.close")
 
         卸载（或加载失败回滚）时，注册表自动把被顶掉的那条放回原位，界面回到
         上一个提供者的控件 —— 不需要自己记得 set 回来。
@@ -233,18 +230,61 @@ class Plugin:
                 f"发布 key 要写成 <提供方 id>.<名字>（如 example_more.widgets），收到 {key!r}")
         return Service(key)
 
-    def add_setting(self, name, cls, *, title, section="core.setting.plugins",
-                    order=900, **fields):
-        """往设置页加一项（控件类的构造签名是 (parent, title)）。"""
-        from ..utils.registry import simple
-        return self.add("core.setting.items", name, init=simple(cls),
-                        section=section, order=order, title=title, **fields)
+    def add_setting(self, name, cls=None, *, title, section="plugins", build=None, **fields):
+        """往设置页加一项：值存插件自己的设置桶，界面自动双向同步。
 
-    def add_qss(self, css, *, theme=None, order=100):
+            self.add_setting("greet", Widgets.Bool, title="问候开关")
+
+        控件类的构造签名是 (parent, title)，必须实现设置项接口（value /
+        set_value / refresh，见 options/base.py）：本方法用 Widgets.control 把它
+        和设置键 `name` 接起来 —— 拨动写回设置，设置被别处改了控件自己刷新。
+
+        要自己画控件、自己接线就给 build：
+            self.add_setting("greet", title="…", build=lambda ctx: MyWidget(ctx.parent))
+        这时 build 返回什么就摆什么，线由你自己接。
+
+        条目落在 core/setting 的分组子点上（默认 "plugins" 组；插件想自己开一组
+        就往 core/setting 下 add 一个 type="core/setting" 的子点，再把 section 写它）。
+        """
+        from .btypes import register as register_point
+        from ..utils.options.base import bind
+
+        plugin = self
+
+        class _ConfigSource:
+            """插件设置桶当设置源：get / set / watch 三件套。"""
+
+            def get(self):
+                return plugin.get_config(name)
+
+            def set(self, value):
+                plugin.set_config(name, value)
+
+            def watch(self, callback):
+                plugin.watch_config(name, lambda *_: callback())
+
+        if build is None:
+            def build(ctx):
+                return bind(cls(ctx.parent, ctx.title), _ConfigSource())
+
+        group = register_point("core/setting")
+        # 分组可以写全名（core.setting.java）也可以只写末段（java）
+        for key in (section, f"core.setting.{section}"):
+            if group.has(key):
+                point = group.get(key)
+                break
+        else:
+            raise KeyError(f"设置分组 {section!r} 不存在"
+                           f"（先 register(\"core/setting\").add({section!r}, "
+                           f"type=\"core/setting\")）")
+        return point.add(f"{self.id}/{name}", title=title,
+                         build=build, **fields)
+
+    def add_qss(self, css, *, theme=None):
         """往全局样式表末尾追加 css；theme 为 None/True/False = 两套/浅色/深色。"""
-        return self.add("core.qss", "qss", qss=css, theme=theme, order=order)
+        return self.add("core.qss", "qss", qss=css, theme=theme)
 
-    def add_tray(self, name, *, title, callback, order=100):
+    def add_tray(self, name, *, title, callback):
         """往托盘右键菜单加一项；title 是语言键，切语言时托盘自己重刷。"""
         from PySide6.QtGui import QAction
 
@@ -253,7 +293,7 @@ class Plugin:
             act.triggered.connect(lambda *_: callback())
             return act
 
-        return self.add("core.tray.menu", name, init=_init, title=title, order=order)
+        return self.add("core.tray.menu", name, init=_init, title=title)
 
     # ── 能力句柄：宿主替你收拾 ──
 

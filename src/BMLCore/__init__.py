@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         id = "you_hello"              # 标识符，建议带作者名；同时是注册表命名空间
         name = "Hello"
 
-        @registrar("core/pages").new(title="you_hello.page", order=50)
+        @registrar("core/pages").new(title="you_hello.page")
         def page(self, ctx):
             return MyPage(ctx.parent)
 
@@ -77,19 +77,70 @@ from ..utils.path_utils import getPath
 from ..utils.registry import registry, simple
 
 
+from . import btypes as _btypes  # noqa: E402
+
+
+class _DualScope:
+    """registrar(path) 的作用域：先试 v3（装饰器语法），解析不到回退旧 v2。
+
+    v3：`@registrar("settings$a$b$c.value_changed").connect()`、
+        `registrar("core/log").info(…)`
+    v2（过渡）：`@registrar("core/pages").new(title=…)` 这类旧动词原样可用。
+    """
+
+    def __init__(self, path):
+        self.path = path
+
+    def _v3(self):
+        return _btypes._resolve_dsl(self.path)
+
+    def connect(self, callback=None):
+        try:
+            target, _name = self._v3()
+        except Exception:
+            return _registrar_mod.registrar(self.path).connect(callback)
+        if callback is None:
+            def deco(fn):
+                target.connect(fn)
+                return fn
+            return deco
+        target.connect(callback)
+        return callback
+
+    def emit(self, *args):
+        try:
+            target, _name = self._v3()
+        except Exception:
+            return _registrar_mod.registrar(self.path).emit(*args)
+        target.emit(*args)
+        return None
+
+    def __getattr__(self, item):
+        try:
+            target, _name = self._v3()
+            return getattr(target, item)
+        except Exception:
+            return getattr(_registrar_mod.registrar(self.path), item)
+
+
 class _Registrar:
-    """`registrar` 既当模块（registrar.apply / registrar.collect…），又当工厂：
-    `registrar("core/pages").new(...)`。module 对象不可调用，所以套一层代理。"""
+    """`registrar` 既当模块（registrar.apply / registrar.collect…），又当工厂。"""
 
     def __call__(self, path):
-        return _registrar_mod.registrar(path)
+        return _DualScope(path)
 
     def __getattr__(self, name):
         return getattr(_registrar_mod, name)
 
 
 registrar = _Registrar()
-register = _registrar_mod.registrar
+
+# ── v3：万物皆 BType（旧格式不再兼容，见 docs/plugin/13）──
+# `register` 直接是 v3 的入口（旧版 registrar("ns") 仍挂在 registrar 代理上做过渡）
+from .btypes import BPoint, BSignal, BType, BTypes, BValue  # noqa: E402
+from .btypes import register  # noqa: E402
 
 __all__ = ["API_VERSION", "Plugin", "BMLPlugin", "Ctx", "Service", "registrar",
-           "register", "Widgets", "events", "registry", "simple", "getPath", "Signal"]
+           "register", "Widgets", "events", "registry", "simple",
+           "getPath", "Signal",
+           "BTypes", "BType", "BPoint", "BSignal", "BValue"]

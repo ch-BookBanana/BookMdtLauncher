@@ -57,10 +57,7 @@ import copy
 import re
 
 __all__ = ["RegistryError", "Entry", "Box", "Registry", "registry", "page",
-           "simple", "DEFAULT_ORDER", "normalize"]
-
-# 条目没写 order 时排在这里：够小，自定义项默认落在内置项之后
-DEFAULT_ORDER = 100
+           "simple", "normalize"]
 
 # 每一段（owner / 接口名的段）的字符规约：与插件 id 同一套
 _SEG_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -127,13 +124,6 @@ def _same(a, b):
     if isinstance(a, str) and isinstance(b, str):
         return normalize(a) == normalize(b)
     return a == b
-
-
-def _sort_key(value):
-    """排序用的 order 值：非数值（老数据 / 手改过的文件）退到默认值。"""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return DEFAULT_ORDER
-    return value
 
 
 # ─────────────────────────── 条目视图 ───────────────────────────
@@ -465,11 +455,6 @@ class Registry:
         missing = sorted(set(contract["required"]) - set(merged))
         if missing:
             raise RegistryError(f"{point}#{key}: 缺必填字段 {missing}")
-        if "order" in fields:
-            v = fields["order"]
-            if isinstance(v, bool) or not isinstance(v, (int, float)):
-                raise RegistryError(
-                    f"{point}#{key}: order 必须是数字，收到 {type(v).__name__}（{v!r}）")
         if stack and stack[-1].get("by") != owner:
             if not contract.get("override", True):
                 raise RegistryError(
@@ -523,30 +508,28 @@ class Registry:
     def entry(self, point, key):
         return self.get(point, key)
 
-    def list(self, point, *, where=None, order_by=_ANY_TOKEN):
-        return self.entries(point, where=where, order_by=order_by)
+    def list(self, point, *, where=None):
+        return self.entries(point, where=where)
 
-    def entries(self, point, *, where=None, order_by=_ANY_TOKEN):
-        """按 order 取条目；where 做等值筛选。未知字段当场报错。"""
+    def entries(self, point, *, where=None):
+        """按登记顺序取条目；where 做等值筛选，未知字段当场报错。
+
+        顺序 = 谁先登记谁在前（清单里的插入顺序），没有 order 这种数字权重 ——
+        和 Qt 摆控件一样：先 addWidget 的先出现。
+        """
         iface_owner, iface_name, contract = self._interface(point)
         allowed = set(contract["fields"])
-        if order_by is _ANY_TOKEN:
-            order_by = "order" if "order" in allowed else None
-        for label, keys in (("where", where or {}),
-                            ("order_by", (order_by,) if order_by else ())):
-            unknown = sorted(k for k in keys if k not in allowed)
-            if unknown:
-                raise RegistryError(
-                    f"{_path(iface_owner, iface_name)}: {label} 里的 {unknown} "
-                    f"不是这个接口的字段；可用：{sorted(allowed)}")
+        unknown = sorted(k for k in (where or {}) if k not in allowed)
+        if unknown:
+            raise RegistryError(
+                f"{_path(iface_owner, iface_name)}: where 里的 {unknown} "
+                f"不是这个接口的字段；可用：{sorted(allowed)}")
         out = []
         for key, stack in self._all_entries(iface_owner, iface_name).items():
             e = self._entry(point, key, stack, contract)
             if where and any(not _same(e.fields.get(k), v) for k, v in where.items()):
                 continue
             out.append(e)
-        if order_by:
-            out.sort(key=lambda e: (_sort_key(e.fields.get(order_by)), e.key))
         return out
 
     def owned(self, point, owner=None):
@@ -890,10 +873,6 @@ class Registry:
                         missing = sorted(set(contract["required"]) - set(top))
                         if missing:
                             problems.append(f"{path}#{key}: 缺必填字段 {missing}")
-                        order = top.get("order")
-                        if order is not None and (isinstance(order, bool)
-                                                  or not isinstance(order, (int, float))):
-                            problems.append(f"{path}#{key}: order 不是数字")
         return problems
 
     def dump(self):
@@ -926,7 +905,6 @@ def page(key, *, point="core/pages", **meta):
         kw.setdefault("title", cls.name)
         if "icon" in fields:
             kw.setdefault("icon", cls.icon)
-        kw.setdefault("order", getattr(cls, "order", DEFAULT_ORDER))
         if "default" in fields:
             kw.setdefault("default", getattr(cls, "default", False))
         registry.add(point, key, **kw)

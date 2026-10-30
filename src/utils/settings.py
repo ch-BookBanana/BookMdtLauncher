@@ -798,5 +798,4 @@ def register():
     调用处也一行都不用动。
     """
     registry.set("core.overlays", "core.closeAsk",
-                 init=lambda b: AskClose(b.parent),
-                 order=30, title="core.wid.closeAsk.title")
+                 init=lambda b: AskClose(b.parent), title="core.wid.closeAsk.title")

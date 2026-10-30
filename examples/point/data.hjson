@@ -1,0 +1,7 @@
+{
+  id: example_point
+  name: 点示例
+  version: 1.0.0
+  api: 2.x
+  entry: main.PointDemo
+}

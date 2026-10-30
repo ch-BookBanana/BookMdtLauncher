@@ -28,6 +28,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         这几个是标准的「设置项」控件：`self.add_setting(name, cls, title=…)`
         会把 (parent, 语言键) 拼好传进来，主题与语言由控件自己跟总线。
 
+    值型控件（Bool / Combo / Slider）实现同一套接口：value() / set_value(v) /
+    refresh()，外加 push 信号。所以「控件 ↔ 存储」这条线不认具体类：
+
+        from BMLCore import Widgets
+        Widgets.bind(Widgets.Bool(ctx.parent, "开关"), entry)      # v3 设置条目
+        Widgets.bind(Widgets.Bool(ctx.parent, "开关"),
+                     Widgets.MappingSource(events.settings, "theme"))   # 宿主设置
+
+    Title / Line 是装饰（分组标题、分隔线），不参与取值，也没有这套接口。
+
     Section(page, title, items, fields=None)
         设置页里的一个分组容器（`registrar("core/setting/sections").new` 的构建函数用它，
         `ctx.items` 是这一组容纳的条目）。
@@ -37,9 +47,25 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         别交给 add_setting。
 """
 
+from ..utils.options.base import MappingSource, SettingItem, bind
 from ..utils.options.items import Bool, Combo, Slider
 from ..utils.options.scrolls import Scroll
 from ..utils.options.sections import Section
 from ..utils.options.texts import Line, Title
 
-__all__ = ["Bool", "Combo", "Slider", "Scroll", "Section", "Title", "Line"]
+def control(ctx, cls=None, **kwargs):
+    """在 build 工厂里用：建控件并接到条目上。
+
+        section.add("probe", default=True,
+                    build=lambda ctx: Widgets.control(ctx, Widgets.Bool))
+
+    ctx 是建控件时传进来的 Box（ctx.parent 挂载父控件、ctx.title 语言键、
+    ctx.entry 就是这条设置项本身）；cls 必须是实现 value/set_value/refresh 的
+    设置项控件。返回已经接好线的控件。
+    """
+    widget = (cls or Bool)(ctx.parent, ctx.title, **kwargs)
+    return bind(widget, ctx.entry)
+
+
+__all__ = ["Bool", "Combo", "Slider", "Scroll", "Section", "Title", "Line",
+           "bind", "control", "SettingItem", "MappingSource"]

@@ -437,7 +437,7 @@ class GameSettings(Scroll):
             self.buttons = [
                 self._button("core.wid.pages.gameManage.rename", self.Rename),
                 self._button("core.wid.pages.gameManage.group", self.Group),
-                self._button("core.wid.pages.gameManage.delete", self.Delete, danger=True),
+                self._button("core.wid.pages.gameManage.delete", self.Delete, danger=True)
             ]
 
         def _button(self, key, page, danger=False):
@@ -1018,17 +1018,15 @@ def register():
     """
     # 管哪个实例走 Box 上下文：开浮层的人才知道（start.py 传当前显示那个）
     registry.add("core.stacks", "core.gameManager",
-                 init=lambda b: GameManager(b.game, b.parent),
-                 order=10, title="core.wid.pages.gameManager")
+                 init=lambda b: GameManager(b.game, b.parent), title="core.wid.pages.gameManager")
 
     # 左栏那个「设置」功能页。它管的是**某个实例**，实例名从 GameManager
     # 现取（b.parent.game）—— 容器里改了名，这里跟着换，不用自己同步。
     registry.add("core.gameManager.pages", "core.gameManager.settings",
-                 init=lambda b: GameSettings(b.parent.game, b.parent),
-                 order=10, title="core.wid.pages.gameManager.settings")
+                 init=lambda b: GameSettings(b.parent.game, b.parent), title="core.wid.pages.gameManager.settings")
 
     # 设置页里的两个区块。本文件定义了它们，所以本文件交出去。
     registry.add("core.gameSettings.sections", "core.gameSettings.folders",
-                 init=lambda b: GameSettings.Folders(b.parent), order=10)
+                 init=lambda b: GameSettings.Folders(b.parent))
     registry.add("core.gameSettings.sections", "core.gameSettings.java",
-                 init=lambda b: GameSettings.Java(b.parent), order=20)
+                 init=lambda b: GameSettings.Java(b.parent))
