@@ -234,11 +234,6 @@ class _JavaManager(QObject):
         reg_map = await self._scan_registry_async()
         common_paths = await self._scan_common_dirs_async()
 
-        # 合并所有路径：注册表登记的 JavaHome 也算候选——JDK 可能装在 _COMMON_DIRS
-        # 之外的自定义盘符/目录，只认 PATH + 常见目录会漏；再深的目录不去追
-        # （全盘遍历的代价远大于收益，这是刻意的取舍）
-        # 用户手动加过的（settings["javaPaths"]）是知道的目录，一并带上：它们多半就装在
-        # 常见目录之外，扫描源找不到；路径已失效的会因取不到版本在下面被剔掉
         saved_paths = {self.resolve(item[0]) for item in ((self.settings or {}).get("javaPaths") or []) if item}
         all_paths = env_paths | common_paths | set(reg_map) | saved_paths
 
@@ -252,8 +247,6 @@ class _JavaManager(QObject):
             # 如果两者都未提供版本，则忽略该路径
             if not ver:
                 continue
-            # 同一个 java.exe 常常从 PATH、注册表、常见目录、候选表几路一起进来，写法还各自不同
-            # （大小写、斜杠、相对/绝对）：按真身去掉重复，再统一成 record() 的记法
             path = self.record(p)
             if any(self.sameJava(path, item[0]) for item in final):
                 continue

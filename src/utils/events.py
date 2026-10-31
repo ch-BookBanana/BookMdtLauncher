@@ -57,22 +57,11 @@ class EventBus(QObject):
         super().__init__(parent)
         # name → holder 实例（holder 是个只带一个 signal 属性的 QObject 子类）
         self._holders = {}
-        # name → [(owner, callback)]：订阅**自己记一份**。
-        # 为什么不用 Qt 的 connections()：摘订阅时要知道「这条是谁订的」，
-        # 而 Qt 只认 callback 本身 —— 插件订了宿主的事件名（plugins_changed 之类）
-        # 时，按名字前缀根本摘不掉它，卸载之后它的回调还在被叫。
         self._subs = {}
         # 「没声明就自动补的无参信号」的名字：真签名到来时要换成真签名
         self._implicit = set()
         self._root = None       # 宿主，由 bind() 交进来一次
 
-    # ─────────────────────── 宿主工具 ───────────────────────
-    # 日志、设置、翻译、宿主体这些东西本来就是全局引用的。与其让每个组件攥着
-    # Main 那一大坨隐式属性，不如统一从这里取：events.logger / events.settings /
-    # events.lang / events.shell。
-    #
-    # 一律用 property 转发、而不是 bind 时取快照 —— 宿主换掉 self.settings 时
-    # 这里要跟着走，挂快照会留下一个过期的旧对象。
 
     def bind(self, root):
         """宿主启动时把自己交进来（Main.__init__ 调一次）。

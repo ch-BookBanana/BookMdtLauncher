@@ -71,9 +71,6 @@ _LOG_STYLES = {
     "V": ("debug",   "debug"),     # 详细
 }
 
-# 日志正文配色：角色 -> (R, G, B)。浅色主题必须用深色字，否则浅底上几乎看不见
-# 色值一律用整数三元组：QColor 不认 "rgb(r, g, b)" 这种 CSS 字符串，
-# 字符串会得到无效颜色，填进调色板/字符格式就是黑色——暗色主题下正好黑底黑字
 _LOG_COLORS = {
     "dark": {
         "info":     (219, 219, 219),   # 无前缀的普通输出：白
@@ -93,8 +90,6 @@ _LOG_COLORS = {
     },
 }
 
-# 日志前缀配色：只有「前缀与正文不同色」的角色列在这里（[L] 紫、[I] 绿）；
-# 没列的角色取正文色，整行同色（警告、报错就是全字段渲染）
 _LOG_TAG_COLORS = {
     "dark": {
         "good":     (126, 200, 126),   # [I]：绿
@@ -106,8 +101,6 @@ _LOG_TAG_COLORS = {
     },
 }
 
-# 控制台底色（跟随主题）：QTextEdit 的正文区是视口画的，视口调色板在创建时就固定了，
-# 单靠 qss 背景或控件调色板都改不动它，必须在 Console.lighting 里直接设视口调色板
 _CONSOLE_BG = {
     "dark":  (55, 55, 55),
     "light": (229, 228, 228),
@@ -159,9 +152,6 @@ class Start(Page):
         # 启动阶段（校验/Java 流程）与游戏进程输出：写入日志文件 + 主区控制台
         events.launcher.log.connect(self._on_launcher_log)
         events.launcher.game_log.connect(self._on_game_log)
-        # 下载列表的轮询会报 Java 任务的实时状态，用它纠偏进度文字
-        # （原先它直接穿到 left.main.launch 上点 setStatus，而那个入口
-        #  main.py 里根本不存在 —— AttributeError 被 except 吞了，功能一直哑着）
         events.on("java_status", self.java_status)
 
     def _on_game_launched(self):
@@ -344,8 +334,6 @@ class Start(Page):
                 self.init_wid()
                 
             def init_wid(self):
-                # 从注册表取：本模块的 register() 登记一次（由 pages/builtin.py 调）。
-                # 登记写在这里的话，第二次构建就会撞「已存在条目」。
                 for e in registry.entries("core.start.bottom"):
                     setattr(self, _FIELDS.get(e.key.replace("/", "."), {}).get("attr", ""),
                             e.init(Box(parent=self, entry=e)))
@@ -392,8 +380,6 @@ class Start(Page):
                         self.parent.setCurrentIndex(2)
                         _page().show_main("world")
                     else:
-                        # 不再顺着 window.main.main 横摸兄弟页：按 key 从注册表取。
-                        # main 是构建期回填的产物（core.pages 声明了槽位）。
                         download = registry.entry("core.pages", "core.download").main
                         download.click()
                         download.main.game.btn.click()
@@ -659,11 +645,6 @@ class Start(Page):
                 if launcher.going:
                     return  # 已有一个实例在跑/在启动，让 launcher 自己报 gameRunning
                 game = events.settings["defaultGame"]
-                # 提前拦：解析口径与启动流程完全一致（同一个 _resolve_java），
-                # 缺 Java 就不放行进启动流程——否则界面会先闪一下「启动中」、
-                # 日志里还会多出一段准备记录，再退回「未检测到Java」。
-                # 拦下后仍走 launcher 的缺失善后：发 java_missing → 自动下载 →
-                # 装好后 _restart_after_java 自己重新启动
                 _, problem = launcher._resolve_java(game)
                 if problem:
                     launcher._java_unavailable(problem, game)
@@ -751,8 +732,6 @@ class Start(Page):
                         if group.rename(data["old_name"], game):
                             break
                 elif etype == "groupChanged":
-                    # 搬家：先从旧组摘掉条目（图标引用跟着释放），再挂到新组。
-                    # 组名来自 settings.gameList 的键，必然已在 self.groups 里。
                     for group in self.groups.values():
                         if group.remove(game):
                             break
@@ -981,8 +960,6 @@ class Start(Page):
                 self.view = QTextEdit(self)
                 self.view.setReadOnly(True)
                 self.view.setFrameShape(QFrame.NoFrame)
-                # 边框/字体由 qss（QTextEdit[wid="console"]）提供；
-                # 底色统一走调色板（见 lighting），避免两处色值各写一份
                 self.view.setProperty("wid","console")
                 self.layout.addWidget(self.view)
 

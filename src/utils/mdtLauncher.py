@@ -8,8 +8,6 @@ from .mdtLocker import mdtLocker
 
 _log = logging.getLogger("Main.MdtLauncher")
 
-# i18n：日志文本来自语言文件（main.py 初始化 langer 后注入翻译函数）。
-# 未注入时回退为 key 本身，日志仍可读、不影响运行。
 _tr_func = None
 
 
@@ -65,9 +63,6 @@ class mdtLauncher(QProcess):
         返回 True 表示启动指令已发出，False 表示启动前校验失败。
         进程的实际启动、运行、结束都通过信号通知。
         """
-        # ---------- 启动前校验：失败直接返回 ----------
-        # 必须排在 game_launched 之前：把界面切到「启动中」页的正是这个信号，
-        # 先切页再退出会留下一个没人负责收回的界面（卡在"就绪"，且 going 停在 1）。
         if self.going:
             self.log.emit({"type": "error", "text": "gameRunning"})
             self._emit_finished(-1)
@@ -77,8 +72,6 @@ class mdtLauncher(QProcess):
             self._emit_finished(-1)
             return False
 
-        # ---------- 生命周期开始 ----------
-        # game_launched 必须早于任何日志：Start 页挂在它上面清空上一次的控制台
         self._finished_emitted = False
         self.game_launched.emit()
         self.going = 1
@@ -100,8 +93,6 @@ class mdtLauncher(QProcess):
         self.data["mdtJar"] = os.path.join(self.data["mdtPath"], "mdt.jar")
         self.log.emit({"type": "info", "text": "MDT instance found: " + mdt_name})
 
-        # ---------- 2. 确定数据目录 ----------
-        # 数据根作为游戏进程的 %APPDATA%，游戏实际数据目录固定为其下的 Mindustry/
         if data_path is None:
             data_root = mdtManager.getDataRoot(mdt_name)
             self.log.emit({"type": "info", "text": "Using default data directory: " + data_root})
@@ -118,8 +109,6 @@ class mdtLauncher(QProcess):
         self.data["mdtData"] = os.path.join(data_root, mdtManager.DATA_DIR_NAME)
         self._prepare_data_dir()
 
-        # ---------- 3. 确定 Java 路径 ----------
-        # 解析与校验的口径收在 _resolve_java 里，界面上的"提前拦"用的是同一套
         java_from_config, problem = self._resolve_java(mdt_name, java_path)
         if problem:
             self._java_unavailable(problem)
@@ -130,9 +119,6 @@ class mdtLauncher(QProcess):
         self.data["args"] = args if args else []
         self.log.emit({"type": "info", "text": "Launch args: " + str(self.data["args"])})
 
-        # ---------- 4. 设置进程环境 ----------
-        # APPDATA 指向数据根：游戏（含不支持 MINDUSTRY_DATA_DIR 的旧版本）会在其下使用 Mindustry/，
-        # 与实际数据目录 <数据根>/Mindustry 一致
         self.envs.insert("MINDUSTRY_DATA_DIR", self.data["mdtData"])
         self.envs.insert("APPDATA", self.data["mdtDataRoot"])
         self.setProcessEnvironment(self.envs)
@@ -147,10 +133,6 @@ class mdtLauncher(QProcess):
         self.finished.connect(self._on_finished)
         self.errorOccurred.connect(self._on_error)
 
-        # ---------- 6. 锁定实例 ----------
-        # 锁住实例目录本身与其中不在数据根里的全部内容：运行期间实例目录、mdt.jar 等
-        # 都改不了名也删不掉（用户手动改名或启动器自身的重命名都会被系统拒绝）；
-        # 数据根整棵子树不持句柄也不下钻：游戏要随时写存档/设置，里面的文件任人改。
         locked, failed = self._locker.lock(self.data["mdtPath"],
                                            exclude=[self.data["mdtDataRoot"]])
         self.log.emit({"type": "info", "text": "Locked instance, data untouched (%d objects, %d failed): " % (locked, failed) + self.data["mdtPath"]})
@@ -162,8 +144,6 @@ class mdtLauncher(QProcess):
 
     def run(self, mdt_name, java_path=None, args=None, data_path=None):
         """对外接口：启动服务端（异步），不阻塞调用线程。"""
-        # 新的一次启动：重新给一次"没有 Java 就先重扫候选表"的补救机会
-        # （重试走 _launch 而不是 run，正是为了不把这面旗子又立回去）
         self._java_rescan_done = False
         self._launch(mdt_name, java_path, args, data_path)
 
@@ -192,9 +172,6 @@ class mdtLauncher(QProcess):
             self.kill()
             if not self.waitForFinished(3000):
                 _log.warning("game process still alive after 3s: pid=%s" % self.processId())
-                # 进程没死：不解锁、也不把状态标成空闲。本轮正在退出，句柄会随
-                # BML 进程结束由系统释放；这里提前解锁反而让「仍在运行的实例」
-                # 看上去可以改名/删除。
                 return False
             self.going = 0
             self._locker.unlock()
@@ -340,8 +317,6 @@ class mdtLauncher(QProcess):
             except Exception:
                 pass
         if not ok:
-            # 失败/取消：不发射 lifecycle_finished（避免与状态显示抢切页），
-            # 下次启动可重新尝试自动下载
             self._java_download_attempts = 0
             cancelled = self._java_cancelled
             self._java_cancelled = False
@@ -353,9 +328,6 @@ class mdtLauncher(QProcess):
             return
         _log.info(_tr("core.log.info.javaAutoDlSuccess"))
         self.java_done.emit(ok)
-        # 新装的 JDK 已经落在盘上：让 javaManager 子线程重扫一遍候选表
-        # （扫完广播 changed，设置页/游戏管理页的 Java 选项跟着刷新；
-        #  下面 _restart_after_java 拿到的就是这份新缓存）
         javaManager.scan()
         # 等待一秒让"Java部署完成"显示后再重新启动游戏
         QTimer.singleShot(1000, self._restart_after_java)
@@ -364,8 +336,6 @@ class mdtLauncher(QProcess):
         """Java 下载完成后：刷新 Java 设置并重新启动游戏。"""
         _log.info(_tr("core.log.info.javaAutoDlRestart"))
         try:
-            # force：这里必须无视缓存重扫，否则可能拿到下载前那份旧候选表，
-            # 新装的 JDK 就被跳过了（此处在子线程刚扫过之后，通常直接命中）
             javas = javaManager.getJavas(force=True)
             if javas:
                 self.settings["javaPaths"] = javas
@@ -386,15 +356,10 @@ class mdtLauncher(QProcess):
         self.game_started.emit()
 
     def _on_finished(self, exitCode):
-        # Qt6: QProcess.finished(int exitCode)，仅一个参数（Qt5 的 ExitStatus 已移除）
-        # 退出码要落进日志：非 0 时 Windows 的异常码按有符号 int 读是负数
-        # （0xC0000005 访问违例 = -1073741819），只看十进制认不出是什么，所以补一个十六进制。
         text = "process exit with %d" % exitCode
         if exitCode != 0:
             text += " (0x%08X)" % (exitCode & 0xFFFFFFFF)
         self.log.emit({"type": "info" if exitCode == 0 else "error", "text": text})
-        # going 先归零再发信号：lifecycle_finished 的接收方读 going 判断运行
-        # 状态，晚归零会让按钮停在禁用态。
         self.going = 0
         self._java_download_attempts = 0   # 游戏进程结束：生命周期结束，下次启动重新允许自动下载
         self._emit_finished(exitCode)
@@ -457,14 +422,6 @@ class mdtLauncher(QProcess):
         except Exception:
             pass
 
-    # ================== 日志输出 ==================
-    # 子进程是 Windows 上的 JVM，System.out 按系统 ANSI 代码页写字节（简中下是 GBK），
-    # 而日志文件是 UTF-8。固定按 UTF-8 解码会把整条中文行变成 �——游戏日志里的
-    # 「UDP session 1 游戏回程 845890 包」就是这么丢的。改成灵活解码：按候选表逐个试，
-    # ASCII 行与编码无关、哪条都能解，只有非 ASCII 行才区分得出来，第一个解得通的胜出，
-    # 全解不了才 replace 兜底。mbcs 就是 Windows 的 ANSI 代码页本身，
-    # 比 locale.getpreferredencoding() 稳——后者会被 Python 的 UTF-8 模式改成 utf-8。
-    # 注意：某串字节同时是两种编码的合法序列时无从分辨，只能认先命中的那条。
     _ENCODINGS = ("utf-8", "mbcs", "gbk")
 
     def _decode(self, raw: bytes) -> str:

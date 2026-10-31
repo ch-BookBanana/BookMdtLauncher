@@ -32,9 +32,6 @@ def _is_nuitka():
         return False
 
 
-# 当前正在加载的插件目录，由 pluginLoader 在 setup 期间设置。
-# 插件资源统一写 getPath("${plugin}/assets/xxx.png") —— 不写死自己叫什么、
-# 也不写死装在哪个位置，换个 id 或换个安装目录都不用改代码。
 _PLUGIN_DIR = None
 
 
@@ -68,15 +65,9 @@ def getPath(relative_path):
 
     if _is_nuitka():
         if relative_path.startswith('src'):
-            # 内置资源位于解压目录/二进制目录。Nuitka 的 __file__ 为
-            # runtime 引用（--file-reference-choice=runtime 默认），包结构
-            # 保持，src/utils/path_utils.py 三次上溯即数据根（同开发模式）。
             base_path = os.path.dirname(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         else:
-            # BML/ 等 exe 旁用户数据：必须用 sys.argv[0] 定位。
-            # onefile 下 sys.executable 指向解压临时位置，而 sys.argv[0]
-            # 保持为原始 exe 的绝对路径（README 明确该行为）。
             base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         return os.path.join(base_path, relative_path)
 

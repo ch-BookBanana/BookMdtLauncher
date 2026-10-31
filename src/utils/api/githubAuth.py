@@ -77,52 +77,22 @@ AUTHORIZE_ENDPOINT = "https://github.com/login/oauth/authorize"
 TOKEN_ENDPOINT = "https://github.com/login/oauth/access_token"
 CALLBACK_PATH = "/callback"
 
-# 本启动器只读：抓公开仓库的发布列表、读自己的头像和用户名。scope 给到
-# read:user 就到顶了 —— 授权页上写得越窄，用户越敢点那个按钮。
 DEFAULT_SCOPE = "read:user"
 
-# 用户可能先去 GitHub 后台建 App 再回来点登录，所以等得久一点；
-# 超过这个时间基本就是人走开了，留着监听没有意义。
 DEFAULT_TIMEOUT = 180
 
-# GitHub App 的凭据：BML/ 是用户本地数据目录（已在 .gitignore 里），
-# 走 getPath 而不是 __file__ 自己拼 —— 打包后它是 exe 同目录，开发时是仓库根，
-# 冒烟/自测里还会被重定向到临时目录。
 APP_CONFIG_REL = "BML/githubApp.json"
 
-# 启动器自己那个 GitHub App 的凭据。
-# 填好这两行，用户点「登录 GitHub」就能直接用，不用碰任何配置文件。
-# GitHub App 后台的 Authorization callback URL 设成 http://127.0.0.1/callback
-# （回环地址允许任意端口，端口由内核分配）。
 BUILTIN_CLIENT_ID = "Iv23lihqub0l2I1s17LI"
 
-# client_secret：GitHub 的 token 端点硬性要求（实测不带会被判
-# incorrect_client_credentials，PKCE 替代不了）。
-# 别把它当机密 —— 桌面端留不住 secret，谁都能从二进制里抠出来。
-# 真正的安全边界是 PKCE（钉住授权发起方）+ 可撤销 + refresh 轮换 + 加密落盘。
-# 现在这个值确实随仓库公开：它只能用来和你这个 App 交换授权码（换不出别人
-# 的 token，也读不到任何仓库），代价是 GitHub 的 secret scanning 若把它
-# 判成泄露会自动撤销 —— 撤销后所有人登录都会失败，届时换一个新 secret 即可。
-# 这个常量为空：真正随二进制分发的那个值改走下面的密封常量（_SEALED_CLIENT_SECRET），
-# 目的只是别让明文出现在源码里；要换 secret 就去跑 scripts/seal_secret.py。
 BUILTIN_CLIENT_SECRET = ""
 
-# 本机凭据放 src/env.py（已在 .gitignore 里）：源码公开、secret 不公开。
-# 导入失败（别人 clone 后没有这个文件）就当没有 secret —— 他自己建 App 填自己的。
 try:
     from ...env import CLIENT_SECRET as _LOCAL_CLIENT_SECRET
 except Exception:            # 文件不存在 / 字段没写，都走「没有本机凭据」这条路
     _LOCAL_CLIENT_SECRET = ""
 
 
-# ─────────────── 内置 secret 的加密封装（见 secretbox.py）───────────────
-# 这里放的不是明文，是 secretbox 封出来的 base64 密文；解开它要一把由
-# **三段分开存放**的素材经 PBKDF2 派生出来的密钥：
-#   第一段在本文件（_SB_A），第二段在 secretbox.py（_SB_B），
-#   第三段写死在 _sb_key_material() 函数体里。
-# 分开只是为了不让人扫一眼源码就把「密钥怎么拼的」串起来 —— 单独看到
-# 任何一段都只是一串普通 base64，`strings` 抓出来也不起眼。
-# 换 secret 就重跑 scripts/seal_secret.py，四样东西必须一起换。
 _SEALED_CLIENT_SECRET = "sbBKvu8jlhK3GkbbLqPA0NiXyW8+SSLnj1EN3ifgCkK0oxreB5O6NtAMiW+qhgvdkxiwo7IekaWvePTatftZYGEMjRL79DQNRJvoG7NVaLOcKHxY"
 
 # 第一段素材（base64）。长度跟另外两段一样，免得「哪段短哪段假」
@@ -176,9 +146,6 @@ def _sealed_secret():
         return ""
 
 
-# ───────────────────────── PKCE ─────────────────────────
-# RFC 7636：verifier 是 43~128 个「A-Z a-z 0-9 - . _ ~」，challenge 是
-# base64url(sha256(verifier)) 去掉 '=' 填充。
 
 def make_code_verifier():
     """造一个 code_verifier。
@@ -259,8 +226,6 @@ def load_app_config():
             # 随二进制分发的那个：密文常量 + 三段素材，解不开就是空串
             secret = _sealed_secret()
         if not secret:
-            # 仓库是公开的：client_id 晒在源码里无所谓，secret 不该跟着走。
-            # 本机的 BML/githubApp.json 里只写 {"client_secret": "…"} 也能用。
             secret = _secret_from_file()
         return builtin, (secret or None), None
 
@@ -275,8 +240,6 @@ def load_app_config():
     if not isinstance(data, dict):
         return None, None, "还没有配置 GitHub App：请在 BML/githubApp.json 里填 client_id"
     client_id = str(data.get("client_id") or "").strip()
-    # secret 只有 confidential client（GitHub App 生成了 client secret）才有；
-    # public client 没它也够 —— PKCE 已经把「谁换的 code」钉住了。
     client_secret = str(data.get("client_secret") or "").strip() or None
     if not client_id:
         return None, None, "还没有配置 GitHub App：请在 BML/githubApp.json 里填 client_id"
@@ -357,8 +320,6 @@ class LoopbackServer:
         srv, self._server = self._server, None
         if srv is not None:
             try:
-                # shutdown() 必须由 serve_forever 之外的线程调用 —— 本方法
-                # 永远是从等待方（工作线程）进来的，正好满足。
                 srv.shutdown()
             except Exception:
                 pass
@@ -414,8 +375,6 @@ class LoopbackServer:
                     # 浏览器会顺手来要图标。给个 404 就行，别当错误、别结束流程。
                     self._empty(404)
                     return
-                # 只认这两条：我们自己拼的是 /callback；万一 App 里填成
-                # http://127.0.0.1（不带路径），浏览器回到的就是 "/"
                 if parsed.path not in (CALLBACK_PATH, "/"):
                     self._empty(404)
                     return
@@ -423,8 +382,6 @@ class LoopbackServer:
                 query = urllib.parse.parse_qs(parsed.query)
                 got_state = (query.get("state") or [""])[0]
                 if got_state != expected_state:
-                    # state 不对：这不是本次授权发出的回调。回 400 但**不结束等待**
-                    # —— 真正的回调可能还在后面，别让一个陌生请求把流程废掉。
                     self._html(400, "state 校验失败，这次请求已被忽略。")
                     return
 
@@ -442,8 +399,6 @@ class LoopbackServer:
 
                 owner.code = code
                 self._html(200, "授权完成，可以关闭此页面。")
-                # 先把响应写回浏览器，再放等待方走：反过来的话等待方可能
-                # 立刻 close() 掉 socket，用户那边看到的是「连接被重置」。
                 owner._got.set()
 
             def _empty(self, status):
@@ -532,13 +487,6 @@ def open_in_browser(url, timeout=15.0):
     return bridge.open(url, timeout=timeout)
 
 
-# ─────────────────── 授权包与过期判断 ───────────────────
-# 换回来的不是一个裸 token，而是一块「授权包」：
-#     {"access", "refresh", "expires_at", "refresh_expires_at",
-#      "scope", "token_type"}
-# 原因是 GitHub App 勾了「Expire user authorization tokens」之后，access_token
-# 只有 8 小时，续期全靠同一个响应里的 refresh_token（6 个月、单次使用 + 轮换）。
-# 只留 access 等于把这份授权当成一次性的，8 小时后用户就得重登一遍。
 
 def expires_at_from(now, expires_in):
     """把「还有多少秒过期」换算成绝对时间戳（epoch 秒）。
@@ -578,24 +526,11 @@ def needs_refresh(expires_at, now, skew=60):
 
 # ───────────────────── 换 token ─────────────────────
 
-# 失败有两种，处置完全不同：
-#   * GitHub 明确拒了 refresh_token（bad_refresh_token）—— 凭据真的死了，
-#     必须清掉授权包让用户重登，留着只会让每个请求白撞一次 401；
-#   * 这会儿连不上 GitHub —— 凭据一点问题都没有，清了等于逼用户断网时重登。
-# 两者都收敛成 (False, 中文原因, None)，所以用这个字样区分：githubAPI 靠它
-# 决定要不要清授权包。换 token 与刷新 token 两处必须拼同一句话 ——
-# 少一个字就变成「断网即登出」。
 NETWORK_ERROR_HINT = "网络出错"
 
-# token 端点被挡时（HTTP 404）给用户的话。写成常量是因为换 code 与刷新两条
-# 路都要说同一句话：用户看到的应该是「换条网络 / 查代理」，而不是去翻参数。
-# 开头必须是 NETWORK_ERROR_HINT —— 它同时是「别把这次失败当成凭据失效」的
-# 标记，见 githubAPI._refresh_now：被挡一次就把人登出，是最难解释的 bug。
 _BLOCKED_HINT = (NETWORK_ERROR_HINT + "：token 端点返回 404（被网络或代理挡了），"
                  "请检查系统代理 / 加速器，或换个网络后重试")
 
-# GitHub 的 error 码 → 用户看得懂的一句话。error 码本身是英文短横线词，
-# 直接甩给用户等于没解释；error_description 是英文长句，附在括号里当细节。
 _OAUTH_ERRORS = {
     "bad_verification_code": "授权码无效或已过期，请重新登录",
     "incorrect_client_credentials":
@@ -607,9 +542,6 @@ _OAUTH_ERRORS = {
     "access_denied": "授权被拒绝（在授权页点了取消）",
     "device_flow_disabled": "这个 GitHub App 没有开启 OAuth 授权",
     "unverified_user_email": "GitHub 账号还没验证邮箱",
-    # 刷新链路专用。refresh_token 是单次使用的：轮换后旧值、超过 6 个月、
-    # 或用户在网页上撤销了授权，换回来的都是这一条。对用户来说只有一句话
-    # 有意义 —— 重新登录：refresh 自身不能自愈，重试多少次都一样。
     "bad_refresh_token": "登录已失效，请重新登录",
 }
 
@@ -786,8 +718,6 @@ def authorize(scope=DEFAULT_SCOPE, timeout=DEFAULT_TIMEOUT, cancel=None,
     """
     client_id, client_secret, err = load_app_config()
     if err:
-        # 凭据都没有就别起监听了：端口开着等一个永远不会来的回调，
-        # 用户只会看到「正在等待浏览器授权…」卡三分钟。
         return False, err, None
 
     state = make_state()

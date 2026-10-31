@@ -88,8 +88,6 @@ from ..utils.registry import registry
 # 动词表：所有命名空间共用同一套名字（signals 另有 emit / connect）
 VERBS = ("new", "set", "update", "remove", "get", "list", "owned", "contract", "watch")
 
-# 标记挂在函数上（列表，允许一个方法挂多条）：
-#   [ (Scope, verb, name, fields), ... ]
 _MARK = "__bml_registrar__"
 
 # 条目链的切分：& / # 是链符号（同时是归属符），/ 只属于 owner/ns 的第一段
@@ -128,8 +126,6 @@ def _split(path):
         if not seg:
             raise ValueError(f"命名空间 {path!r} 的 {mode!r} 后面要跟一段名字")
         chain.append((mode, seg))
-    # 2) base 段：owner/ns（ns 可以有层级：宿主既有的 core/setting/items 就这么写；
-    #    「/ 不是目录」说的是条目链用 & / #，ns 内部的层级仍原样保留）
     if "/" in base:
         owner, _, ns = base.partition("/")
         if not owner or not ns:
@@ -198,8 +194,6 @@ class Scope:
     def set(self, name=None, *args, **fields):
         if callable(name) and not isinstance(name, str):
             return _Mark(self, "set", name.__name__, fields)(name)
-        # 带条目链的命名空间（core/settings&launcher&java&probeaaa）：
-        # set(值) 的第一个位置参数是值，不是条目名
         if self.entries and name is not None and not isinstance(name, str):
             args = (name,) + args
             name = None
@@ -233,8 +227,6 @@ class Scope:
         return self._run_mark("owned", None, kw)
 
     def contract(self, **fields):
-        # contract 是「声明点」：宿主在启动时直接执行（没有插件实例、也没有会话）；
-        # 插件在类体里写的话先记标记、apply 时落地。
         if self.plugin is not None or registry._session_owner is None:
             return self._exec("contract", None, fields, None)
         return _Mark(self, "contract", None, fields)
@@ -306,16 +298,11 @@ class Scope:
             return self._tools(verb, name, fields, actor, fn)
         return self._registry(verb, name, fields, fn, actor)
 
-    # 设置：自己那一桶（self.plugin.settings）；core/settings 走 other()；
-    # 链式条目 core/settings&launcher&java 读的是桶里的嵌套键。
-    # 装饰器 new(name=…) 同时把「设置项控件」登记进设置页，section 按路径自动分配。
     def _settings(self, verb, name, fields, actor, fn=None):
         chain = self._chain(actor)
         owner = chain[0][0] if chain else (self.owner or actor)
         paths = [seg for _o, seg in chain]
         if verb == "contract":
-            # 逐层注册设置点：先 core/settings&launcher，再 &launcher&java，
-            # 之后 &launcher&java&probeaaa 这种注册项才开放
             if not paths:
                 raise ValueError(
                     "settings 的 contract 要写在具体点上，如 core/settings&launcher")
@@ -639,10 +626,6 @@ def apply(plugin):
 _READY = {}
 
 
-# ─────────────────────────── 设置点（逐层注册）───────────────────────────
-# settings 命名空间是树：core/settings&launcher 注册之后，&launcher&java 才开放；
-# &launcher&java 注册之后，&launcher&java&probeaaa 这种「注册项」才开放。
-# 根（core/settings）是宿主自带的，不用注册。
 _SETTINGS_POINTS = set()
 
 

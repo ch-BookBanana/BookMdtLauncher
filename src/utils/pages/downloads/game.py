@@ -51,16 +51,9 @@ _FIELDS = {
 
 
 
-# 进行中的游戏下载任务。QDownloader 实例必须被强引用着：一旦没人引用，出作用域
-# 就被回收，下载会静默中断（不报错、也不会有 finished）。
-# 这份引用原先挂在 root 上（root._mdt_downloads —— 一个没有声明处、靠
-# hasattr 现建现用的动态属性），现在收回本模块：它本来就只归下载流程用。
 _ACTIVE_DOWNLOADS = []
 
 
-# ─────────────── 下载列表项的操作按钮（core.download.item.actions）───────────────
-# init 由这一层自己提供：按钮自己知道该弹什么，Item 只负责把它们摆到右边、
-# 并统一管显隐（悬停时才显示）。
 
 
 
@@ -245,8 +238,6 @@ class Game(QWidget):
 
         # 下载界面游戏本体模板
         class Template(QWidget):
-            # 仓库介绍（intro）异步就绪通知：子线程抓到正文后回主线程补写缓存。
-            # 介绍只是附加内容，绝不让它拖住搜索结果。
             introReady = Signal(object)
             # intro 抓取超时（秒），只作用于附加介绍，子类可覆盖
             introTimeout = 10
@@ -910,9 +901,6 @@ class Game(QWidget):
 
                         self.layout.addStretch(1)
 
-                        # 右侧操作按钮走注册中心：加一个按钮 = 写一个 init + 一条
-                        # registry.add（见本模块 register()）。回调在 init 里接
-                        # （按钮自己知道该弹什么），这里只管摆位置与统一控显隐。
                         self._action_btns = []
                         for e in registry.entries("core.download.item.actions"):
                             btn = e.init(Box(parent=self, entry=e))
@@ -954,8 +942,6 @@ class Game(QWidget):
                         super().enterEvent(event)
 
                     def leaveEvent(self, event):
-                        # 鼠标移到子按钮上时 Item 也会收到 Leave，
-                        # 但不能直接取消悬停，需按全局位置判断是否真的离开 Item
                         self.check_hover()
                         super().leaveEvent(event)
 
@@ -995,8 +981,6 @@ class Game(QWidget):
                     bus.bind(self)
 
                 def init_wid(self):
-                    # 弹窗尺寸：仅「关闭行 + 分割线 + 名称输入框 + 提示/确定行」，
-                    # 宽度取 320、高度 190，避免 400x130 时过于扁长
                     self.setFixedSize(320, 190)
 
                     self.layout = QVBoxLayout(self)
@@ -1389,9 +1373,6 @@ class Game(QWidget):
                     self._intro_loading.move(0, 0)
 
                     def _job(event):
-                        # 图片下载完成的回调不依赖 QThTimer 的 event（task 一次性任务
-                        # 结束后 event 会被自动销毁，下载线程再 emit 会丢失），改用
-                        # RepoInfo 自身的 mdImageReady 信号回到主线程。
                         try:
                             on_image = self.mdImageReady.emit
                         except Exception:
@@ -1410,8 +1391,6 @@ class Game(QWidget):
                             self._intro_md = result
                             # _job 已返回 HTML（含图片缓存与 0.2 缩放），直接渲染
                             self.intro.setHtml(result)
-                            # 竞态兑底：若下载回调先于本结果到达（_flush 已保留 pending），
-                            # 结果就绪后补一次刷新，保证已下载图片一定回填
                             if getattr(self, "_mdimg_pending", None) and self._mdimg_flush is None:
                                 self._mdimg_flush = QTimer.singleShot(0, _flush_md_images)
                         except Exception:
@@ -1424,8 +1403,6 @@ class Game(QWidget):
                                 pass
 
                     def _on_md_image(full, local):
-                        # 主线程（mdImageReady 信号 QueuedConnection 回到主线程）：
-                        # 收集已下载图片，同帧合并刷新
                         try:
                             self._mdimg_pending[full] = local
                             if self._mdimg_flush is None:
@@ -1433,8 +1410,6 @@ class Game(QWidget):
                         except Exception:
                             pass
 
-                    # 下载线程通过 mdImageReady 信号触发本回调；绑定到 self 作为
-                    # receiver 上下文，保证 QueuedConnection 一定回到主线程
                     self.mdImageReady.connect(_on_md_image, Qt.QueuedConnection)
 
                     def _flush_md_images():
@@ -1549,9 +1524,6 @@ class Game(QWidget):
                     
 
         class Origin(Template):
-            # ── 下载源元信息：注册与展示的唯一出处 ──
-            # 以前这些值一半写在 __init__ 里、一半又当参数传给 add_page()，
-            # 同一份数据两处维护；现在集中在类属性上，Main 只按表读取。
             title_key   = "core.wid.pages.download.origin"
             introUrl    = "https://raw.githubusercontent.com/Anuken/Mindustry/master/README.md"
             releaseRepo = "Anuken/Mindustry"
@@ -1702,8 +1674,6 @@ class Game(QWidget):
 
             @classmethod
             def _sort_versions(cls, versions):
-                # 分类仍是 alpha/beta 的固定顺序（它们只是分组标签），
-                # 分组内部一律按发布时间倒序
                 order = {"alpha": 0, "beta": 1}
                 out = {}
                 for cls_key in sorted(versions.keys(), key=lambda k: order.get(k, 99)):
@@ -1779,8 +1749,6 @@ class Game(QWidget):
                 }
 
             def _fetch_and_merge(self, pages, per_page, cache):
-                # Custom fetch: keep beta results in-memory for rendering,
-                # but only persist alpha versions to disk because beta is time-sensitive.
                 api = events.githubAPI
                 releases_all = []
                 max_workers = min(len(pages) + 1, 8)
@@ -1932,9 +1900,6 @@ def register():
                  init=_src_init(Game.Main.MindustryARC),
                  title=Game.Main.MindustryARC.title_key, icon=Game.Main.MindustryARC.iconPath)
 
-    # 列表项右侧的操作按钮：init 用 b.parent（那个 Item）现取宿主，
-    # 所以不必等 Item 建出来才登记 —— 原先靠一个模块级标志在 Item.__init__
-    # 里懒登记，现在条目在这就位，Item 只管摆位置。
     point = "core.download.item.actions"
     registry.add(point, "core.download.item.download",
                  init=_item_action_download,

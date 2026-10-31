@@ -161,10 +161,6 @@ class DlListPage(QWidget):
         if self._closed or isinstance(result, Exception):
             return
         actives, pendings = result
-        # Java 下载状态同步：检测循环轮询读取任务实时状态，驱动 Launch 页 label。
-        # 与 paused_changed 信号互补——信号丢失/时序错乱时，1 秒内轮询自动纠正，
-        # 避免暂停瞬间被 progress 覆盖成"正在下载"后卡住。
-        # 只更新 label 文本不切页，避免打断用户当前页面。
         try:
             for _t in actives.values():
                 _dest = _t.get("dest") or ""
@@ -174,8 +170,6 @@ class DlListPage(QWidget):
                     _pct = min(100, int(_done * 100.0 / _total)) if _total > 0 else 0
                     _paused = bool(_t.get("paused"))
                     events.emit("java_status", "paused" if _paused else "downloading", _pct)
-                    # 检测循环日志：记录读取到的 Java 任务状态（含暂停/恢复切换），
-                    # 用于排查信号竞争导致的"暂停后被覆盖成正在下载"
                     if _paused != self._last_java_paused:
                         events.logger.info(t(events.lang.get("core.log.info.dlJavaState"),
                                                 "paused" if _paused else "downloading",
@@ -231,8 +225,6 @@ class DlListPage(QWidget):
         task_dir = os.path.dirname(state_file) if state_file else None
         if task_dir and os.path.isdir(task_dir):
             shutil.rmtree(task_dir, ignore_errors=True)
-        # 若是 mdt 游戏下载：同时删除目标文件夹（含 downloading.json），
-        # 避免残留记录导致下次启动又被续传
         try:
             dest = ""
             if state_file and os.path.isfile(state_file):
@@ -447,8 +439,6 @@ class DlListPage(QWidget):
                 events.logger.warning(t(events.lang.get("core.log.warning.dlMdtPausedError"), repr(e)))
 
         def _on_secondary_clicked(self):
-            # 运行中：取消（子线程执行阻塞式取消，取消后删除 mdt 目标文件夹）；
-            # 待续传：请求页面删除
             if self.task_info.get("kind") == "active":
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
                     def _do_cancel(e, task=self.task, dest=self.task_info.get("dest") or ""):
@@ -456,10 +446,6 @@ class DlListPage(QWidget):
                             stopped = task.cancel(timeout=8)
                         except Exception:
                             stopped = False
-                        # 分片线程没停下来就别删目标目录：它还阻塞在网络读上，
-                        # 收尾时会继续往临时目录里写。这时删掉目录，用户看到的
-                        # 是「取消了但文件又回来了」，而紧接着重新下载同一个目标
-                        # 会复用同一个 task_id，两个线程写同一批分块文件。
                         if not stopped:
                             events.logger.warning(t(
                                 events.lang.get("core.log.warning.dlCancelPending")))

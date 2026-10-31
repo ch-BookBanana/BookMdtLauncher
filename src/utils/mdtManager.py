@@ -72,9 +72,6 @@ class mdtManager(QObject):
         改一处忘一处的话，实例扫描会当成「一个都没有」。"""
         os.makedirs(cls.base_dir, exist_ok=True)
     DEFAULT_ICON = ICON_MDT
-    # 实例名长度上限（字符）。名字既是目录名也是界面上到处显示的标题，
-    # NTFS 允许的 255 对 UI 毫无意义，太长会把列表、标题栏、下载卡片撑坏。
-    # 下载页的输入框与管理模块的改名共用这一个值（check_name 是唯一校验入口）。
     MAX_NAME_LEN = 32
     on_game_changed = Signal(dict)
     # BML.json 里「跟随全局设置」的标识符（只写不读：界面按它显示「跟随全局」那个选项）
@@ -82,18 +79,10 @@ class mdtManager(QObject):
     # settings["gameList"] 里默认分组的键（是个符号名，显示前要过 i18n 翻成「默认」）
     DEFAULT_GROUP = "<:|default|:>"
 
-    # ---- 实例数据目录布局（与 mdtLauncher 启动时设的环境变量一一对应）----
-    # <实例目录>/data 是数据根：启动时既是进程的 %APPDATA%，也是进程的工作目录；
-    # 游戏真正读写的是其下的 Mindustry/：saves、schematics、mods 都在那一层。
     DATA_ROOT_NAME = "data"
     DATA_DIR_NAME = "Mindustry"
-    # 「数据 / 蓝图 / 模组」三个文件夹按类别取：键是类别名，值是数据目录下的目录名。
-    # 数据目录本体用空串表示（蓝图 schematics、模组 mods 都是游戏自己定的目录名）。
     DATA_FOLDERS = {"data": "", "blueprint": "schematics", "mod": "mods"}
 
-    # ---- 游戏图标全局缓存表（引用计数，仅主线程操作） ----
-    # QPixmaps: {game: QPixmap}；_pixmap_refs: {game: int}
-    # 有任一引用即常驻内存；引用归零立即删除释放资源
     QPixmaps = {}
     _pixmap_refs = {}
 
@@ -471,8 +460,6 @@ class mdtManager(QObject):
                         merged[key][sub_key] = sub_value
             else:
                 merged[key] = value
-        # 内容无变化则不写回：避免每次 checkGame 刷新 BML.json mtime，
-        # 否则 check_icons 的缓存键(bml_mtime)永远不匹配，每秒全量误报 iconChanged
         if merged == file_data:
             return
         try:
@@ -536,8 +523,6 @@ class mdtManager(QObject):
         if java_path is None:
             java_path = cls.pickJava(settings["javaPaths"])
 
-        # 最终校验：解析结果同样可能失效（例如全局选中的那个刚被卸载）
-        # （None 表示自动匹配，不参与 isJava 校验，也不写入 BML.json）
         if java_path and not javaManager.isJava(java_path):
             java_path = cls.FOLLOW
             cls.setData(subdir_name, ["javaPath"], cls.FOLLOW)
@@ -743,8 +728,6 @@ class mdtManager(QObject):
                     shutil.copyfile(src, png)
                 except OSError as exc:
                     return self._fail("ioError", exc)
-            # icon_path 归位默认值：实例内 icon.png 优先级更高，
-            # 留着旧路径会在 icon.png 被删后又把旧图标捡回来
             self._scanner.setData(self.name, ["icon_path"], self._scanner.DEFAULT_ICON)
             self._scanner.invalidate_cache(self.name)
             self._scanner.invalidate_icon_pixmap(self.name)
@@ -839,8 +822,6 @@ class mdtManager(QObject):
                 return self._fail("locked", exc)
             except OSError as exc:
                 return self._fail("ioError", exc)
-            # 目录没了：副本列表缓存与图标缓存一起作废（图标引用计数不碰，
-            # 那是各处持有者自己 release 的账）
             self._scanner.invalidate_cache()
             self._scanner.invalidate_icon_pixmap(name)
             for games in self._scanner.settings["gameList"].values():
@@ -880,8 +861,6 @@ class mdtManager(QObject):
                 # 目录名变了 → 图标来源路径跟着变，基线作废，下次检查静默重建
                 self._icon_check_keys.pop(mdt, None)
                 if mdt in setting:
-                    # 重名：目录名早就有登记了，旧名那笔是残留（或同一个实例被记了两次）。
-                    # 只把旧名清掉，别再插一笔同名的，否则 gameList 里会出现两份。
                     for _, value in self.settings["gameList"].items():
                         while old_name in value:
                             value.remove(old_name)
@@ -897,9 +876,6 @@ class mdtManager(QObject):
                 if self.settings["defaultGame"] == old_name:
                     self.settings["defaultGame"] = mdt
             elif old_name is None:
-                # 首次扫到这个实例：把目录名写进 BML.json 的 name 当身份标记，
-                # 之后无论谁改了目录名，这一行就是改名依据。
-                # 先清图标检测键：写文件会改 bml_mtime，否则下一秒误报 iconChanged。
                 self.setData(mdt, ["name"], mdt)
                 self._icon_check_keys.pop(mdt, None)
             # 2. 目录存在但不在 gameList → 新游戏

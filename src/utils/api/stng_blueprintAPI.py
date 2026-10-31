@@ -21,33 +21,6 @@ from PySide6.QtCore import QObject
 
 from .githubAPI import _get_ca_bundle
 
-# ---------------------------------------------------------------
-# STNG蓝图工坊(www.stng.pw) API 封装
-# ---------------------------------------------------------------
-# 后端为 REST + JWT(Bearer)认证，查询/下载接口无需登录，全部实测。
-# 注意：这是蓝图站，文件格式为 .msch(Mindustry 蓝图)，不是地图。
-#
-# 接口清单(无需登录):
-#   GET /api/blueprints?orderBy={download_count|upload_time|id}&orderDir={DESC}&page={n}&limit={n}
-#       -> {"data": [...], "total": N, "page": n, "limit": n}
-#          orderBy 映射: 热度 -> download_count DESC, 最新 -> upload_time DESC, ID -> id
-#   GET /api/blueprints/search?q={kw}&orderBy=&orderDir=&page=&limit=
-#       -> 同上结构，关键词匹配名称/作者/描述
-#   GET /api/blueprints/{id}
-#       -> 详情 dict（字段见 get_blueprint docstring）
-#   GET /api/blueprints/user/{uploader_qq}?limit={n}
-#       -> {"data": [...], "total": n} 同作者的其他蓝图
-#   GET /api/blueprints/{id}/download
-#       -> .msch 二进制（msch 魔数 + zlib 压缩），
-#          Content-Disposition: attachment; filename="xxx.msch"
-#   GET /api/blueprints/{id}/content
-#       -> {"success": true, "base64": "..."} 可直接粘贴进游戏的蓝图文本
-#   GET /api/stats
-#       -> {"users": 91, "blueprints": 2517, "likes": 6, "downloads": "61"}
-#
-# 需登录(启动器一般不调用): POST /api/blueprints/{id}/like（点赞）、
-#   POST /api/blueprints/upload / upload-text（上传）、GET /api/auth/me（登录态检查）
-# ---------------------------------------------------------------
 
 
 class StngAPI(QObject):
@@ -72,8 +45,6 @@ class StngAPI(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 复用 githubAPI 的合并 CA bundle（certifi + Windows 系统证书库），
-        # 加速器/抓包工具把根证书装进系统库时不会误报 SSL 错误。
         self._session = requests.Session()
         self._session.trust_env = True
         self._session.verify = _get_ca_bundle()

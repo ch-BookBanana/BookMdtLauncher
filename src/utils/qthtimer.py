@@ -78,8 +78,6 @@ _active_timers = set()
 _dedicated_threads = set()
 _zombie_threads = []      # 未能及时停止的线程：保留引用，交给进程退出兜底
 _pending_objects = set()  # 已请求销毁的跨线程 QObject：保持 Python 引用，
-                          # 防止在主线程被 GC 而 C++ 对象在线程内被错误销毁
-                          # （否则 Qt 报 "Timers cannot be stopped from another thread"）
 
 
 def _release_pending(obj=None):
@@ -243,8 +241,6 @@ class QThTimer(QObject):
         self._interval = int(interval)
         # 归属（插件 id 之类）：谁开的计时器，卸载时按 owner 找得到
         self.owner = owner
-        # 取消信号：job 里轮询 timer.cancel_event.is_set() 就能及时收手；
-        # stop()/cancel()/destroy() 都会把它 set 上
         self.cancel_event = threading.Event()
         self._single_shot = False
         self._job = None
@@ -262,9 +258,6 @@ class QThTimer(QObject):
         _active_timers.add(self)
         self._event = None
         self._parent_obj = None
-        # 自动销毁连接所在的信号（once/singleShot → timeout；task → finished）。
-        # destroy() 只对这个信号做无参 disconnect()：该信号必有连接
-        #（至少包含 _auto_destroy 槽），不会触发 "Failed to disconnect" 警告。
         self._auto_destroy_signal = None
         # 如果传入 parent，则在 parent 销毁时自动销毁本实例
         if parent is not None:
@@ -335,11 +328,6 @@ class QThTimer(QObject):
             return
         self._destroyed = True
 
-        # 断开自动销毁连接所在的信号。
-        # 注意：无参 disconnect() 在信号无连接时会打印 "Failed to disconnect (None)"
-        # RuntimeWarning（libpyside 直接输出，try/except 捕获不了）。因此只对
-        # 记录过的信号（必有连接）执行；destroy 后信号不再发射，用户回调也已
-        # 执行完毕，断开全部连接无副作用，还能释放用户回调的引用避免泄漏。
         sig = getattr(self, '_auto_destroy_signal', None)
         if sig is not None:
             self._auto_destroy_signal = None
@@ -477,8 +465,6 @@ class QThTimer(QObject):
             try:
                 return job(event)
             except Exception:
-                # job 异常不再静默吞掉：打印完整堆栈便于定位（仍返回异常对象，
-                # 兼容 result_callback 收到的可能是异常的容错逻辑）
                 traceback.print_exc()
                 import sys
                 sys.stdout.flush()
@@ -490,8 +476,6 @@ class QThTimer(QObject):
         timer.setJob(_wrapped_job)
         if result_callback is not None:
             timer.finished.connect(result_callback)
-        # 一次性任务：job 完成并回调后自动销毁，释放 dedicated 线程
-        #（防止调用方未持有返回实例时，线程长期存活/GC 跨线程析构）。
         timer.finished.connect(timer._auto_destroy)
         timer._auto_destroy_signal = timer.finished
         timer.setSingleShot(True)
@@ -550,8 +534,6 @@ class QThTimer(QObject):
                 result = job(event)
                 return result
             except Exception:
-                # job 异常不再静默吞掉：打印完整堆栈便于定位（仍返回异常对象，
-                # 兼容 result_callback 收到的可能是异常的容错逻辑）
                 traceback.print_exc()
                 import sys
                 sys.stdout.flush()
@@ -588,9 +570,6 @@ def shutdown():
             pass
     _dedicated_threads.clear()
     _shutdown_qthtimer_thread()
-    # 兜底：destroy()/quit 超时进入 _zombie_threads 的线程，在进程退出前
-    # 给它们最后的机会结束，避免线程仍在运行时 QThread 对象被销毁而触发
-    # "QThreadStorage: entry destroyed before end of thread" 警告。
     for thr in list(_zombie_threads):
         try:
             thr.wait(15000)

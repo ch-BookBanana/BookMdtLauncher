@@ -109,9 +109,6 @@ registry.declare("core.download.item.actions", registrant="core.download",
                  required=("init", "title", "icon"),
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
-# 游戏管理浮层左栏的功能页（设置 / Mods / …）。项由各子页自己登记。
-# 浮层页面：盖在窗口上的整页界面，由 FloatingStack 承载。
-# 与 core.pages 的区别是它不进左栏、而是弹出来；条目形态一样。
 registry.declare("core.overlays", registrant="core",
                  fields=("init", "title"),
                  required=("init", "title"),
@@ -136,10 +133,6 @@ registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
                  required=("init",),
                  doc="游戏管理页的区块（文件夹 / Java …）")
 
-# ─────────────────────────── 内置条目登记 ───────────────────────────
-# 每个页面模块导出顶层 register()，这里逐个调 —— import 本身不登记。
-# 「有哪些内置条目」于是全在这一个文件里看得见，不必翻到各模块末尾去数；
-# 调用顺序必须排在契约声明之后（register 里的 add 会校验契约）。
 
 from . import start                # noqa: E402,F401
 from . import download             # noqa: E402,F401
@@ -149,8 +142,6 @@ from .Modal import githubSetting    # noqa: E402,F401
 from .Stack import dlList             # noqa: E402,F401
 from .downloads import game as _download_sources   # noqa: E402,F401
 from .Stack import gameManager    # noqa: E402,F401
-# 关闭询问浮层住在基层（settings.py）—— 它问的就是基层那个字段，控件跟着字段
-# 走；登记仍然由这里统一叫（register 见那个文件的第二级）。
 from ..settings import register as _register_close_ask    # noqa: E402,F401
 
 start.register()                   # core.start.bottom（底部按钮页）

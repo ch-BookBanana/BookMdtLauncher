@@ -314,8 +314,6 @@ class Registry:
         override     : 该接口下的条目默认允不允许被别人顶掉（默认允许；个别条目在条目上单独关）
         """
         owner, name = _split_point(point)
-        # v1 的 registrant 是「分区标签」（core.setting / core.gameManager…）：
-        # 它必须落在接口路径里面 —— 那是**出处标注**，不是 owner；owner 永远是路径第一段。
         decl_label = registrant or owner
         if decl_label != owner:
             np_, nl = normalize(point), normalize(decl_label)
@@ -813,8 +811,6 @@ class Registry:
             n += sum(len(entries) for ifaces in b["registers"].values()
                      for entries in ifaces.values())
             n += len(b["declares"])
-        # 别人挂在它接口上的条目：随接口一起撤（孤儿策略）；
-        # 同时在所有桶里剔掉「by == ns」的层（它顶掉别人的那些）
         for owner, ob in list(self.data.items()):
             regs = ob["registers"]
             gone = regs.pop(ns, None)

@@ -70,9 +70,6 @@ class Service:
         try:
             return getattr(self.target, item)
         except KeyError as e:
-            # 取不到时抛的是注册表的 RegistryError，而它在语义上就是
-            # 「这个名字现在没有」—— 包成 AttributeError，`hasattr` 与
-            # `getattr(svc, "x", 默认)` 这两条最自然的探测写法才有效。
             raise AttributeError(
                 f"{self._key} 现在取不到：{e}") from None
 
@@ -118,8 +115,6 @@ class Plugin:
 
     # ── 注册动作 ──
 
-    # 设置（settings 命名空间的落点）：默认值声明在这里，DSL 的
-    # register("settings").new(...) 也会把键补进来。
     settings_defaults = {}
     _settings_view = None
 
@@ -132,8 +127,6 @@ class Plugin:
         """
         if self._settings_view is None:
             from ..utils.pluginSettings import PluginSettings
-            # 拷贝一份默认值：settings_defaults 是类属性，视图不该跟着它变。
-            # （但**别去改那个类属性本身** —— 改了是所有实例一起变。）
             self._settings_view = PluginSettings(self.id, dict(self.settings_defaults))
         return self._settings_view
 

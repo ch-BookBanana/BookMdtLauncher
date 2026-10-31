@@ -140,25 +140,11 @@ try:
 
             self.launcher = mdtLauncher(self, self.settings)
             self.githubAPI = GithubAPI()
-            # 挂上 settings：access token 8 小时一过，刷新出来的新授权包要写回
-            # 磁盘（refresh_token 单次使用，只留在内存里一次重启就丢了）
             self.githubAPI.bindSettings(self.settings)
             self.mdtManager = mdtManager(self.settings, parent=None, root=self)
             self.mdtManager.on_game_changed.connect(self._on_game_changed)
-            # 宿主工具登记到 core/tools：插件用 register("core/tools&mdtManager").get()
-            # 取活对象（卸载/重载跟着走，不用自己存引用）
             self._register_tools()
-            # 设置点逐层注册：core/settings&launcher → &launcher&{…} 之后，
-            # 插件才能往 &launcher&java&<键> 这种注册项上登记/读写
             self._register_settings_points()
-            # GitHub 是可选功能：没登录就什么都不做 —— 启动时不需要用户先有
-            # 凭据，也不该为「没登录」发请求或提示。有授权包才顺手校验一次，
-            # 顺带把 rate 余量填上（设置面板打开时就有数）。
-            # 登录走 GitHub App 授权（src/utils/api/githubAuth.py）：用户在
-            # GitHub App 后台把 Authorization callback URL 设为
-            # http://127.0.0.1（端口任意），client_id 填进 BML/githubApp.json。
-            # access token 只有 8 小时，关机一晚上基本必然过期 —— 这里不用
-            # 自己判断：checkToken 走的是 _request，它会先拿 refresh_token 续上。
             auth_blob = githubAPI.read_auth(self.settings)
             if auth_blob:
                 self.githubAPI.setAuth(auth_blob)
@@ -238,8 +224,6 @@ try:
                 root.add("core/signals", type="core/point", entry="core/signal")
             except Exception as e:
                 self.logger.warning(f"注册点 core/signals 登记失败：{e}")
-            # 设置页的分组/条目都登记在 core/setting（见 pages/setting.py 的
-            # register()），v2 的 core/settings&… 设置点已经不需要了。
 
         def _bridge_signals(self):
             """把宿主事件总线上的信号桥进 core/signals（核心信号名 → BEventSignal 条目）。"""
@@ -282,8 +266,6 @@ try:
                 self.tray.hide()
             except Exception:
                 pass
-            # 结束启动器拉起的游戏进程：退出启动器就不再留下后台跑着的服务端
-            # blocking=True：退出流程已回不到事件循环，必须同步等进程真的死掉
             try:
                 self.launcher.kill_game(blocking=True)
             except Exception:
@@ -309,8 +291,6 @@ try:
             except Exception:
                 pass
 
-        # 授权包的加密与落盘在 api/githubAPI.py 里（store_auth / read_auth），
-        # 不在这里 —— 用到它的是 GitHub 设置页和启动流程，跟宿主没关系。
 
         def _on_startup_rate_check(self, result):
             """启动时那一次凭据校验的结果（只在真的有授权包时才走到）。
@@ -331,8 +311,6 @@ try:
             elif error_type == "auth":
                 # logout 把授权包（含老格式的 token 键）、rate、user 一次清干净
                 self.githubAPI.logout(self.settings)
-                # useful=False 是给托盘 tooltip 的信号：凭据已经不能用了，
-                # 那句话会直接告诉用户「去设置面板重新登录」
                 self.settings["github"]["useful"] = False
                 try:
                     self.logger.warning("GitHub 登录已过期，请重新登录")
@@ -345,13 +323,6 @@ try:
             self.settings["theme"] = 1 if theme else 0
             self.apply_theme()
 
-        # ==================== settings 读写 ====================
-        # settings.json 的读写统一走这里：
-        #   写 → 临时文件 + os.replace 原子替换（不会留下写了一半的文件）
-        #   读 → 失败时原件备份到 BML/badSettings/，再回退默认值
-        # ── 设置：实现在 src/utils/settings.py（L0 基层），这里只留入口 ──
-        # 宿主对设置只剩两件事：什么时候读、什么时候写。校验/合并/原子替换/
-        # 损坏备份/清理临时文件都在那个类里。
 
         @property
         def defsettings(self):
@@ -417,8 +388,6 @@ try:
                     "插件已重载：%d 个加载成功%s"
                     % (len(ok), "，%d 个失败（已标注停用）" % len(bad) if bad else ""),
                     name="Plugin")
-                # 界面不必在这里逐个收拾：这批结束时统一发一次 plugins_changed，
-                # 语言 / 样式 / 托盘 / 页面各自挂在它上面按注册表对账。
                 return infos
             except Exception:
                 self.logger.error("重载插件失败：\n" + traceback.format_exc(limit=6),
@@ -491,9 +460,6 @@ try:
                 with open(getPath(f"src/resources/styles/{theme_file}"), "r", encoding="utf-8") as f:
                     qss = f.read()
 
-                # 扩展加的样式片段（core.qss）：接在主题文件**后面**，同名选择器
-                # 以靠后的为准 —— 插件能盖内置样式，而不必去改主题文件。
-                # theme 为 None 表示两套主题都加，否则按当前是不是浅色筛。
                 extra = [e.qss for e in registry.entries("core.qss")
                          if e.get("theme") is None
                          or bool(e.get("theme")) == is_light]
@@ -561,9 +527,6 @@ try:
                 if event.type() == QEvent.WindowStateChange:
                     if not self.isMinimized():
                         self._last_window_state = self.windowState()
-                        # 同步最大化/还原按钮图标。
-                        # 不依赖 nativeEvent（PySide6 下 eventType 是 QByteArray，
-                        # Windows 消息分支不可靠），Qt 自身的窗口状态变化一定触发这里。
                         try:
                             tbt = self.main.top.tbt_max
                             maximized = self.isMaximized()
@@ -627,8 +590,6 @@ try:
                 self.layout.addWidget(self.stren, 0)
 
                 self.root.logger.debug("init QW.windowL.main")
-                # 左栏导航按钮组在这里注入：页容器要往导航栏加按钮，但不该顺着
-                # parent/root 往上摸 —— 显式传下去，「谁给谁」就写在这一行里。
                 self.main = self.Main(self, self.root, nav=self.left.pagebtns)
                 self.layout.addWidget(self.main, 1)
 
@@ -637,13 +598,8 @@ try:
 
                 self.floatingStack.raise_()
 
-                # 叠加浮层：GitHub 设置页、游戏管理、下载列表都由 core.overlays
-                # 登记、用的时候现建（见 pages/githubSetting.py、dlList.py）——
-                # 窗口不认识这些类，也不替它们保管实例。
                 self.floatingOverlay = FloatingOverlay(self)
 
-                # 浮层/栈请求在这里落地：请求方只管发信号，
-                # 挂载点（叠加层还是栈层）由窗口自己决定
                 _sig = self.root.signals
                 _sig.connect("overlayRequested", self.floatingOverlay.add_page)
                 _sig.connect("overlayClosed", self.floatingOverlay.pop_page)
@@ -674,9 +630,6 @@ try:
                 """
                 拦截 Windows 原生消息
                 """
-                # 判断是否是 Windows 消息
-                # PySide6: eventType 是 QByteArray（b"windows_generic_MSG"）；PyQt5 是 str。
-                # 直接比较 str 在 PySide6 下恒为 False，导致整个分支（含最大化检测）失效。
                 if eventType in (b"windows_generic_MSG", "windows_generic_MSG"):
                     # PySide6: message 已是 int（内存地址）；PyQt5 是 sip.voidptr，int() 两者通用
                     msg = ctypes.wintypes.MSG.from_address(int(message))
@@ -890,8 +843,6 @@ try:
 
                     def mouseReleaseEvent(self, event):
                         if event.button() == Qt.LeftButton:
-                            # 用 drag_end 的返回值区分单击/拖动：它返回「本次是否真的移动过」。
-                            # 不能改读 _drag_moving——drag_end 里已经把它清成 False 了。
                             if self.root.window._drag_pressed and not self.root.window.drag_end(event):
                                 self.parent.fold()
                         # 松开时鼠标仍在控件上：不论左右键都回到悬停的食指手
@@ -1198,9 +1149,6 @@ try:
                             self.init_ui()
                             bus.bind(self)
                             self.clicked.connect(self.root.window.openGithubSetting)
-                            # refreshed / authChanged 仅更新 tooltip，不触发后台请求；
-                            # authExpired 同理 —— 登录过期后 tooltip 也该立刻变成
-                            # 「登录已失效，请重新登录」，不必等用户 hover 回来
                             self.root.githubAPI.refreshed.connect(self._update_tooltip)
                             self.root.githubAPI.authChanged.connect(self._update_tooltip)
                             self.root.githubAPI.authExpired.connect(self._update_tooltip)
@@ -1216,8 +1164,6 @@ try:
 
                         def _update_tooltip(self):
                             """仅更新 tooltip 文本，不触发网络请求。"""
-                            # 以内存里的授权包为准（settings 里那份是加密的，
-                            # 而且刷新出来的新包可能还没落盘）
                             has_auth = self.root.githubAPI.hasToken()
                             live_rate = self.root.githubAPI.rate
                             rate = self.root.settings["github"]["rate"]
@@ -1247,8 +1193,6 @@ try:
                                 rate["search"] if rate["search"].get("reset") else live_rate["search"]
                             )
 
-                            # useful is False 优先：「凭据已经不能用了」比「未登录」
-                            # 多说一句话，用户才知道下一步该去点登录
                             if self.root.settings["github"]["useful"] is False:
                                 key = "core.github.token.error"
                             elif not has_auth:
@@ -1291,8 +1235,6 @@ try:
                             self.shown = True
                             self.hide()
                             self._active_state = None
-                            # taskP 周期驱动：job 在 QThTimer 共享子线程检查任务表，
-                            # 仅状态变化时 emit 回主线程刷新 UI——主线程零轮询、跨线程消息最少
                             self._dl_timer = QThTimer.taskP(
                                 1000, self._check_state, [lambda v: self._apply_visible(v)]
                             )
@@ -1402,8 +1344,6 @@ try:
                                                 # 插件页没有 btn 属性，按钮只归装配方管）
                         self._page_keys = {}    # core.pages 的 key -> (page, btn)，对账用
                         self.init_wid()
-                        # 默认页由 core.pages 里 default=True 的那条决定；
-                        # 没有标记（或注册表为空）时退回第一个。
                         default = self.default_page or (self.pages[0] if self.pages else None)
                         if default is not None:
                             default_btn = self._page_btn(default)
@@ -1425,9 +1365,6 @@ try:
                         self.right = self.Right_(self,self.root)
                         self.layout.addWidget(self.right,0)
 
-                        # 宿主体交给注册器：页面据此取三栏容器，不必再顺着
-                        # parent.parent 猜「我的祖父有三栏」。这也是插件页能独立
-                        # 构造的前提 —— 它只认注册表里的具名条目，不认窗口结构。
                         registry.declare("core.shell", registrant="core",
                                          fields=("init",),
                                          required=("init",),
@@ -1435,18 +1372,9 @@ try:
                                          doc="宿主体（三栏页容器）：left / main / right")
                         registry.provide("core.shell", "core.shell.workspace", self)
 
-                        # 页面本身不在这里登记：各页面模块在自己末尾往 core.pages
-                        # 加条目（契约声明在 pages/builtin.py），装配方只负责构建 ——
-                        # 「有哪些页面」不归 main.py 管，加页面也不动这里。
-                        # 属性名（start/download/game/setting）仍不是内部私有的：
-                        # on_start/java.py 按 key 取到 Start 后调它的具名入口
-                        # （java_show_progress / java_finish），registry.bind 回填的
-                        # 产物也用这些名字，改名要连带一起改。
                         self.default_page = None
                         self.sync_pages()
 
-                        # 插件集合一变就对账：卸掉一个带页面的插件，它的按钮与
-                        # 三栏控件不能留在界面上（原先要重启才干净）。
                         events.on("plugins_changed", self.sync_pages)
 
                     @staticmethod
@@ -1470,8 +1398,6 @@ try:
                         keys = [e.key for e in want]
                         sigs = {e.key: self._page_sig(e) for e in want}
 
-                        # 先摘：建过、但现在不在注册表里的（插件被卸了），
-                        # 以及同 key 换了提供者的（覆盖加回退）
                         for key in [k for k in self._page_keys if k not in keys]:
                             self._drop_page(key)
                         for key, built in list(self._page_keys.items()):
@@ -1490,20 +1416,11 @@ try:
 
                     def _build_page(self, e, index):
                         """建一页并插到 index（左栏按钮、三栏控件、注册表产物一起）。"""
-                        # icon 用 get：契约里它是可选的（required 只要 init/title），
-                        # 直接 e.icon 会让「插件页面没配图标」炸掉整个装配循环 ——
-                        # NavBtn 本来就接受 None。
                         btn = self.nav.add_btn(e.title, e.get("icon"))
                         page = e.init(Box(parent=self, entry=e, btn=btn))
-                        # 这两张表归装配方维护，不由页面自己追加 ——
-                        # 插件页面不走内置的 Page 基类，靠自己就会漏。
-                        # btns 装的是左栏按钮（内置页面上 pages[i].btn is btns[i]）。
                         self.pages.insert(index, page)
                         self.btns.insert(index, btn)
                         self._page_keys[e.key] = (page, btn, self._page_sig(e))
-                        # 装配方对页面只有两条要求：按钮能切过去、内容能摆出来。
-                        # 三栏页自己实现 changePage()（内置页都继承 pages.Page）；
-                        # 实现不了的就当「整页控件」——塞进主栏栈，切到它就完事。
                         if (not callable(getattr(page, "changePage", None))
                                 and getattr(page, "main", None) is None):
                             self.main.addWidget(page)
@@ -1625,9 +1542,6 @@ try:
 
                 self.menu.addSeparator()  # 添加分隔线
 
-                # 扩展项（core.tray.menu）：插件自己给 QAction，托盘只负责摆位置。
-                # 它们连同兜底那条分隔线由 reload_plugin_items() 维护 ——
-                # 插件卸载后要把它的项摘掉，不能建好就不管。
                 self._plugin_actions = []
                 self._plugin_sep = self.menu.addSeparator()
 

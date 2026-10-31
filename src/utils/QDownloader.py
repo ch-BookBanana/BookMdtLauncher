@@ -71,16 +71,9 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal
 from .path_utils import getPath
 
 
-# 默认 User-Agent：统一使用下载工具 UA（curl 风格）。
-# 部分站点按 UA 做反爬白名单，python-requests / 浏览器 UA 会被 403，
-# 下载工具 UA 可正常放行；对 GitHub 等其他源无副作用。
 _DEFAULT_USER_AGENT = "curl/8.5.0"
 
 
-# ==================== SSL 证书验证容错 ====================
-# Watt Toolkit（Steam++）等加速器会注入自签根证书，Python 的 certifi 不信任，
-# 导致 SSLError: CERTIFICATE_VERIFY_FAILED。默认走证书验证（安全），
-# 遇 SSLError 自动降级为 verify=False 重试一次并抑制 InsecureRequestWarning。
 def _ssl_retry_request(sess, method, url, **kwargs):
     """带 SSL 降级重试的请求。正常环境走证书验证，证书异常时降级 verify=False。"""
     try:
@@ -306,12 +299,6 @@ class QDownloader(QObject):
         self._thread = QThread()
         self.moveToThread(self._thread)
         self._thread.started.connect(self._run)
-        # finished / cancelled 均需退出线程并注销任务。
-        # quit 用 DirectConnection：信号在下载线程发射，若默认 AutoConnection 会
-        # 排队到主线程事件循环，而持有方可能在主线程阻塞等待本线程退出（wait），
-        # 导致 quit 永远处理不到、线程无法退出，随后销毁运行中的 QThread 崩溃。
-        # QThread::quit 线程安全，可在任意线程直接调用。
-        # 删除对象统一由持有方（JavaDownloadFlow）在 wait_thread 确保线程退出后执行。
         self.finished.connect(self._thread.quit, Qt.DirectConnection)
         self.finished.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
         self.cancelled.connect(self._thread.quit, Qt.DirectConnection)
@@ -419,16 +406,12 @@ class QDownloader(QObject):
         """
         self._is_cancelled = True
         self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
-        # 打断在途网络读：不这么做的话，分片线程要一直阻塞到读超时（60 秒）
-        # 才看得到取消标志，cancel() 也就跟着卡同样久。
         self._interrupt_inflight()
         stopped = True
         if self._thread.isRunning():
             stopped = self._thread.wait(timeout)
         if stopped:
             self._cleanup(keep_state=False)
-        # 线程从未启动（未 start 即 cancel）：finished/cancelled 信号不会发射，
-        # 需要手动注销，避免僵尸任务残留在注册表中
         unregister_task(self.task_id)
         return stopped
 
@@ -602,16 +585,11 @@ class QDownloader(QObject):
                                               stream=True, timeout=10)
                     try:
                         resp.raise_for_status()
-                        # 只接受 206：返回 200 说明服务器忽略了 Range（不支持分块/续传），
-                        # 会被 _prepare 直接拒绝。这类源无视 Range 全量推数据、测速虚高，
-                        # 若不在这里剔除，它会赢下竞速再让整次下载以"不支持断点续传"失败。
                         if resp.status_code != 206:
                             raise ValueError("no range support")
                         for chunk in resp.iter_content(chunk_size=65536):
                             if self._is_cancelled or _ABORT_EVENT.is_set():
                                 break
-                            # 首个分片校验 zip 魔数：有的源对不存在的文件返回
-                            # 206 + HTML 错误页，只查状态码挡不住。
                             if got == 0 and chunk and chunk[:2] != b"PK":
                                 raise ValueError("not a zip payload")
                             got += len(chunk)
@@ -623,8 +601,6 @@ class QDownloader(QObject):
                 if got > 0 and cost > 0:
                     speed = got / cost
             except Exception:
-                # 源不可用（404/超时/TLS/Range 不支持/内容异常）不中断竞速，
-                # 但要上报给上层记录，否则死链会被静默跳过、只剩慢源可用却毫无提示。
                 speed = -1.0
             with lock:
                 speeds[url] = speed
@@ -679,8 +655,6 @@ class QDownloader(QObject):
                 self.cancelled.emit()
                 return
 
-            # 总大小一确定就立刻广播一次：块还没开始下时界面也知道文件多大，
-            # 不再停在“0 B”上，避免误以为下载卡死。
             self.progress.emit(0, self.total_size)
 
             # 创建临时目录，加载断点状态，初始化每块字节进度
@@ -705,12 +679,8 @@ class QDownloader(QObject):
                 futures = {executor.submit(self._download_block, sess, idx): idx for idx in pending}
                 pending_futures = set(futures.keys())
 
-                # 主下载线程每 1 秒轮询：遍历各分线程的字节进度并汇总为总进度，
-                # 同时节流写 download.json，供界面展示与下次续传
                 while pending_futures:
                     if self._is_cancelled:
-                        # 先通知界面，再在下面 finally 里等分片收尾 —— 顺序不能反，
-                        # 否则界面要等 worker 退出（最坏是读超时）才有反应。
                         self.cancelled.emit()
                         break
                     done_set, pending_futures = wait(pending_futures, timeout=1.0)
@@ -743,13 +713,6 @@ class QDownloader(QObject):
                             self.finished.emit(False)
                             return
             finally:
-                # 取消时 wait=True：本线程退出必须等于「分片都停了」，因为
-                # cancel() 正是靠 _thread.wait() 判断能不能清理临时目录。
-                # wait=False 的话它一看到本线程退出就去删目录，而分片仍在往
-                # 里头写 —— 已取消的下载反而会留下删不干净的临时文件。
-                # 分片线程阻塞在 recv 上时无法被外部唤醒（socket.close() 不会
-                # 中断阻塞读），所以这里的等待上界是读超时；等不及则由
-                # cancel() 的 timeout 判超时、保留临时文件供下次续传。
                 executor.shutdown(wait=self._is_cancelled,
                                   cancel_futures=True)
 
@@ -781,8 +744,6 @@ class QDownloader(QObject):
             if self.proxy:
                 sess.proxies.update({"http": self.proxy, "https": self.proxy})
 
-            # 探测只发一次请求（旧逻辑 HEAD + 二次 GET 确认最坏要 3 次往返，
-            # 高延迟线路下就是“开始下载后十几秒进度不动”的主因）
             supports_range = False
             try:
                 resp = _ssl_retry_request(sess, "get", self.url,
@@ -913,11 +874,6 @@ class QDownloader(QObject):
             # 暂停时阻塞等待（resume 或 cancel 时唤醒），不返回失败
             self._pause_event.wait()
 
-            # stream=True 的响应必须显式 close 才会把连接还给连接池；中途放弃
-            # （取消 / 断流重试 / raise_for_status 失败）时 iter_content 不会读到
-            # 结尾，不关就漏一个连接。8 线程 × 重试足以耗尽默认 pool_maxsize=10，
-            # 表现为下载后段变慢或卡住重连。`_race_sources` 的探测分支出于同一
-            # 原因也是显式 close 的（见该函数注释）。
             resp = None
             try:
                 local_headers = self.headers.copy()
@@ -954,10 +910,6 @@ class QDownloader(QObject):
                 finally:
                     with self._lock:
                         self._active_responses.pop(block_idx, None)
-                # 连接被提前关掉时（对端断开、中间设备掐断、或有人从外部 close
-                # 了这个响应）iter_content 不抛异常、静默结束，上面的 for 循环
-                # 照常走完。不校验字节数就 return True 的话，没下完的块会被当成
-                # 完成写进 completed_blocks，到合并阶段才发现块不完整。
                 if downloaded < total_block:
                     if self._is_cancelled or _ABORT_EVENT.is_set():
                         return False

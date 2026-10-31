@@ -42,8 +42,6 @@ from .QDownloader import QDownloader
 
 _log = logging.getLogger("Main.JavaDownload")
 
-# i18n：日志文本来自语言文件（main.py 初始化 langer 后注入翻译函数）。
-# 未注入时回退为 key 本身，日志仍可读、不影响运行。
 _tr_func = None
 
 
@@ -80,27 +78,14 @@ JAVA_ROOT = getPath(os.path.join("BML", ".Java"))
 JAVA_INFO_PATH = os.path.join(TMP_DIR, "javaDownload.json")
 
 DEFAULT_MAJOR = 17
-# Adoptium 在 17.0.20 之后把构建号命名从 "17.0.20+8" 改成了 "17.0.20.1+1"，
-# 国内镜像只同步新命名（旧命名一律 404），因此这里必须跟着用新命名。
 DEFAULT_VERSION = "17.0.20.1"
 DEFAULT_BUILD = 1
 
-# 国内镜像前缀（清华镜像路径首字母为大写 Adoptium，须一致）。
-# 下列镜像均已用 GET + Range 实测过（HEAD 会得到假阳性，不能作数）：
-#   清华、南大（均返回 206 + application/zip，且首字节为 zip 魔数 PK）
-# 已排除的镜像及原因（勿再加入）：
-#   中科大（HEAD 200 但 GET 一律 403）
-#   兰州大学（忽略 Range 返回 200 全量，会被 _prepare 判为不支持续传）
-#   山东大学、东莞理工（返回 206 但内容是 HTML 错误页）
-#   华为云（前端 SPA，任何路径都返回同一个页面，无法确认文件是否存在）
 _MIRROR_PREFIXES = (
     "https://mirrors.tuna.tsinghua.edu.cn/Adoptium",
     "https://mirror.nju.edu.cn/adoptium",
 )
 
-# GitHub 加速代理（第三方，仅作国内镜像全部失败时的兜底）。
-# 实测远慢于镜像（本机约 40~470 KB/s），正常情况下不会赢得竞速；
-# 且返回内容为第三方转发，不如教育机构镜像可信，故排在镜像之后。
 _GH_PROXIES = (
     "https://ghproxy.net/",
     "https://gh-proxy.com/",
@@ -393,8 +378,6 @@ class JavaDownloadFlow(QObject):
         self.version = info.get("version") or self.version
         self.major = info.get("major") or self.major
         self.build = info.get("build") or self.build
-        # 源列表由代码生成，不复用 json 里的旧快照——否则地址或文件命名失效后
-        # 会永远沿用那份死链列表。
         self.urls = _build_urls(self.major, self.version, self.build)
         self.target_dir = os.path.join(JAVA_ROOT, self.version)
 
@@ -473,9 +456,6 @@ class JavaDownloadFlow(QObject):
 
     def _on_download_finished(self, ok):
         _log.info(_tr("core.log.info.javaDlFinished", ok, self._is_cancelled))
-        # 无论成功失败都释放并删除 QDownloader。
-        # 必须先 wait_thread 确保下载线程完全退出，否则销毁仍运行的 QThread
-        # 会触发 Qt 致命错误（QThread: Destroyed while thread is still running）。
         dl = self._downloader
         self._downloader = None
         if dl is not None:
@@ -517,15 +497,7 @@ class JavaDownloadFlow(QObject):
         thread.started.connect(worker.run)
         worker.progress.connect(self._emit_extract_progress)
         worker.finished.connect(self._on_extract_finished)
-        # 关键：DirectConnection 让 thread.quit 在 worker 线程直接调用（QThread.quit 线程安全），
-        # 若用默认 AutoConnection，quit 会排队到主线程事件循环，而 _on_extract_finished
-        # 先入队并阻塞主线程执行 thread.wait()，quit 永远处理不到 → 线程无法退出 →
-        # 之后销毁仍在运行的 QThread 崩溃。
         worker.finished.connect(thread.quit, Qt.DirectConnection)
-        # 不用 worker.deleteLater/thread.deleteLater 自动连接：
-        # worker 的 deleteLater 排队到即将退出的事件循环会被丢弃；
-        # thread 的 deleteLater 与 Python 引用释放存在跨线程竞态。
-        # 线程退出与对象销毁统一由 shutdown()/_on_extract_finished 显式管理。
         self._extract_worker = worker
         self._extract_thread = thread
         thread.start()

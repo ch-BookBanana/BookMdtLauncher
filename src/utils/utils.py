@@ -202,8 +202,6 @@ def _cache_md_images(html, base_url, session, cache_dir, on_image=None):
             pass
         return full, None
 
-    # 收集所有远程图片 URL；已缓存的直接用本地图，未缓存的先占位 + 后台下载。
-    # 共享 githubAPI 的 session（trust_env=True），自动尊重系统代理（VPN/加速器）。
     remote = []
     for s in re.findall(r'<img\b[^>]*\bsrc\s*=\s*["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
         s = s.strip()
@@ -270,8 +268,6 @@ def _cache_md_images(html, base_url, session, cache_dir, on_image=None):
 
     html = re.sub(r'<img\b[^>]*>', _replace, html, flags=re.IGNORECASE)
 
-    # 后台下载未缓存图片：每成功一张回调 on_image(full, local)。
-    # 回调在线程池线程触发，调用方需自行切回主线程（QThTimer 事件模式天然线程安全）。
     if pending and session is not None and on_image is not None:
         def _run():
             max_workers = min(len(pending), 8)

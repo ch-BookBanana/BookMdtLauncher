@@ -40,11 +40,6 @@ from .path_utils import getPath
 class Langer:
     def __init__(self, *, settings=None, logger=None, winreg=None,
                  overrides=None, revision=None, default_lang="en-US"):
-        # 全部注入：次基层也不往上依赖，更不 import 插件层。
-        # overrides 是「某个语言有哪些插件覆盖项」的来源（宿主把
-        # pluginLoader.plugin_langs 递进来），缺省就没有覆盖。
-        # revision 是插件语言包那侧的版本号来源（宿主递 pluginLoader.langs_revision）：
-        # 光看语言名分不出「插件集合变了没有」，而插件语言包是会盖内置键的。
         self._settings = settings
         self._logger = logger
         self._winreg = winreg
@@ -128,8 +123,6 @@ class Langer:
         if sig == self._loaded and getattr(self, "langs", None):
             return
         self._loaded = sig
-        # 记下当前语言：调用方常用 load(self.current_lang) 做「按现在这门语言重读」，
-        # 不更新的话，切到别的语言之后再重载就会被拽回启动时那门语言。
         self.current_lang = lang
 
         lang_path = getPath(f"src/lang/{lang}.json")
@@ -138,10 +131,6 @@ class Langer:
         try:
             with open(lang_path, "r", encoding="utf-8") as f:
                 self.langs = json.load(f)
-            # 插件语言包覆盖内置同名键（插件想改哪句文案，直接在自己语言包里
-            # 写那个键）。**来源是注入的那个函数**，不是从这里 import 插件层 ——
-            # 原先那行是「次基层 ← 插件层」的反依赖：插件层一动，语言服务就得
-            # 跟着重建，而语言服务重建又会牵动整个界面。
             if self._overrides is not None:
                 try:
                     self.langs.update(self._overrides(lang) or {})
@@ -164,8 +153,6 @@ class Langer:
             self._log("warning", f"Failed to load default language file {default_lang_path}: {e}")
             self.default_langs = {}
 
-        # 广播语言变化：各控件的 langing 已自行接在总线上，
-        # 延到事件循环里统一刷新，避免阻塞本次语言文件的加载
         QTimer.singleShot(0, bus.set_lang)
         self._log("info", self.get("core.init.load"))
 

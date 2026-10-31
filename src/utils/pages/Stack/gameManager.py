@@ -78,8 +78,6 @@ class GameManager(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        # 左栏：功能菜单。外观与设置页左栏是同一套 —— 同一个 NavBtn、同一个
-        # Scroll、同样用 QButtonGroup 管互斥，所以两边看起来就是一套东西。
         self.left = QWidget()
         self.left.setFixedWidth(NavBtn.WIDTH)
         self.left.setAttribute(Qt.WA_StyledBackground, True)
@@ -182,8 +180,6 @@ class GameSettings(Scroll):
     MAX_WIDTH = 600     # 内容列最大宽度，与设置页 Page 的 max-width 一致
 
     def __init__(self, game, parent=None):
-        # 上下留 10：和设置页正文那条一致（那边是外层 layout 给的 0,10,0,10；
-        # 这一页整页就是滚动区，所以 10 落在 Scroll 自己的边距上）
         super().__init__(parent, margins=(30, 10, 30, 10), spacing=0,
                          content_align=Qt.AlignHCenter)
         self.main.setMaximumWidth(self.MAX_WIDTH)
@@ -201,23 +197,15 @@ class GameSettings(Scroll):
         self.line.setProperty("wid", "line")
         self.scroll_layout.addWidget(self.line, 0)
 
-        # 区块从注册表取：加一个区块 = 写一个 QWidget 子类 + 在本文件 register()
-        # 里加一条。登记写在这里的话，init_wid 每构建一次就跑一次，
-        # 第二次构建会直接撞「已存在条目」。
         for e in registry.entries("core.gameSettings.sections"):
             wid = e.init(Box(parent=self, entry=e))
             f = _FIELDS.get(e.key.replace("/", "."), {})
             setattr(self, f.get("attr", ""), self.add(wid, f.get("spacing", 0)))
 
-        # 顶部信息填真实数据（图标/名称/分组/版本），并订阅实例事件：
-        # 本页后续的管理项都以 self.game 为操作对象，改名时必须跟着换。
-        # 启动器状态同理：本页实例一跑起来，顶部那排按钮就得禁掉。
         self.refresh()
         events.mdtManager.on_game_changed.connect(self._on_game_changed)
         events.launcher.game_started.connect(self._sync_running)
         events.launcher.lifecycle_finished.connect(self._sync_running)
-        # Java 候选表归 javaManager 扫（子线程 + TTL 缓存）：本页开着时跟着看，
-        # 出栈就 unwatch（见 on_close），不常驻扫盘
         javaManager.watch()
         javaManager.changed.connect(self._on_java_changed)
 
@@ -256,8 +244,6 @@ class GameSettings(Scroll):
             if data["game"] != self.game:
                 return
         elif etype == "deleteGame":
-            # 实例被删（本页删的，或目录在外面没了）：本页已无操作对象，直接出栈。
-            # 叠在上面的浮层不属于本页（Qt 上没有父子关系），由删除流程自己出叠。
             if data["game"] == self.game:
                 events.emit("stackClosed", self, True)
             return
@@ -398,8 +384,6 @@ class GameSettings(Scroll):
             self.name.setStyleSheet("font-size: 22px;")
             self.info.addWidget(self.name, 0)
 
-            # 版本行：分组 ･ 版本号。分组是这个实例的归属信息，摆在版本号前面；
-            # 中间那个点只是分隔符，压成灰色，不跟两边的字抢眼。
             self.versw = QWidget()
             self.versw.setFixedHeight(30)
             self.vers_l = QHBoxLayout(self.versw)
@@ -426,8 +410,6 @@ class GameSettings(Scroll):
 
             self.layout.addSpacing(10)
 
-            # l2：操作按钮行（并排）。样式沿用左侧栏那套 wid="btn"，
-            # 只有删除是危险操作，单独压成红色。文案挂 property，切语言时统一刷。
             self.l2 = QHBoxLayout()
             self.l2.setContentsMargins(0, 8, 0, 0)
             self.l2.setSpacing(8)
@@ -519,8 +501,6 @@ class GameSettings(Scroll):
                 self.init_wid()
                 self.langing()
                 self.lighting(bool(events.settings.get("theme")))
-                # 接总线必须在控件建好之后：bus.bind 会立刻补一次 lighting，
-                # 那时 btn_close 还不存在，直接炸 AttributeError。
                 bus.bind(self)
 
             def init_wid(self):
@@ -555,10 +535,6 @@ class GameSettings(Scroll):
                 self.layout.addWidget(self.line, 0)
 
                 self.body = QWidget()
-                # 这里不能写 setStyleSheet("background: transparent")：
-                # 控件级样式表是「整棵子树」的规则，优先级还高于全局 qss，
-                # 会把弹层里所有子控件的底色一起压成透明（分组页的 color2 就是这么丢的）。
-                # body 与面板同源同色（都吃全局 QWidget 那条），不写也看不出接缝。
                 self.layout.addWidget(self.body, 1)
                 self.body_l = QVBoxLayout(self.body)
                 self.body_l.setContentsMargins(15, 0, 15, 15)
@@ -704,8 +680,6 @@ class GameSettings(Scroll):
                 editor = events.mdtManager.edit(self.game)
                 editor.rename(self._final_name)
                 if not editor.ok:
-                    # notFound / locked / ioError：实例没了或正被系统锁着，
-                    # 退回校验态已无意义，直接把失败摆在下边
                     self._final_name = None
                     self.input.setStyleSheet("border: 1px solid red;")
                     self.tip.setStyleSheet("font-size: 13px; color: red;")
@@ -740,8 +714,6 @@ class GameSettings(Scroll):
 
                 layout.addSpacing(10)
 
-                # 列表底：滚动区自己只画 viewport，颜色得由装在它里面的容器给，
-                # 这样滚动时才是一整块 color2，而不是底色与内容两层脱开
                 self.box = QWidget()
                 self.box.setProperty("wid", "color2")
                 self.box.setAttribute(Qt.WA_StyledBackground, True)
@@ -898,8 +870,6 @@ class GameSettings(Scroll):
         def __init__(self, parent=None):
             self.page = parent       # 所属的 GameSettings 页，实例名现取（改名后自动是新名）
             self._none = False       # 一个 Java 也没嗅到：第 0 项文案改挂「无可用 Java」
-            # 左侧标题走 Combo 那套 i18n，bus 的绑定也在 Combo.__init__ 里做完了；
-            # 那条链上 MRO 先命中这里的 langing，所以覆写时必须 super() 上去
             super().__init__(parent, "core.wid.pages.setting.launcher.java.select")
             self.combo.popupAboutToShow.connect(self.fill)
             self.combo.activated.connect(self._apply)
@@ -957,15 +927,11 @@ class GameSettings(Scroll):
                 else:
                     index = combo.findData(current)
                     if index < 0:
-                        # 记法变过（绝对 ↔ 相对），候选表里那条就是它：按真身对回来，
-                        # 免得同一个 Java 在列表里出现两次
                         for i in range(combo.count()):
                             if javaManager.sameJava(combo.itemData(i), current):
                                 index = i
                                 break
                     if index < 0:
-                        # 记录里的 Java 已不在候选里（卸载/换盘）：照样列出来，
-                        # 否则界面显示的选项跟 BML.json 里的实际值对不上
                         combo.addItem("v%s" % (javaManager.getJavaVersion(current) or "?"), current)
                         combo.setItemData(combo.count() - 1, current, Qt.ToolTipRole)
                         index = combo.count() - 1
@@ -978,8 +944,6 @@ class GameSettings(Scroll):
             combo = self.combo
             index = combo.findData(events.mdtManager.FOLLOW)
             if index >= 0:
-                # 没装 Java 时这条改挂「无可用 Java」，两种情况都复用设置页的词条；
-                # 「跟随全局」是本页独有的，设置页没有对应文案
                 key = ("core.wid.pages.setting.launcher.java.select.none" if self._none
                        else "core.wid.pages.gameManage.java.follow")
                 combo.setItemText(index, events.lang.get(key))
@@ -1002,8 +966,6 @@ class GameSettings(Scroll):
             else:
                 editor.java(data)
             if not editor.ok:
-                # notFound / invalidJava：实例没了或选中的 Java 已失效，
-                # 重填一遍把界面退回真实值，不留在假的选项上
                 self.fill()
 
         def langing(self):
@@ -1020,8 +982,6 @@ def register():
     registry.add("core.stacks", "core.gameManager",
                  init=lambda b: GameManager(b.game, b.parent), title="core.wid.pages.gameManager")
 
-    # 左栏那个「设置」功能页。它管的是**某个实例**，实例名从 GameManager
-    # 现取（b.parent.game）—— 容器里改了名，这里跟着换，不用自己同步。
     registry.add("core.gameManager.pages", "core.gameManager.settings",
                  init=lambda b: GameSettings(b.parent.game, b.parent), title="core.wid.pages.gameManager.settings")
 

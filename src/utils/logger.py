@@ -121,8 +121,6 @@ class Logger:
         main_logger.addHandler(file_handler_timestamp)
         main_logger.addHandler(file_handler_latest)
 
-        # 本 logger 自带三个 handler，不再向 root 冒泡：
-        # 否则任何一次 logging.basicConfig() 都会让每条日志重复输出一遍。
         main_logger.propagate = False
 
         self._loggers[self.base_logger_name] = main_logger
@@ -160,9 +158,6 @@ class Logger:
 
         if target_name not in self._loggers:
             logger = logging.getLogger(target_name)
-            # 子 logger 默认继承父 logger 的级别和 handler，无需额外配置
-            # 但如果需要单独控制级别，可以在此设置：
-            # logger.setLevel(logging.DEBUG)
             self._loggers[target_name] = logger
 
         return self._loggers[target_name]

@@ -135,8 +135,6 @@ class _Registrar:
 
 registrar = _Registrar()
 
-# ── v3：万物皆 BType（旧格式不再兼容，见 docs/plugin/13）──
-# `register` 直接是 v3 的入口（旧版 registrar("ns") 仍挂在 registrar 代理上做过渡）
 from .btypes import BPoint, BSignal, BType, BTypes, BValue  # noqa: E402
 from .btypes import register  # noqa: E402
 

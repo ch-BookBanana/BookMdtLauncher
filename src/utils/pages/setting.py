@@ -150,8 +150,6 @@ class Setting(Page):
             def __init__(self, parent=None, text=None,icon=None):
                 super().__init__(parent,text,icon)
                 self._secs = {}          # 容器 key → (控件, 签名)，对账用
-                # javaManager 是全局单例：这条线只接一次，回调读的永远是当前那份
-                # 控件（重建之后照样对）。接在 init_wid 里的话，每次重建会多接一条。
                 javaManager.changed.connect(lambda javas: self._t3_select_fill(javas))
                 self.init_wid()
 
@@ -190,8 +188,6 @@ class Setting(Page):
                 self._wire_java()
                 self.langing()
                 self.lighting(bool(events.settings["theme"]))
-                # 插件集合一变就对账：条目没了控件不能留着，重载后还得换成连着
-                # 新实例的那一份（见 sync_registry_parts）。
                 events.on("plugins_changed", self.sync_registry_parts)
 
             def _add_section(self, sec, items, index=None):
@@ -287,12 +283,6 @@ class Setting(Page):
                 self._t1_lang.combo.activated.connect(lambda: events.lang.load(self._t1_lang.combo.currentData()) if self._t1_lang.combo.currentIndex() != -1 and not self._t1_lang.combo.currentData() == events.settings["language"] else None)
 
             def _wire_general(self):
-                # 关闭窗口时：未设置（= 每次点 × 都弹一层问，见 main.py 的 close_()）
-                # / 隐藏到托盘 / 退出启动器。写的就是那个 closeByTray（浮层里那条
-                # 「保存到设置」写的是同一个键，两处看到的是同一件事）。
-                # 「未设置」只在当前真的是 None 时露面：一旦选定了做法，这个选项就
-                # 不再出现（想回到「每次都问」得手改 settings.json —— 这是有意的，
-                # 不然那个选项会变成一个随时能把用户的选择抹掉的按钮）。
                 def _t2_close_fill():
                     combo = self._t2_close.combo
                     value = events.settings["closeByTray"]
@@ -314,9 +304,6 @@ class Setting(Page):
                     lambda: _t2_close_pick(self._t2_close.combo.currentData()))
 
             def _wire_java(self):
-                # 添加 Java：挂在 Java 那一组的末尾（尺寸跟游戏管理那排按钮一致）。
-                # 复合控件（QWidget + 布局 + 按钮），不是标准条目，仍手写 ——
-                # 但挂进容器（sec_java），不再往页面上平铺。
                 self._t3_add_row = self.sec_java.add_wid(QWidget(), 20)
                 self._t3_add_row_layout = QHBoxLayout(self._t3_add_row)
                 self._t3_add_row_layout.setContentsMargins(0,0,0,0)
@@ -367,8 +354,6 @@ class Setting(Page):
                 combo.setCurrentIndex(combo.findData(select))
 
             def _t3_add_java(self, java):
-                # 记进候选表（javaManager 与两个页面的下拉框都读这一份）：先剔掉指向同一个
-                # java.exe 的旧条目（写法不同也算同一个），再按路径排序
                 java = javaManager.resolve(java)
                 javas = [item for item in list(events.settings["javaPaths"])
                          if item and not javaManager.sameJava(item[0], java)]
@@ -560,8 +545,6 @@ def register():
     core.setting.plugins（Plugin.add_setting 的默认分组）。本页不认识任何具体
     条目，加减一项都不用动这里。
     """
-    # 设置页自己的子页（左栏 -> 设置 -> 各分组页），还是 v2 的页面注册表；
-    # 页面这套迁移是另一件事，和设置项无关。
     registry.add("core.setting.pages", "core.setting.launcher",
                  init=lambda b: b.parent.Launcher(b.parent, b.title, b.icon),
                  title="core.wid.pages.setting.launcher", icon=ACT_UNITS)
@@ -587,8 +570,6 @@ def register():
     def _combo(ctx):
         return Combo(ctx.parent, ctx.title)
 
-    # 标准条目：attr 是绑回 Launcher 的名字，下面的行为绑定仍按这些名字取控件。
-    # 这几项的值都在宿主设置里，界面由本页手工接线（build 只负责把控件建出来）。
     group.get("core.setting.preferences").add(
         "core.setting.theme", title="core.wid.pages.setting.launcher.preferences.theme", default=False, build=_bool, attr="_t1_theme")
     group.get("core.setting.preferences").add(

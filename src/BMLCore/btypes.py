@@ -708,14 +708,6 @@ BTypes._types.update({
 })
 
 
-# ─────────────────────────── 取自己的注册点（register()）──
-#
-# register() 不带参数：当前 owner 自己的那个 BPoint。
-#     - 插件加载期（会话主人 = 插件 id）→ 插件自己的点
-#     - 宿主启动期（没有会话）→ core 的点
-# 自己的子点/条目都往它上面 add；宿主（core）手下登记的点作为它的子项，
-# 插件侧用 `register().get("core/tools")` 这样取 —— 名字是子项 key，
-# 不是"某个空间"的字符串路径，语法上也就不存在"往任意空间写"这个口子。
 _OWNER_POINTS = {}     # owner → 它自己的 BPoint
 
 
@@ -770,9 +762,6 @@ def unload(owner):
                 other.remove(owner, owner=owner)
             _OWNER_POINTS.pop(owner, None)
 
-    # 别处的点（尤其是宿主的 core/setting 这类）上也可能有他登记的条目：
-    # 插件把设置项挂进宿主的分组子点，卸载时同样得摘掉，不然界面上留着一个
-    # 连着已卸载实例的开关。
     for host_point in list(_OWNER_POINTS.values()):
         _unload_deep(host_point, owner, removed)
     return removed
@@ -787,15 +776,6 @@ def _unload_deep(point, owner, removed):
             _unload_deep(child, owner, removed)
 
 
-# ─────────────────────────── registrar(path)：装饰器语法 ───────────────────────────
-#
-# 装饰器专用：
-#     @registrar("settings$launcher$java$select_java.value_changed").connect()
-#     def aaa(value=None): ...
-#
-# 路径分隔：`$` / `&` / `#` 都当链分隔；最后一段可以是「条目.属性」，
-# 属性指向条目的成员（比如 BValue.value_changed → BSignal）。
-# 不带 @ 时也能当普通取用：registrar("core/log").info("…")。
 
 _CHAIN_SPLIT = re.compile(r"[$&#]")
 

@@ -49,8 +49,6 @@ def startup_resume_java(root):
         pass
     # 等待一秒后，切换"正在下载Java"并拉起 QDownloader 续传
     def _resume_once():
-        # 防重入：已有延续流程或 launcher 内置流程在下载时，不重复创建
-        # （相同 dest 的 QDownloader 会因 task_id 冲突抛错）
         if root.java_flow is not None:
             return
         try:
@@ -83,9 +81,6 @@ def begin_java_flow(root, resume=False):
     flow.start()
 
 
-# ==================== Java 下载流程的 UI 回调/辅助函数 ====================
-# 原为 main.py Main 类方法，拆分后改为模块级函数（第一个参数 root），
-# 通过 attach(root) 绑定为 Main 实例方法，保持 main.py 内 self._java_* 调用点不变。
 
 
 def _start_page(root):

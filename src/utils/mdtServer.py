@@ -19,18 +19,6 @@ import socket
 import struct
 import time
 
-# Mindustry 服务器信息通过 UDP discovery 协议获取（不是 TCP！）
-# 依据官方源码：core/src/mindustry/net/ArcNetProvider.pingHostImpl
-#   socket.send(new DatagramPacket(new byte[]{-2, 1}, 2, ...))
-# 服务器回包格式见 core/src/mindustry/net/NetworkIO.writeServerData()
-# （arc ByteBuffer，大端序）：
-#   [1B长度][UTF-8] 服务器名(max100)
-#   [1B长度][UTF-8] 地图名(max64)
-#   i32 人数  i32 波次  i32 版本build
-#   [1B长度][UTF-8] 版本类型("official"等)
-#   b 模式序号  i32 最大人数
-#   [1B长度][UTF-8] 描述  [1B长度][UTF-8] modeName
-#   i16 端口(0 时用默认 6567)
 
 
 class mdtServer:
