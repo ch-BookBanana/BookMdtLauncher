@@ -82,9 +82,10 @@ class _JavaManager(QObject):
         """
         self._watchers += 1
         self._last = None
-        self.scan()
+        self.scan()          # 第一趟完整扫：PATH / 注册表 / 常见目录都过一遍
         if self._poll is None:
-            self._poll = QThTimer.timer(self.POLL_MS, [self.scan])
+            # 之后只做轻量维护（剔失效 + 补 BML/.Java），不再每 5 秒扫盘
+            self._poll = QThTimer.timer(self.POLL_MS, [self.refresh])
 
     def unwatch(self):
         """取消关注：最后一个关注者离开后停掉轮询。"""
@@ -111,6 +112,77 @@ class _JavaManager(QObject):
             self._publish(result)
 
         QThTimer.task(0, job, result_callback=done)
+
+    # ==================== 轮询用的轻量维护 ====================
+    def refresh(self):
+        """维护候选表，不扫盘：剔掉失效路径，补上 BML/.Java 下新解出来的 Java。
+
+        与 scan() 的分工：scan() 是「发现系统里有哪些 Java」的完整扫描（启动时跑）；
+        refresh() 是「守着自己那份候选表别长毛」的增量维护（轮询用）——
+        每 5 秒遍历十几个常见目录和注册表纯属浪费，而变化其实只有两种：
+        路径失效、以及启动器自己解压到 BML/.Java 的新 JDK。
+        """
+        saved = (self.settings or {}).get("javaPaths") or []
+        if not saved:
+            return None          # 还没扫过，交给启动那趟 scan()
+
+        fresh = []
+        for item in saved:
+            try:
+                path = item[0]
+            except (TypeError, IndexError):
+                continue
+            # 失效的（文件没了 / 不是 java.exe）直接丢掉；别留一条点不开的选项
+            if not self.isJava(self.resolve(path)):
+                continue
+            if any(self.sameJava(path, kept[0]) for kept in fresh):
+                continue
+            fresh.append(list(item))
+
+        # 启动器自己的 Java 目录：下载/解压完就能自动出现在下拉框里
+        for java in self._javas_under(getPath('BML/.Java')):
+            path = self.record(java)
+            if any(self.sameJava(path, kept[0]) for kept in fresh):
+                continue
+            version = self.getJavaVersion(path)
+            if not version:
+                continue          # 认不出版本的目录不当候选（和 scan() 同一条标准）
+            fresh.append([path, version])
+
+        fresh.sort(key=lambda item: item[0].lower())
+        if fresh != [list(item) for item in saved]:
+            # 只有真变了才回写设置并发 changed：轮询不能每拍都惊动界面与存盘
+            try:
+                # 写回设置就够了：settings 的变更通知会触发宿主那边的防抖存盘
+                # （main._on_settings_changed → 500ms 后 saveSettings）
+                self.settings["javaPaths"] = fresh
+            except Exception:
+                pass
+            self._publish(fresh)
+        return fresh
+
+    def _javas_under(self, root, depth=3):
+        """在 root 下按「.../bin/java.exe」的布局找 java.exe（最多 depth 层）。
+
+        启动器把 JDK 解压成 BML/.Java/<版本>/bin/java.exe，层数固定且很浅；
+        用递归 os.walk 会顺带钻进 jmods 之类的目录，没必要。
+        """
+        found = []
+        if not os.path.isdir(root):
+            return found
+        try:
+            for dirpath, dirnames, _files in os.walk(root):
+                depth_now = dirpath[len(root):].count(os.sep)
+                if depth_now >= depth:
+                    dirnames[:] = []
+                    continue
+                candidate = os.path.join(dirpath, 'bin', 'java.exe')
+                if os.path.isfile(candidate):
+                    found.append(candidate)
+                    dirnames[:] = []          # 找到就够，别往这个 JDK 里面再钻
+        except Exception:
+            pass
+        return found
 
     # ---------- 版本获取：从 release 文件 ----------
     def _get_version_from_release(self, java_path: str) -> Optional[str]:
