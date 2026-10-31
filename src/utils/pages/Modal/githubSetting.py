@@ -33,6 +33,7 @@ BML/githubApp.json）。
 面板尺寸 520x365：它是浮在窗口上的小卡片，跟设置页那条 600px 正文列不是一个口径。
 """
 
+import os
 import time
 
 from PySide6.QtCore import QSize, Qt, QTimer
@@ -510,7 +511,34 @@ class GithubSetting(QWidget):
                         self.tokenStatus.setText(events.lang.get("core.github.settings.tokenStatus.none"))
                         self.headIcon.clear()
 
+                def _avatar_cache_file(self):
+                    """头像缓存文件：固定一个路径，放 BML/.tmp。
+
+                    不按 url 哈希命名：换账号/换头像就会留下一个新文件，
+                    攒久了全是没人用的旧头像。固定名 + 内容变了才覆盖，
+                    盘上永远只有一张最新的。
+                    """
+                    folder = getPath("BML/.tmp")
+                    os.makedirs(folder, exist_ok=True)
+                    return os.path.join(folder, "github_avatar.png")
+
                 def _load_avatar(self, url):
+                    """头像：先读本地缓存，没有才联网，拿到就存一份。
+
+                    用户名和头像地址本来就存在 settings["github"]["user"] 里；
+                    这里补的是图片本身 —— 每次开面板都去 avatars.githubusercontent.com
+                    抓一遍既慢又浪费，断网时还会变成空白。
+                    """
+                    cache = None
+                    cached_data = None
+                    try:
+                        cache = self._avatar_cache_file()
+                        if os.path.isfile(cache):
+                            with open(cache, "rb") as f:
+                                cached_data = f.read()
+                    except Exception:
+                        cache = None            # 缓存不可用就别挡着联网这条路
+
                     def _fetch():
                         # 复用 githubAPI 的 session：走系统代理 + 合并 CA bundle
                         # （裸 requests.get 无法访问 avatars.githubusercontent.com）
@@ -527,7 +555,7 @@ class GithubSetting(QWidget):
                         except Exception:
                             pass
                         return None
-                    def _set_round(data):
+                    def _apply_avatar(data):
                         # 网络任务回来时面板可能已经关了（控件被 deleteLater 掉）：
                         # 先确认控件还活着，否则 setPixmap 会撞 already deleted。
                         if not isValid(self.headIcon):
@@ -551,7 +579,22 @@ class GithubSetting(QWidget):
                         painter.drawPixmap(offset_x, offset_y, scaled)
                         painter.end()
                         self.headIcon.setPixmap(round_pix)
-                    QThTimer.task(0, lambda e,_url=url: _fetch(), result_callback=_set_round, dedicated=True)
+                        # 画成功了才存原始字节：解码不了的图不值得缓存。
+                        # 内容没变就不写 —— 缓存只在「头像真的换了」时才更新，
+                        # 免得每开一次面板都无谓地写盘。
+                        if cache and data != cached_data:
+                            try:
+                                with open(cache, "wb") as f:
+                                    f.write(data)
+                            except Exception:
+                                pass        # 磁盘写不进去不影响这次显示
+                    # 缓存命中就立刻画出来（面板一打开就有头像，不用等网络），
+                    # 但**不 return** —— 后台照样拉一次最新的，回来再换上。
+                    # 这是「即时显示 + 最终一致」：断网时停在缓存那张，联网时自动更新。
+                    # （必须放在 _apply_avatar 定义之后，它是个嵌套函数。）
+                    if cached_data:
+                        _apply_avatar(cached_data)
+                    QThTimer.task(0, lambda e,_url=url: _fetch(), result_callback=_apply_avatar, dedicated=True)
 
                 def _update_token_section(self):
                     if events.githubAPI.hasToken():
