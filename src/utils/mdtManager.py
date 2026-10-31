@@ -20,7 +20,7 @@ import shutil
 from PySide6.QtCore import QObject, Signal, Qt
 from PySide6.QtGui import QPixmap
 
-import os, zipfile, json, logging
+import base64, hashlib, os, struct, time, zipfile, json, logging
 from .path_utils import getPath
 from .javaManager import javaManager
 from .qthtimer import QThTimer
@@ -63,6 +63,386 @@ def _parse_simple_config_typed(content: str) -> dict:
             config[key] = val
     return config
 
+
+# ═══════════════════ 游戏设置 settings.bin 编解码 ═══════════════════
+#
+# Mindustry 把玩家设置写在「游戏数据目录」下的 settings.bin，布局与游戏
+# SettingsIO 完全一致（实测 5 个在用实例 + 20 份备份/历史快照逐字节印证）：
+#
+#     int32 BE 条数 N
+#     重复 N 组: uint16 BE key 长度 | key 字节 | uint8 类型码 | 该类型的值
+#         0 bool     1 字节
+#         1 int32    4 字节 BE 有符号
+#         2 int64    8 字节 BE 有符号
+#         3 float32  4 字节 BE IEEE754
+#         4 String   uint16 BE 长度 + 字节
+#         5 byte[]   int32 BE 长度 + 原始字节（内容多为游戏侧序列化对象，不解释）
+#
+# 没有版本号头、没有时间戳、没有校验和：唯一的自洽校验就是「N 条走完必须恰好到
+# EOF」，多一字节少一字节都当坏文件。key 与字符串走 Java writeUTF（modified
+# UTF-8）：NUL 写成 C0 80、增补平面写成两个 3 字节代理对；BMP 字符（含中文）与
+# 标准 UTF-8 完全一致，所以「标准解码能过」就是快路径，「解不动」才需要手工处理。
+#
+# BML.json 里另存一份 JSON 镜像（mdtData）做双向变更检测。镜像里**每个键都写成
+# [类型码, 值]**：
+#       "musicvol":                 [1, 100]
+#       "MetricCollector.lastPost": [2, 1791120307016]
+#       "maxzoomingamemultiplier":  [3, 1.0]
+#       "uuid":                     [4, "7qiif72Y7fY="]
+#       "serpulo-campaign-stats":   [5, "e3iICnBsYXl0aW1l..." ]
+# 把类型码显式存下来有三个好处：int32 与 int64 分得清（不会把「值很小的 long
+# 键」写回 int32 让游戏端 getLong() 抛 ClassCastException）；byte[] 不必靠字符串
+# 前缀打标记（前缀总有和真实字符串撞车的可能）；镜像本身就是一份带类型的设置表，
+# 谁读都能看懂。公开接口（getSettings/setSettings）进出仍是原生类型。
+
+_SETTINGS_BOOL, _SETTINGS_INT, _SETTINGS_LONG = 0, 1, 2
+_SETTINGS_FLOAT, _SETTINGS_STR, _SETTINGS_BYTES = 3, 4, 5
+_SETTINGS_CODES = (_SETTINGS_BOOL, _SETTINGS_INT, _SETTINGS_LONG,
+                   _SETTINGS_FLOAT, _SETTINGS_STR, _SETTINGS_BYTES)
+_SETTINGS_INT32_MIN, _SETTINGS_INT32_MAX = -2147483648, 2147483647
+_SETTINGS_INT64_MIN, _SETTINGS_INT64_MAX = -9223372036854775808, 9223372036854775807
+_SETTINGS_UTF_MAX = 0xFFFF            # writeUTF 的长度上限
+_SETTINGS_FLOAT_STRUCT = struct.Struct(">f")
+
+
+def _settings_decode_utf(raw):
+    """writeUTF 的字节 → str：先试标准 UTF-8（BMP 字符全都一致），失败才手工解。"""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return _settings_decode_modified_utf8(raw)
+
+
+def _settings_decode_modified_utf8(raw):
+    """手工解码 Java modified UTF-8（NUL=C0 80、增补平面=两个 3 字节代理对）。
+
+    非法字节序列退化成 U+FFFD，不抛异常 —— 设置文件里不该出现，真出现了也没必要
+    为它整份读取失败。
+    """
+    out = bytearray()
+    i, n = 0, len(raw)
+    while i < n:
+        c = raw[i]
+        if c < 0x80:
+            out.append(c)
+            i += 1
+        elif (c & 0xE0) == 0xC0 and i + 1 < n:
+            out.append(((c & 0x1F) << 6) | (raw[i + 1] & 0x3F))
+            i += 2
+        elif (c & 0xF0) == 0xE0 and i + 2 < n:
+            cp = ((c & 0x0F) << 12) | ((raw[i + 1] & 0x3F) << 6) | (raw[i + 2] & 0x3F)
+            i += 3
+            # 高代理后面紧跟低代理 → 合成增补平面字符
+            if 0xD800 <= cp < 0xDC00 and i + 2 < n and (raw[i] & 0xF0) == 0xE0:
+                lo = ((raw[i] & 0x0F) << 12) | ((raw[i + 1] & 0x3F) << 6) | (raw[i + 2] & 0x3F)
+                if 0xDC00 <= lo < 0xE000:
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00)
+                    i += 3
+            out.extend(chr(cp).encode("utf-8"))
+        else:
+            out.extend(b"\xef\xbf\xbd")
+            i += 1
+    return out.decode("utf-8", "replace")
+
+
+def _settings_encode_utf(text):
+    """str → Java writeUTF 字节（modified UTF-8 / CESU-8）。
+
+    与标准 UTF-8 的两处差别，都是 Java 那边的硬要求：
+      * NUL 写成 C0 80（标准 UTF-8 是单字节 00）；
+      * 增补平面字符（emoji 等）写成**两个 3 字节代理对**，而不是 4 字节序列 ——
+        readUTF 只认前者，遇到 4 字节序列会抛 UTFDataFormatException，
+        整个 settings.bin 就读不出来了。
+    BMP 字符（含中文）与标准 UTF-8 完全一致。
+    """
+    out = bytearray()
+    for ch in text:
+        cp = ord(ch)
+        if cp == 0:
+            out += b"\xc0\x80"
+        elif cp <= 0x7F:
+            out.append(cp)
+        elif cp <= 0x7FF:
+            out += bytes((0xC0 | (cp >> 6), 0x80 | (cp & 0x3F)))
+        elif cp <= 0xFFFF:
+            out += bytes((0xE0 | (cp >> 12),
+                          0x80 | ((cp >> 6) & 0x3F),
+                          0x80 | (cp & 0x3F)))
+        else:
+            # 增补平面 → UTF-16 代理对，每个代理各写 3 字节
+            v = cp - 0x10000
+            for unit in (0xD800 | (v >> 10), 0xDC00 | (v & 0x3FF)):
+                out += bytes((0xE0 | (unit >> 12),
+                              0x80 | ((unit >> 6) & 0x3F),
+                              0x80 | (unit & 0x3F)))
+    return bytes(out)
+
+
+def _settings_decode_typed(data):
+    """settings.bin 字节 → {key: (类型码, 原生值)}，类型码原样保留。
+
+    数据不自洽（长度越界、类型码未知、走完不到 EOF 或超出 EOF）一律抛 ValueError，
+    由调用方决定怎么兜底 —— 这里不猜、不吞、不修补。
+    """
+    total = len(data)
+    if total < 4:
+        raise ValueError("settings.bin 太短: %d 字节" % total)
+    count = int.from_bytes(data[0:4], "big", signed=True)
+    if count < 0:
+        raise ValueError("settings.bin 条数非法: %d" % count)
+    out = {}
+    from_bytes = int.from_bytes
+    unpack_float = _SETTINGS_FLOAT_STRUCT.unpack_from
+    pos = 4
+    for _ in range(count):
+        if pos + 2 > total:
+            raise ValueError("key 长度越界 @%d" % pos)
+        klen = (data[pos] << 8) | data[pos + 1]
+        pos += 2
+        end = pos + klen
+        if end > total:
+            raise ValueError("key 越界 @%d" % pos)
+        key = _settings_decode_utf(data[pos:end])
+        pos = end
+        if pos >= total:
+            raise ValueError("类型码越界 @%d" % pos)
+        code = data[pos]
+        pos += 1
+        if code == _SETTINGS_INT:
+            if pos + 4 > total:
+                raise ValueError("int32 越界 @%d" % pos)
+            out[key] = (code, from_bytes(data[pos:pos + 4], "big", signed=True))
+            pos += 4
+        elif code == _SETTINGS_BOOL:
+            if pos + 1 > total:
+                raise ValueError("bool 越界 @%d" % pos)
+            out[key] = (code, data[pos] != 0)
+            pos += 1
+        elif code == _SETTINGS_STR:
+            if pos + 2 > total:
+                raise ValueError("字符串长度越界 @%d" % pos)
+            slen = (data[pos] << 8) | data[pos + 1]
+            pos += 2
+            end = pos + slen
+            if end > total:
+                raise ValueError("字符串越界 @%d" % pos)
+            out[key] = (code, _settings_decode_utf(data[pos:end]))
+            pos = end
+        elif code == _SETTINGS_LONG:
+            if pos + 8 > total:
+                raise ValueError("int64 越界 @%d" % pos)
+            out[key] = (code, from_bytes(data[pos:pos + 8], "big", signed=True))
+            pos += 8
+        elif code == _SETTINGS_FLOAT:
+            if pos + 4 > total:
+                raise ValueError("float32 越界 @%d" % pos)
+            out[key] = (code, unpack_float(data, pos)[0])
+            pos += 4
+        elif code == _SETTINGS_BYTES:
+            if pos + 4 > total:
+                raise ValueError("byte[] 长度越界 @%d" % pos)
+            blen = from_bytes(data[pos:pos + 4], "big", signed=True)
+            pos += 4
+            end = pos + blen
+            if blen < 0 or end > total:
+                raise ValueError("byte[] 越界 @%d" % pos)
+            out[key] = (code, data[pos:end])
+            pos = end
+        else:
+            raise ValueError("未知类型码 %d（key=%r @%d）" % (code, key, pos - 1))
+    if pos != total:
+        raise ValueError("尾部多余 %d 字节（count=%d）" % (total - pos, count))
+    return out
+
+
+def _settings_decode(data):
+    """settings.bin 字节 → {key: 原生值}（丢掉类型码的扁平版，给外部/测试用）。"""
+    return {key: value for key, (_, value) in _settings_decode_typed(data).items()}
+
+
+def _settings_f32(value, key=None):
+    """float → float32 量化后的 Python float。
+
+    settings.bin 里只有 32 位浮点：0.53 存进去就是 0.5299999713897705。镜像与
+    typed 表都统一用量化后的值，两者因此永远等价，读-改-写任何一轮都稳定。
+    """
+    try:
+        return _SETTINGS_FLOAT_STRUCT.unpack(_SETTINGS_FLOAT_STRUCT.pack(value))[0]
+    except (OverflowError, struct.error):
+        raise ValueError("float 超出 float32 范围（key=%r）: %r" % (key, value))
+
+
+def _settings_normalize_value(code, value, key=None):
+    """把值规整成某个类型码对应的 Python 形态；不合格抛 ValueError。"""
+    if code == _SETTINGS_BOOL:
+        if not isinstance(value, bool):
+            raise ValueError("类型码 0 需要 bool（key=%r）: %r" % (key, type(value)))
+        return value
+    if code in (_SETTINGS_INT, _SETTINGS_LONG):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("类型码 %d 需要 int（key=%r）: %r" % (code, key, type(value)))
+        lo, hi = ((_SETTINGS_INT32_MIN, _SETTINGS_INT32_MAX) if code == _SETTINGS_INT
+                  else (_SETTINGS_INT64_MIN, _SETTINGS_INT64_MAX))
+        if not lo <= value <= hi:
+            raise ValueError("整数超出类型码 %d 的范围（key=%r）: %r" % (code, key, value))
+        return value
+    if code == _SETTINGS_FLOAT:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("类型码 3 需要数字（key=%r）: %r" % (key, type(value)))
+        return _settings_f32(value, key)
+    if code == _SETTINGS_STR:
+        if not isinstance(value, str):
+            raise ValueError("类型码 4 需要 str（key=%r）: %r" % (key, type(value)))
+        return value
+    if code == _SETTINGS_BYTES:
+        if not isinstance(value, (bytes, bytearray)):
+            raise ValueError("类型码 5 需要 bytes（key=%r）: %r" % (key, type(value)))
+        return bytes(value)
+    raise ValueError("未知类型码 %r（key=%r）" % (code, key))
+
+
+def _settings_pick_code(value, prefer=None, key=None):
+    """按 Python 值选类型码；prefer 是原文件里的码，装得下就沿用。
+
+    沿用的意义：一个值很小、但游戏端声明为 long 的键，若只按值推断会被写回 int32，
+    游戏 getLong() 读到 Integer 直接 ClassCastException。所以整数一律优先沿用原码。
+    """
+    if isinstance(value, bool):
+        return _SETTINGS_BOOL
+    if isinstance(value, int):
+        if not _SETTINGS_INT64_MIN <= value <= _SETTINGS_INT64_MAX:
+            raise ValueError("整数超出 int64（key=%r）: %r" % (key, value))
+        if prefer == _SETTINGS_LONG:
+            return _SETTINGS_LONG
+        fits32 = _SETTINGS_INT32_MIN <= value <= _SETTINGS_INT32_MAX
+        return _SETTINGS_INT if fits32 else _SETTINGS_LONG
+    if isinstance(value, float):
+        return _SETTINGS_FLOAT
+    if isinstance(value, str):
+        return _SETTINGS_STR
+    if isinstance(value, (bytes, bytearray)):
+        return _SETTINGS_BYTES
+    raise ValueError("不支持的设置类型 %r（key=%r）" % (type(value), key))
+
+
+def _settings_values_to_typed(values, prior=None):
+    """公开接口的原生 dict → {key: (类型码, 值)}；prior 是已有 typed 表，用来沿用类型码。"""
+    if not isinstance(values, dict):
+        raise ValueError("settings 必须是 dict，拿到 %r" % type(values))
+    prior = prior or {}
+    typed = {}
+    for key, value in values.items():
+        if not isinstance(key, str):
+            raise ValueError("settings 的 key 必须是 str，拿到 %r" % (key,))
+        old = prior.get(key)
+        code = _settings_pick_code(value, old[0] if old else None, key)
+        typed[key] = (code, _settings_normalize_value(code, value, key))
+    return typed
+
+
+def _settings_encode_typed(typed):
+    """{key: (类型码, 值)} → settings.bin 字节；类型码照写，不再推断。"""
+    if not isinstance(typed, dict):
+        raise ValueError("typed settings 必须是 dict，拿到 %r" % type(typed))
+    buf = bytearray()
+    buf += struct.pack(">i", len(typed))
+    for key, entry in typed.items():
+        code, value = entry
+        if not isinstance(key, str):
+            raise ValueError("settings 的 key 必须是 str，拿到 %r" % (key,))
+        kb = _settings_encode_utf(key)
+        if len(kb) > _SETTINGS_UTF_MAX:
+            raise ValueError("key 过长（writeUTF 上限 %d 字节）: %r" % (_SETTINGS_UTF_MAX, key))
+        buf += struct.pack(">H", len(kb))
+        buf += kb
+        if code == _SETTINGS_BOOL:
+            buf += b"\x00" + (b"\x01" if value else b"\x00")
+        elif code == _SETTINGS_INT:
+            buf += b"\x01" + struct.pack(">i", value)
+        elif code == _SETTINGS_LONG:
+            buf += b"\x02" + struct.pack(">q", value)
+        elif code == _SETTINGS_FLOAT:
+            buf += b"\x03" + _SETTINGS_FLOAT_STRUCT.pack(value)
+        elif code == _SETTINGS_STR:
+            sb = _settings_encode_utf(value)
+            if len(sb) > _SETTINGS_UTF_MAX:
+                raise ValueError("字符串过长（writeUTF 上限 %d 字节）: %r" % (_SETTINGS_UTF_MAX, key))
+            buf += b"\x04" + struct.pack(">H", len(sb)) + sb
+        elif code == _SETTINGS_BYTES:
+            raw = bytes(value)
+            buf += b"\x05" + struct.pack(">i", len(raw)) + raw
+        else:
+            raise ValueError("未知类型码 %r（key=%r）" % (code, key))
+    return bytes(buf)
+
+
+def _settings_encode(values):
+    """扁平 dict → settings.bin 字节（按值推断类型码的便利入口）。"""
+    return _settings_encode_typed(_settings_values_to_typed(values))
+
+
+def _settings_mirror(typed):
+    """typed → BML.json 里的 JSON 镜像 {key: [类型码, 值]}；byte[] 存 base64 字符串。"""
+    mirror = {}
+    for key, (code, value) in typed.items():
+        if code == _SETTINGS_BYTES:
+            mirror[key] = [code, base64.b64encode(value).decode("ascii")]
+        else:
+            mirror[key] = [code, value]
+    return mirror
+
+
+def _settings_typed_from_mirror(mirror):
+    """JSON 镜像 → typed；结构不对或类型不匹配抛 ValueError。
+
+    调用方据此认定「这份镜像不可信」（例如手改坏了、或是别处写的旧形状），
+    改从 settings.bin 重建，而不是拿坏数据去写游戏文件。
+    """
+    if not isinstance(mirror, dict):
+        raise ValueError("镜像必须是 dict，拿到 %r" % type(mirror))
+    typed = {}
+    for key, entry in mirror.items():
+        if not isinstance(key, str):
+            raise ValueError("镜像的 key 必须是 str: %r" % (key,))
+        if not isinstance(entry, list) or len(entry) != 2:
+            raise ValueError("镜像的键 %r 不是 [类型码, 值] 形状" % (key,))
+        code, value = entry
+        if isinstance(code, bool) or not isinstance(code, int) or code not in _SETTINGS_CODES:
+            raise ValueError("镜像的键 %r 类型码非法: %r" % (key, code))
+        if code == _SETTINGS_BYTES:
+            if not isinstance(value, str):
+                raise ValueError("镜像的键 %r 的类型码是 5，值应为 base64 字符串" % (key,))
+            try:
+                value = base64.b64decode(value, validate=True)
+            except Exception:
+                raise ValueError("镜像的键 %r 的 base64 非法" % (key,))
+        elif code in (_SETTINGS_INT, _SETTINGS_LONG):
+            # JSON 里的整数可能被手改成 1.0 这种写法，整数值就认
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+        typed[key] = (code, _settings_normalize_value(code, value, key))
+    return typed
+
+
+def _settings_values(typed):
+    """typed → 公开接口用的扁平原生 dict。"""
+    return {key: value for key, (_, value) in typed.items()}
+
+
+def _settings_hash(obj):
+    """变更检测用的指纹，两种口径：
+
+    bytes  → sha256(settings.bin 原始字节)，判断「游戏是否改过盘上文件」；
+    dict   → sha256(规范化 JSON 镜像)，判断「镜像是否被改过」。
+    镜像口径用 sort_keys=True：只比内容不比键序，手改 BML.json 时重排键序不算变更。
+    """
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        return hashlib.sha256(bytes(obj)).hexdigest()
+    canonical = json.dumps(obj, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 class mdtManager(QObject):
     base_dir = getPath("BML/.Mindustrys")
 
@@ -81,6 +461,7 @@ class mdtManager(QObject):
 
     DATA_ROOT_NAME = "data"
     DATA_DIR_NAME = "Mindustry"
+    SETTINGS_FILE_NAME = "settings.bin"
     DATA_FOLDERS = {"data": "", "blueprint": "schematics", "mod": "mods"}
 
     QPixmaps = {}
@@ -195,6 +576,266 @@ class mdtManager(QObject):
             return ""
         return os.path.join(root, cls.DATA_DIR_NAME, cls.DATA_FOLDERS[kind])
 
+    # ==================== 游戏设置（settings.bin）====================
+    #
+    # 读写口径见模块顶部的编解码说明与规范：
+    #   - 位置只有一个「游戏数据目录」= <数据根>/Mindustry（mdtLauncher 把
+    #     MINDUSTRY_DATA_DIR 与兜底的 APPDATA 都指到同一处）；
+    #   - 读的时候认得旧版启动器留在 <数据根>/settings.bin 的遗留文件，
+    #     但**写永远只写规范位置**，不再制造第二份；
+    #   - BML.json 里的 mdtData 是设置的 JSON 镜像 + 双指纹，负责「游戏改过没」
+    #     与「镜像被改过没」这两个判断。
+
+    @classmethod
+    def _settings_file(cls, subdir_name, for_write=False):
+        """返回 settings.bin 的路径；实例名为空返回 ""。
+
+        规范位置是 <数据根>/Mindustry/settings.bin。读路径（for_write=False）下，
+        规范位置不存在而 <数据根>/settings.bin 存在时返回后者 —— 那是重构前
+        启动器把数据目录直接设在数据根上留下的遗留文件，只为读兼容。
+        for_write=True 时无论遗留文件在不在都只给规范位置。
+        """
+        if not subdir_name:
+            return ""
+        main = os.path.join(cls.getDataFolder(subdir_name, "data"), cls.SETTINGS_FILE_NAME)
+        if for_write:
+            return main
+        if os.path.isfile(main):
+            return main
+        legacy = os.path.join(cls.getDataRoot(subdir_name), cls.SETTINGS_FILE_NAME)
+        if os.path.isfile(legacy):
+            return legacy
+        return main
+
+    @classmethod
+    def _settings_block(cls, subdir_name):
+        """读 BML.json 里的 mdtData 块，读不到/结构不对返回 None。"""
+        bml_path = getPath(f"BML/.Mindustrys/{subdir_name}/BML.json")
+        try:
+            with open(bml_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError, TypeError):
+            return None
+        block = data.get("mdtData") if isinstance(data, dict) else None
+        return block if isinstance(block, dict) else None
+
+    @classmethod
+    def _set_settings_block(cls, subdir_name, bin_hash, json_hash, mirror, current=None):
+        """把 mdtData 三个字段整块写回 BML.json。
+
+        **幂等**：内容没变就一个字节都不写。这一步是硬要求而不是优化 —— 白改
+        BML.json 的 mtime 会让它自己的 mtime 型缓存全部失效（版本信息缓存要重开
+        数十 MB 的 mdt.jar）。三个字段必须一次写完整，不能出现「指纹是新的、
+        镜像是旧的」这种中间态。
+
+        current 是调用方手上已有的 mdtData 块（读路径刚解析过 BML.json 时传进来，
+        省掉一次重复读盘；BML.json 的每次 open 都不便宜）。
+        """
+        block = {"binHash": bin_hash, "jsonHash": json_hash, "data": mirror}
+        if current is None:
+            current = cls._settings_block(subdir_name)
+        if current == block:
+            return True
+        return cls.setData(subdir_name, ["mdtData"], block)
+
+    @staticmethod
+    def _write_bytes_atomic(path, raw):
+        """原子写字节：同目录唯一临时文件 → flush → fsync → os.replace。
+
+        任意时刻磁盘上的目标要么是旧内容要么是新内容，不会出现半截文件。
+        os.replace 在 Windows 上可能被杀毒/索引临时占用，短重试以躲开瞬时锁
+        （与 settings.py 的 atomic_write_json 同一套做法）。
+        """
+        tmp = "%s.%d-%d.tmp" % (path, os.getpid(), time.time_ns())
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp, "wb") as f:
+                f.write(raw)
+                f.flush()
+                os.fsync(f.fileno())
+            for attempt in range(4):
+                try:
+                    os.replace(tmp, path)
+                    return True
+                except PermissionError:
+                    if attempt == 3:
+                        raise
+                    time.sleep(0.05)
+        except OSError as exc:
+            _log.debug(f"_write_bytes_atomic({path}) failed: {exc!r}")
+        finally:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+        return False
+
+    @classmethod
+    def _backup_bad_settings(cls, path):
+        """把损坏的 settings.bin 复制进 badSettings/ 留证，只保留最近几份。
+
+        只为「别把证据丢了」：getSettings 的返回值契约仍是 {}，不受影响。
+        目录与保留份数沿用 settings.json 那套（BAD_DIR / BAD_KEEP），文件名带
+        settingsbin. 前缀，与 JSON 备份互不覆盖。延迟导入是为了避开
+        settings.py → 页面/注册表 → mdtManager 的循环导入。
+        """
+        try:
+            from .settings import BAD_DIR, BAD_KEEP
+            folder = getPath(BAD_DIR)
+            os.makedirs(folder, exist_ok=True)
+            name = "settingsbin.%s.bin" % time.strftime("%Y%m%d-%H%M%S")
+            dest = os.path.join(folder, name)
+            shutil.copy2(path, dest)
+            names = sorted(n for n in os.listdir(folder)
+                           if n.startswith("settingsbin.") and n.endswith(".bin"))
+            keep = max(0, int(BAD_KEEP))
+            for old in (names if keep == 0 else names[:-keep]):
+                try:
+                    os.remove(os.path.join(folder, old))
+                except OSError:
+                    pass
+            return dest
+        except Exception as exc:
+            _log.debug(f"_backup_bad_settings({path}) failed: {exc!r}")
+            return None
+
+    @classmethod
+    def getSettings(cls, subdir_name):
+        """读该实例的游戏设置，返回 dict（值只有 bool/int/float/str/bytes）。
+
+        读不到（实例名无效、游戏还没启动过、文件损坏）一律返回 {}，不抛异常。
+
+        与 BML.json 的 mdtData 镜像按四态同步，判据是两个指纹：
+            binHash  = sha256(settings.bin 原始字节) → 游戏改过盘上文件没
+            jsonHash = sha256(镜像的规范化 JSON)     → 镜像被改过没
+        两边都对得上 → 直接用镜像（只算指纹、不解析 bin、不写盘）
+        只有 bin 变了 → 解析 bin 并原子刷新镜像（bin 是设置的唯一权威）
+        只有镜像变了 → 返回镜像现值，**绝不自动写 bin**（写不写由调用方 setSettings 决定）
+        两边都变了   → 兜底以镜像为准（正常流程下不可达：游戏运行时 BML.json 被
+                       mdtLocker 握着只读句柄写不进去，管理界面也同时被锁）
+
+        镜像里每个键是 [类型码, 值]，所以返回值的类型与文件里完全对应；镜像结构
+        看不懂时（旧形状、手改坏了）当它不存在，改从 bin 重建。
+
+        损坏的 settings.bin 会复制一份到 badSettings/ 留证，返回值仍是 {}。
+        """
+        if not subdir_name:
+            return {}
+        path = cls._settings_file(subdir_name)
+        raw = None
+        if path:
+            try:
+                with open(path, "rb") as f:
+                    raw = f.read()
+            except OSError as exc:
+                _log.debug(f"getSettings({subdir_name}) read failed: {exc!r}")
+                raw = None
+        bin_hash = _settings_hash(raw) if raw is not None else None
+        block = cls._settings_block(subdir_name)
+        mirror, mirror_hash, typed_mirror = None, None, None
+        if block and isinstance(block.get("data"), dict):
+            try:
+                # 镜像必须能解成 [类型码, 值] 才可信；旧形状/手改坏了 → 当没有镜像，
+                # 强制从 bin 重建（绝不用一份看不懂的镜像去写游戏文件）。
+                typed_mirror = _settings_typed_from_mirror(block["data"])
+                mirror_hash = _settings_hash(block["data"])
+                mirror = block["data"]
+            except (TypeError, ValueError):
+                mirror, mirror_hash, typed_mirror = None, None, None
+        # 指纹缺失 = 那份镜像不是本版本写的，不可信 → 一律按 bin 重建。
+        # （否则「有 data 但没有 jsonHash」会被误判成冲突，把陈旧镜像当成手改结果供出去。）
+        has_prints = bool(isinstance(block, dict)
+                          and isinstance(block.get("binHash"), str)
+                          and isinstance(block.get("jsonHash"), str))
+        bin_ok = bool(typed_mirror is not None and has_prints and block.get("binHash") == bin_hash)
+        json_ok = bool(typed_mirror is not None and has_prints and block.get("jsonHash") == mirror_hash)
+        # 两边都对上：镜像就是当前设置的忠实表示，不必解析 bin
+        if bin_ok and json_ok:
+            return _settings_values(typed_mirror)
+        if raw is None:
+            # 没有 settings.bin：游戏没启动过（或实例数据被清掉）。
+            # 不动 mdtData —— 留下旧镜像比把「还没启动过」写成「设置全空」更可恢复。
+            return {}
+        # 只有镜像被改过（bin 没动）：返回镜像现值，既不解析 bin 也不刷新镜像，
+        # 更不能替调用方决定要不要写进游戏 —— 那是 setSettings 的事。
+        if bin_ok and not json_ok:
+            return _settings_values(typed_mirror)
+        try:
+            typed = _settings_decode_typed(raw)
+        except ValueError as exc:
+            _log.warning(f"getSettings({subdir_name}) settings.bin 损坏: {exc}")
+            cls._backup_bad_settings(path)
+            return {}
+        # 两边都变过：兜底以镜像为准（不刷新，避免把玩家的手改冲掉）
+        if typed_mirror is not None and has_prints and not bin_ok and not json_ok:
+            _log.warning(f"getSettings({subdir_name}) bin 与镜像都变过，以镜像为准")
+            return _settings_values(typed_mirror)
+        new_mirror = _settings_mirror(typed)
+        cls._set_settings_block(subdir_name, bin_hash, _settings_hash(new_mirror),
+                                new_mirror, current=block)
+        return _settings_values(typed)
+
+    @classmethod
+    def setSettings(cls, subdir_name, values):
+        """整表覆盖写该实例的游戏设置，成功返回 True，失败 False（不抛异常）。
+
+        **整表覆盖**：values 就是写入后 settings.bin 的全部内容，没有 patch 概念 ——
+        没出现在 values 里的键视为删除。值只接受 bool/int/float/str/bytes，
+        其余类型整次失败（不猜、不做字符串兜底）。
+
+        类型码优先沿用镜像里已有的码（int 依旧 int、long 依旧 long，值太小也不会
+        被降级成 int32 导致游戏端 getLong() 抛 ClassCastException）；只有新键才按
+        值推断（超 int32 写 int64）。float 一律按 float32 量化。
+
+        写入顺序：先原子写 settings.bin，再刷新 BML.json 的 mdtData 镜像。
+        镜像那步失败不算写入失败（bin 已经是新内容了）：下次 getSettings 会看到
+        binHash 对不上，自动把镜像重建出来。
+
+        安全边界（调用方负责）：
+            - 不备份、不回读校验、不回滚 —— 一次写坏即损坏，游戏侧的
+              settings_backup.bin 只能救回「上一次游戏保存」的版本；
+            - 不要趁游戏运行时写：游戏下一次保存会整表重写，静默覆盖本次改动
+              （届时 BML.json 也被 mdtLocker 握着只读句柄，镜像那步会失败）；
+            - 同一实例不提供互斥，并发调用由调用方串行化。
+        """
+        if not subdir_name or not isinstance(values, dict):
+            return False
+        path = cls._settings_file(subdir_name, for_write=True)
+        if not path:
+            return False
+        block = cls._settings_block(subdir_name)
+        prior = None
+        if block and isinstance(block.get("data"), dict):
+            try:
+                # 沿用镜像里的类型码：值很小的 long 键不会被写回 int32
+                prior = _settings_typed_from_mirror(block["data"])
+            except (TypeError, ValueError):
+                prior = None
+        try:
+            typed = _settings_values_to_typed(values, prior)
+            raw = _settings_encode_typed(typed)
+        except (ValueError, TypeError, struct.error) as exc:
+            _log.warning(f"setSettings({subdir_name}) 拒绝写入: {exc}")
+            return False
+        # 幂等：与盘上内容一模一样就不写（避免白改 mtime 打穿别人的 mtime 缓存）
+        current = None
+        try:
+            with open(path, "rb") as f:
+                current = f.read()
+        except OSError:
+            current = None
+        if current != raw and not cls._write_bytes_atomic(path, raw):
+            return False
+        try:
+            mirror = _settings_mirror(typed)
+            cls._set_settings_block(subdir_name, _settings_hash(raw),
+                                    _settings_hash(mirror), mirror, current=block)
+        except Exception as exc:
+            # bin 已写成，镜像没刷成不是致命问题：下次 getSettings 会自愈
+            _log.warning(f"setSettings({subdir_name}) 镜像刷新失败: {exc!r}")
+        return True
+
     @classmethod
     def _get_base_dir_mtime(cls):
         try:
@@ -220,18 +861,20 @@ class mdtManager(QObject):
 
         图标解析优先级：子目录 icon.png > BML.json 的 icon_path > 默认图标。
         icon_path 为 null 或指向无效图片时自动写回默认图标（DEFAULT_ICON）。
-        使用 (jar_mtime, bml_mtime, png, png_mtime, png_size) 作为缓存键，
-        避免重复读取 zip。"""
+        使用 (jar_mtime, png, png_mtime, png_size) 作为缓存键，避免重复读取 zip。
+
+        缓存键**刻意不含 BML.json 的 mtime**：BML.json 里还存着设置的镜像
+        （mdtData），游戏每改一次设置就会让它刷新；若拿 mtime 当键，每刷新一次
+        都得重开几十 MB 的 mdt.jar 读 version.properties（实测 41~103 ms）。
+        本方法的产物只受 icon_path 影响，而它已经体现在解析出来的 png 路径上。"""
         # 计算 png 路径与 mtime/size
         png = None
         png_mtime = 0
         png_size = 0
-        bml_mtime = 0
         bml_path = getPath(f"BML/.Mindustrys/{subdir_name}/BML.json")
         icon_path = None
         try:
             if os.path.isfile(bml_path):
-                bml_mtime = os.path.getmtime(bml_path)
                 with open(bml_path, "r", encoding="utf-8") as f:
                     icon_path = (json.load(f) or {}).get("icon_path")
         except (OSError, ValueError, TypeError):
@@ -240,10 +883,6 @@ class mdtManager(QObject):
         if not icon_path:
             icon_path = cls.DEFAULT_ICON
             cls.setData(subdir_name, ["icon_path"], icon_path)
-            try:
-                bml_mtime = os.path.getmtime(bml_path)
-            except OSError:
-                pass
         # icon_path 指向的文件不存在或非有效图片 → 写回默认图标
         cand = getPath(icon_path) if not os.path.isabs(icon_path) else icon_path
         if os.path.isfile(cand) and cls._is_valid_image(cand):
@@ -251,10 +890,6 @@ class mdtManager(QObject):
         else:
             cls.setData(subdir_name, ["icon_path"], cls.DEFAULT_ICON)
             png = getPath(cls.DEFAULT_ICON)
-            try:
-                bml_mtime = os.path.getmtime(bml_path)
-            except OSError:
-                pass
         # 子目录 icon.png 存在则优先
         try:
             png_path = getPath(f"BML/.Mindustrys/{subdir_name}/icon.png")
@@ -274,7 +909,7 @@ class mdtManager(QObject):
         except OSError:
             pass
 
-        cache_key = (jar_mtime, bml_mtime, png, png_mtime, png_size)
+        cache_key = (jar_mtime, png, png_mtime, png_size)
         if subdir_name in cls._mdt_msg_cache:
             cached_key, cached_data = cls._mdt_msg_cache[subdir_name]
             if cached_key == cache_key:

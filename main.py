@@ -178,6 +178,14 @@ try:
 
             QThTimer.task(100, lambda event: self.mdtManager.preload_all())
 
+            # Java 候选表常驻轮询：和 mdtManager 的 preload_all 同一思路 ——
+            # 谁也不用操心「现在有没有人在看」，界面一打开就有最新数据。
+            # watch() 是引用计数，页面级再 watch/unwatch 不会把它关掉。
+            try:
+                javaManager.watch()
+            except Exception as e:
+                self.logger.warning(f"Java 候选表轮询启动失败：{e}")
+
             app.aboutToQuit.connect(self._cleanup_on_quit)
 
             _attach_java_ui(self)
