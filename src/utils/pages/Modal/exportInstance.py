@@ -33,6 +33,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 导出成功后不自动关窗：用户需要看见「存到哪了、几个文件、多大」。关掉之后这些
 信息没有任何地方可以回看（没有 toast，日志也不给普通用户看）。
+
+脱敏默认打开
+------------
+包里最危险的不是客户端，是 ``data/Mindustry/settings.bin`` 里的 ``usid-*`` ——
+服务器身份，拿到即可冒充。所以这里默认抹掉，宁可让换机自用的人多点一下取消
+勾选，也不让「顺手发给别人看看」变成把身份一起送出去。规则见 instanceSanitize。
 """
 
 import os
@@ -87,8 +93,8 @@ class ExportInstance(QWidget):
     # ---------- 界面 ----------
 
     def init_wid(self):
-        # 420x310：比导入高出一格，因为多了「包含存档」这个选项与一行说明
-        self.setFixedSize(420, 310)
+        # 420x344：比导入高，因为多了「包含存档」「抹去个人信息」两个选项与说明
+        self.setFixedSize(420, 344)
 
         self.layout = QVBoxLayout(self)
         self.layout.setSpacing(0)
@@ -142,6 +148,16 @@ class ExportInstance(QWidget):
         self.opt.toggled.connect(lambda _: self._refresh())
         self.body_l.addWidget(self.opt, 0)
 
+        # 抹去个人信息：默认勾上。这个默认值是有意识的取舍 —— 忘掉勾它的代价是
+        # 把 usid 连同服务器身份一起发出去（不可逆、不可撤回），而误勾的代价只是
+        # 接收端要重新登录、丢掉在服务器上的管理员身份（可以再要回来）。
+        # 换机自用的人看得到这行字，取消勾选即可。
+        self.priv = QCheckBox()
+        self.priv.setChecked(True)
+        self.priv.setStyleSheet("font-size: 13px;")
+        self.priv.toggled.connect(lambda _: self._refresh())
+        self.body_l.addWidget(self.priv, 0)
+
         # 保存位置行：输入框可编辑（用户能自己粘路径），浏览按钮给不会拼路径的人
         self.path_row = QWidget()
         self.body_l.addWidget(self.path_row, 0)
@@ -189,6 +205,8 @@ class ExportInstance(QWidget):
         self.btn_close.setToolTip(lang.get("core.wid.top.close"))
         self.desc.setText(t(lang.get("core.wid.pages.exportInstance.desc"), self.game))
         self.opt.setText(lang.get("core.wid.pages.exportInstance.opt"))
+        self.priv.setText(lang.get("core.wid.pages.exportInstance.priv"))
+        self.priv.setToolTip(lang.get("core.wid.pages.exportInstance.priv.tip"))
         self.btn_pick.setText(lang.get("core.wid.pages.importJar.pick"))
         self.btn_ok.setText(lang.get("core.text.yes"))
         self._refresh()
@@ -262,6 +280,7 @@ class ExportInstance(QWidget):
         self.btn_pick.setEnabled(False)
         self.path.setEnabled(False)
         self.opt.setEnabled(False)
+        self.priv.setEnabled(False)
         self.btn_ok.setEnabled(False)
         self.btn_ok.setStyleSheet(self.BTN_OFF)
         self.tip.setStyleSheet("font-size: 13px;")
@@ -278,6 +297,7 @@ class ExportInstance(QWidget):
 
         root = os.path.join(mdtManager.base_dir, self.game)
         include_data = self.opt.isChecked()
+        sanitize = self.priv.isChecked()
 
         # 打包 100 MB 在机械盘上要十几秒，必须在子线程；dedicated=True 是因为
         # 它比共享队列里那些「查一下」的任务长得多，混在一起会把它们堵住
@@ -287,7 +307,8 @@ class ExportInstance(QWidget):
                 root, dest, meta=meta,
                 progress=lambda f: e.lambdas[0].emit(f),
                 cancel=self._cancel.is_set,
-                include_data=include_data),
+                include_data=include_data,
+                sanitize=sanitize),
             events=[self._on_progress],
             result_callback=self._on_done,
             dedicated=True,
@@ -306,6 +327,7 @@ class ExportInstance(QWidget):
         self.btn_pick.setEnabled(True)
         self.path.setEnabled(True)
         self.opt.setEnabled(True)
+        self.priv.setEnabled(True)
 
         if isinstance(result, Exception) or not result or not result[0]:
             code = "ioError" if isinstance(result, Exception) else (
@@ -316,7 +338,10 @@ class ExportInstance(QWidget):
             # 路径还在：用户换块盘/腾出空间后可以直接重试
             self.btn_ok.setEnabled(True)
             self.btn_ok.setStyleSheet(self.BTN_ON)
-            events.logger.error("[export] 导出 %s 失败: %s" % (self.game, code))
+            detail = ""
+            if not isinstance(result, Exception) and isinstance(result[2], dict):
+                detail = str(result[2].get("detail") or "")
+            events.logger.error("[export] 导出 %s 失败: %s %s" % (self.game, code, detail))
             return
 
         stats = result[2] or {}
@@ -328,6 +353,15 @@ class ExportInstance(QWidget):
         msg = t(events.lang.get("core.wid.pages.exportInstance.done"),
                 str(stats.get("files", 0)),
                 "%.1f" % (float(stats.get("zip_bytes", 0)) / 1048576.0))
+        # 抹掉了多少要当面说清楚：用户勾了那个框，就得知道它到底做了什么，
+        # 而不是只能相信「已脱敏」这四个字
+        if stats.get("sanitized"):
+            removed = int(stats.get("removed") or 0)
+            if removed:
+                msg += "  " + t(events.lang.get("core.wid.pages.exportInstance.stripped"),
+                                str(removed), str(stats.get("serverIds") or 0))
+            else:
+                msg += "  " + events.lang.get("core.wid.pages.exportInstance.stripped.none")
         # 跳过数是游戏正开着时才会出现的：日志/存档被占用，那些文件没进包。
         # 不说明的话用户会以为导出是完整的。
         if stats.get("skipped"):

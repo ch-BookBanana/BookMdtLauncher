@@ -40,6 +40,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ``mdt.jar`` 与 ``mods/*.jar`` 本身已是 deflate 过的容器，再压一遍 CPU 花掉、
 体积几乎不变（实测收益 < 1%）。按后缀把它们存成 STORED，其余文本与小文件
 照常 deflate。
+
+脱敏
+----
+``sanitize=True``（默认）时先向 :mod:`instanceSanitize` 要一份计划：哪些文件
+不带、``settings.bin`` 剥成什么。它**只改包里的字节**，实例目录一个字节都不动
+—— 导出是只读操作，用户导出完继续玩，设置与身份都还在。
 """
 
 import json
@@ -47,6 +53,7 @@ import os
 import time
 import zipfile
 
+from .instanceSanitize import SanitizeError, build_plan
 from .jarImport import FORMAT_VERSION, MANIFEST_NAME, MANIFEST_TYPE
 
 # 运行期状态文件，不是实例数据：装进包里只会让接收方看到一堆无意义的残留。
@@ -67,6 +74,8 @@ ERR_EMPTY = "empty"            # 实例目录里没有可打包的内容
 ERR_DEST_INSIDE = "destInside"  # 保存位置落在了实例目录内部
 ERR_IO = "ioError"
 ERR_CANCELLED = "cancelled"
+# settings.bin 读不出来（settingsUnreadable）由 instanceSanitize 抛 SanitizeError
+# 带过来 —— 失败码只在那一处定义，这里不抄第二份
 
 
 class _Cancelled(Exception):
@@ -79,26 +88,44 @@ def _should_skip(name):
     return name.lower().endswith(EXCLUDE_SUFFIX)
 
 
-def collect(instance_dir, include_data=True):
-    """扫出要打包的文件，返回 ``([(相对路径, 绝对路径, 字节数)], 总字节)``。
+def collect(instance_dir, include_data=True, plan=None):
+    """扫出要打包的文件，返回 ``([(相对路径, 绝对路径, 字节数)], 总字节, 脱敏丢弃数)``。
 
     相对路径一律用 ``/``：zip 内部路径就是这种写法，Windows 的反斜杠进去会
     变成文件名的一部分，解压时得到一堆 ``data\\Mindustry`` 这样的怪目录。
 
     include_data=False 时只收实例根上的文件（客户端本体、BML.json、图标），
     用于「只想要这个客户端外壳」的场景。
+
+    plan 非空时按它过滤（``server_list.json``、崩溃日志等整份不进包）。被丢掉的
+    文件不计入总字节，也不进进度条 —— 进度分母只算真正要写的量。
     """
     root = os.path.abspath(instance_dir)
     entries = []
     total = 0
+    dropped = 0
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = os.path.relpath(dirpath, root)
         top = "" if rel_dir == "." else rel_dir.replace(os.sep, "/")
         if not include_data and (top == "data" or top.startswith("data/")):
             dirnames[:] = []   # 整个 data 子树都不进
             continue
+        # 整棵剪掉要丢的目录：省掉逐文件判断，也保证空目录不会漏进包
+        if plan is not None and dirnames:
+            keep = []
+            for name in dirnames:
+                sub = (top + "/" + name) if top else name
+                if plan.drops(sub + "/"):
+                    dropped += 1
+                    continue
+                keep.append(name)
+            dirnames[:] = keep
         for fn in filenames:
             if _should_skip(fn):
+                continue
+            rel = (top + "/" + fn) if top else fn
+            if plan is not None and plan.drops(rel):
+                dropped += 1
                 continue
             abs_path = os.path.join(dirpath, fn)
             try:
@@ -106,9 +133,9 @@ def collect(instance_dir, include_data=True):
             except OSError:
                 # 扫描后被删了（游戏正在轮转日志之类）：跳过，不要因为它整包失败
                 continue
-            entries.append(((top + "/" + fn) if top else fn, abs_path, size))
+            entries.append((rel, abs_path, size))
             total += size
-    return entries, total
+    return entries, total, dropped
 
 
 def _zip_info(rel, abs_path, compressed):
@@ -129,12 +156,18 @@ def _zip_info(rel, abs_path, compressed):
 
 
 def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
-                    include_data=True):
+                    include_data=True, sanitize=True):
     """把实例目录写成 dest，返回 ``(ok, code, stats)``。
 
-    code 成功为 None，失败为 ERR_* 之一。
+    code 成功为 None；失败为 ERR_* 之一，或脱敏层给出的 settingsUnreadable
+    （此时 stats 里带 {"detail": 出错的相对路径与原因}，只用于写日志）。
     progress 收 0.0–1.0，在**调用方线程**里被调（界面传 Signal.emit）。
     cancel 是一个无参可调用对象，返回 True 就中止并删掉半成品。
+
+    sanitize=True 时按 :mod:`instanceSanitize` 的计划去掉身份信息：整份丢掉
+    服务器收藏夹 / 崩溃日志 / 设置备份，剥掉 settings.bin 里的 usid-*、uuid、
+    ip、封禁名单，并从 BML.json 拿掉设置镜像与本机绝对路径。只改包里的字节，
+    实例目录本身不动。
 
     先写 ``dest.part`` 再改名：中途取消/磁盘满时不会留下一个「看起来存在、
     实际打不开」的 zip 让用户以为导出成功了。
@@ -143,7 +176,16 @@ def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
     if not os.path.isdir(root):
         return False, "missing", None
 
-    entries, total = collect(root, include_data)
+    plan = None
+    if sanitize:
+        try:
+            plan = build_plan(root, include_data)
+        except SanitizeError as exc:
+            # 读不出来就不导出：宁可让用户关掉这个勾、明确选择「照原样打包」，
+            # 也不把一个没法确认内容的东西塞进标着「已抹去个人信息」的包
+            return False, exc.code, {"detail": exc.detail}
+
+    entries, total, dropped = collect(root, include_data, plan)
     if not entries:
         return False, ERR_EMPTY, None
 
@@ -161,6 +203,9 @@ def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
     manifest["type"] = MANIFEST_TYPE
     manifest.setdefault("exported_at", int(time.time()))
     manifest["include_data"] = bool(include_data)
+    # 标记脱敏与否：接收方（以及事后复盘的自己）能看出这个包里的 usid 是被
+    # 剥掉的、还是本来就没有
+    manifest["sanitized"] = bool(sanitize)
 
     part = dest_abs + ".part"
     done = 0
@@ -175,6 +220,18 @@ def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
             for rel, abs_path, size in entries:
                 if cancel is not None and cancel():
                     raise _Cancelled()
+                blob = plan.rewrite_for(rel) if plan is not None else None
+                if blob is not None:
+                    # 改写过的条目（settings.bin / BML.json）：字节来自计划，
+                    # 时间戳仍取盘上原文件，接收端看起来像「原本就这样」
+                    with zf.open(_zip_info(rel, abs_path, True), "w",
+                                 force_zip64=True) as wf:
+                        wf.write(blob)
+                    done += size
+                    if progress is not None and total:
+                        progress(min(1.0, done / total))
+                    written += 1
+                    continue
                 compressed = not rel.lower().endswith(STORE_SUFFIX)
                 try:
                     rf = open(abs_path, "rb")
@@ -208,7 +265,10 @@ def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
         raise
 
     stats = {"files": written, "skipped": skipped, "bytes": total,
-             "zip_bytes": os.path.getsize(dest_abs)}
+             "zip_bytes": os.path.getsize(dest_abs), "sanitized": bool(sanitize),
+             "dropped": dropped}
+    if plan is not None:
+        stats.update(plan.summary())
     return True, None, stats
 
 
