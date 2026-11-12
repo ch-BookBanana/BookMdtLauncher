@@ -92,7 +92,6 @@
     "core.wid.pages.start.modbtn": "모드 관리",
     "core.wid.pages.start.gamebtn": "게임 선택",
     "core.wid.pages.start.downloadbtn": "다운로드 페이지",
-    "core.wid.pages.start.importbtn": "로컬 JAR 가져오기",
     "core.wid.pages.start.java.idle": "준비됨",
     "core.wid.pages.start.java.missing": "Java를 찾을 수 없음",
     "core.wid.pages.start.java.resume": "미완료 Java 다운로드 재개 중...",
@@ -150,6 +149,7 @@
     "core.wid.pages.exportInstance.err.settingsUnreadable": "settings.bin 을 읽을 수 없어 내용을 확인할 수 없습니다 — 「개인 정보 삭제」를 해제하면 그대로 내보낼 수 있습니다",
     "core.wid.pages.download": "다운로드",
     "core.wid.pages.download.game": "게임 본체",
+    "core.wid.pages.download.import": "JAR 가져오기",
 
     "core.wid.pages.download.origin": "원본",
     "core.wid.pages.download.origin.search": "증분 검색",

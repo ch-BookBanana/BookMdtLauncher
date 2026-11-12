@@ -92,7 +92,6 @@
     "core.wid.pages.start.modbtn": "管理模组",
     "core.wid.pages.start.gamebtn": "选择游戏",
     "core.wid.pages.start.downloadbtn": "下载界面",
-    "core.wid.pages.start.importbtn": "导入本地JAR",
     "core.wid.pages.start.java.idle": "就绪",
     "core.wid.pages.start.java.missing": "未检测到Java",
     "core.wid.pages.start.java.resume": "正在下载未完成的Java...",
@@ -151,6 +150,7 @@
     "core.wid.pages.download": "下载",
 
     "core.wid.pages.download.game": "游戏本体",
+    "core.wid.pages.download.import": "导入 JAR",
     "core.wid.pages.download.origin": "原版",
     "core.wid.pages.download.origin.search": "增量搜索",
     "core.wid.pages.download.origin.searchAll": "全量搜索",

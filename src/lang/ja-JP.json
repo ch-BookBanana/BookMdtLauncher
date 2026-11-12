@@ -92,7 +92,6 @@
     "core.wid.pages.start.modbtn": "MODを管理",
     "core.wid.pages.start.gamebtn": "ゲーム選択",
     "core.wid.pages.start.downloadbtn": "ダウンロードページ",
-    "core.wid.pages.start.importbtn": "ローカルJARを導入",
     "core.wid.pages.start.java.idle": "準備完了",
     "core.wid.pages.start.java.missing": "Javaが見つかりません",
     "core.wid.pages.start.java.resume": "未完了のJavaダウンロードを再開中...",
@@ -150,6 +149,7 @@
     "core.wid.pages.exportInstance.err.settingsUnreadable": "settings.bin を解析できないため中身を確認できません —— 「個人情報を消す」のチェックを外せばそのまま書き出せます",
     "core.wid.pages.download": "ダウンロード",
     "core.wid.pages.download.game": "ゲーム本体",
+    "core.wid.pages.download.import": "JAR を導入",
 
     "core.wid.pages.download.origin": "原版",
     "core.wid.pages.download.origin.search": "増分検索",

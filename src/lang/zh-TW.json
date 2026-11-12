@@ -92,7 +92,6 @@
     "core.wid.pages.start.modbtn": "管理模組",
     "core.wid.pages.start.gamebtn": "選擇遊戲",
     "core.wid.pages.start.downloadbtn": "下載介面",
-    "core.wid.pages.start.importbtn": "匯入本機JAR",
     "core.wid.pages.start.java.idle": "就緒",
     "core.wid.pages.start.java.missing": "未檢測到Java",
     "core.wid.pages.start.java.resume": "正在下載未完成的Java...",
@@ -150,6 +149,7 @@
     "core.wid.pages.exportInstance.err.settingsUnreadable": "settings.bin 讀不出來，沒法確認裡面有什麼 —— 取消勾選「抹去個人資訊」可以照樣匯出",
     "core.wid.pages.download": "下載",
     "core.wid.pages.download.game": "遊戲本體",
+    "core.wid.pages.download.import": "匯入 JAR",
 
     "core.wid.pages.download.origin": "原版",
     "core.wid.pages.download.origin.search": "增量搜尋",

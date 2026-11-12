@@ -92,7 +92,6 @@
     "core.wid.pages.start.modbtn": "治模",
     "core.wid.pages.start.gamebtn": "擇戲",
     "core.wid.pages.start.downloadbtn": "納戲之頁",
-    "core.wid.pages.start.importbtn": "納本地JAR",
     "core.wid.pages.start.java.idle": "備妥",
     "core.wid.pages.start.java.missing": "未見Java",
     "core.wid.pages.start.java.resume": "續載未竟之Java...",
@@ -150,6 +149,7 @@
     "core.wid.pages.exportInstance.err.settingsUnreadable": "settings.bin 不能讀，無以知其內 —— 去「抹去私隱」之鉤則可徑出",
     "core.wid.pages.download": "納戲",
     "core.wid.pages.download.game": "戲本",
+    "core.wid.pages.download.import": "納 JAR",
 
     "core.wid.pages.download.origin": "原版",
     "core.wid.pages.download.origin.search": "增搜",

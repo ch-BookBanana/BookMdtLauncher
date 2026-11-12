@@ -39,6 +39,7 @@ from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
 from ...registry import Box, registry
+from .._init import open_overlay
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
 _FIELDS = {
@@ -281,6 +282,15 @@ class Game(QWidget):
                 # 统一注册搜索按钮（增量/全量），子类无需重复注册
                 self.add_action_btn("core.wid.pages.download.origin.search", lambda: self.search())
                 self.add_action_btn("core.wid.pages.download.origin.searchAll", lambda: self.searchAll())
+
+                # 本地导入：装新实例的第二条路（第一条是下面的下载列表）。
+                # 挂在下载页这排而不是主页那颗大按钮下面 —— 主页只留一个主动作；
+                # 「从本地文件装一个」本质上也是「获取游戏本体」，跟搜索下载同一件事。
+                # 三个下载源共用这一排，所以只写在这一处；拖放仍是全局快捷方式。
+                self.action_bar_layout.addSpacing(16)
+                self.add_action_btn("core.wid.pages.download.import",
+                                    lambda: open_overlay("core.importJar", self))
+
                 self.action_bar_layout.addStretch()
 
                 self.main = QWidget()

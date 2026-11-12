@@ -391,16 +391,6 @@ class Start(Page):
 
                     self.action.clicked.connect(self._on_click)
 
-                    # 导入本地 JAR：新建实例的第二个入口（第一个是下载页）。
-                    # 放在这一层而不是实例管理页里 —— 管理页管的是**已经装好**的
-                    # 实例，而这条路的产物此刻还不存在。无实例时它照样在，那正是
-                    # 离线装包最需要它的时刻。
-                    self.import_ = self.Btn(self)
-                    self.import_.setFixedSize(QSize(170,36))
-                    self.layout.addWidget(self.import_)
-                    self.import_.clicked.connect(
-                        lambda: open_overlay("core.importJar", self))
-
                 def _on_click(self):
                     # 有游戏：进入游戏选择列表；无游戏：前往下载页的「游戏本体」分类
                     if self.have_game:
@@ -411,7 +401,12 @@ class Start(Page):
                         # main 是构建期回填的产物（core.pages 声明了槽位）。
                         download = registry.entry("core.pages", "core.download").main
                         download.click()
-                        download.main.game.btn.click()
+                        # 下载页里的「游戏本体」页签同样按 key 取：注册表把 tab 的
+                        # 属性名存成「download/game」（点号统一规范成斜杠），所以
+                        # download.main.game 那个写法根本取不到。
+                        game = registry.entry("core.download.tabs",
+                                              "core.download.game").main
+                        game.btn.click()
 
                 def set_have_game(self, have: bool):
                     if self.have_game == have:
@@ -422,7 +417,6 @@ class Start(Page):
                 def langing(self):
                     btn = "core.wid.pages.start.gamebtn" if self.have_game else "core.wid.pages.start.downloadbtn"
                     self.action.setText(events.lang.get(btn))
-                    self.import_.setText(events.lang.get("core.wid.pages.start.importbtn"))
 
             class Mod(Pages):
                 def __init__(self, parent=None):

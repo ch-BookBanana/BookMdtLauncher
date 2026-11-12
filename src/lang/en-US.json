@@ -92,7 +92,6 @@
     "core.wid.pages.start.modbtn": "Manage Mods",
     "core.wid.pages.start.gamebtn": "Select Game",
     "core.wid.pages.start.downloadbtn": "Download Page",
-    "core.wid.pages.start.importbtn": "Import Local JAR",
     "core.wid.pages.start.java.idle": "Ready",
     "core.wid.pages.start.java.missing": "No Java detected",
     "core.wid.pages.start.java.resume": "Resuming unfinished Java download...",
@@ -150,6 +149,7 @@
     "core.wid.pages.exportInstance.err.settingsUnreadable": "settings.bin can't be parsed, so its contents can't be verified — uncheck “Strip personal info” to export anyway",
     "core.wid.pages.download": "Download",
     "core.wid.pages.download.game": "Game Files",
+    "core.wid.pages.download.import": "Import JAR",
 
     "core.wid.pages.download.origin": "Original",
     "core.wid.pages.download.origin.search": "Quick Search",
