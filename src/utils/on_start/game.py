@@ -32,6 +32,12 @@ def resume_mdt_downloads(root):
     有 .tmp/<task_id>/state.json → continue_task 续传；否则用 downloading.json
     的 url/dest 新建任务；downloading.json 记录 paused=true 时创建后立即暂停。
     """
+    # 上次取消时线程还卡在网络请求里，临时目录没能当场删干净（标记文件在）。
+    # 那些线程已经随进程消失，这里正好一次清掉，后面就不会再被当成待续传任务。
+    try:
+        QDownloader.clean_cancelled_tasks()
+    except Exception:
+        pass
     try:
         downloading = root.mdtManager.getDownloadingMdts() or {}
     except Exception as e:

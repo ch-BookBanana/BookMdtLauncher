@@ -123,6 +123,11 @@ class DlListPage(QWidget):
         try:
             actives = {}
             for task_id, task in QDownloader.get_active_tasks().items():
+                # 已经点了取消的任务不再上卡：线程可能还卡在网络请求里几十秒
+                # （见 QDownloader.cancel 的说明），留着卡片只会让用户以为
+                # 「取消没反应」，再点一次又排一遍 8 秒等待。
+                if getattr(task, "_is_cancelled", False):
+                    continue
                 done, total = 0, 0
                 try:
                     done, total = task.get_progress()
@@ -478,27 +483,23 @@ class DlListPage(QWidget):
                     self.btn_secondary.setEnabled(False)
 
                     def _do_cancel(e, task=self.task, dest=self.task_info.get("dest") or ""):
-                        try:
-                            stopped = task.cancel(timeout=8)
-                        except Exception:
-                            stopped = False
-                        # 分片线程没停下来就别删目标目录：它还阻塞在网络读上，
-                        # 收尾时会继续往临时目录里写。这时删掉目录，用户看到的
-                        # 是「取消了但文件又回来了」，而紧接着重新下载同一个目标
-                        # 会复用同一个 task_id，两个线程写同一批分块文件。
-                        if not stopped:
-                            events.logger.warning(t(
-                                events.lang.get("core.log.warning.dlCancelPending")))
-                            return False
-                        # 卡片最长会陈旧 1 秒：点下去的那一刻任务可能刚好下完、
-                        # 线程已经退出。那不算「取消」，不能把刚下好的实例删掉。
+                        # 顺序是「先删记录、再等线程」：
+                        #   线程最可能卡在 _prepare 的建连上（源连不通），那里没有
+                        #   可打断的 socket，cancel 要等满 8 秒才返回。要是先等，
+                        #   用户在这 8 秒里关掉启动器，downloading.json 还在，
+                        #   下次开又被续回来 —— 正是「取消完重启又出现」。
+                        #
+                        # 已经下满的任务不能当取消处理：卡片最长陈旧 1 秒，点下去
+                        # 的那一刻可能刚好下完，删了就是删掉一个刚装好的实例。
                         try:
                             _done, _total = task.get_progress()
                         except Exception:
                             _done, _total = 0, 0
                         if _total and _done >= _total:
                             return True
-                        # mdt 游戏下载：取消后删除目标文件夹（含 downloading.json）
+                        # mdt 游戏下载：立刻删目标文件夹（含 downloading.json）。
+                        # 与线程停没停无关 —— 分片只往临时目录写，_is_cancelled 之后
+                        # 目标目录不会再被碰。（合并阶段上前面的进度判断已经拦掉了）
                         if dest and _is_mdt_download(dest):
                             mdir = os.path.dirname(dest)
                             try:
@@ -508,6 +509,20 @@ class DlListPage(QWidget):
                                                         os.path.basename(mdir) or mdir))
                             except Exception:
                                 pass
+                        # 取消是「用户说了算」的动作，不因线程停不下来而作废：
+                        # cancel() 第一件事就是置位并落盘取消标记，后面的等待
+                        # 只决定「现在能不能顺手把临时目录也删了」。
+                        try:
+                            stopped = task.cancel(timeout=8)
+                        except Exception:
+                            stopped = False
+                        if not stopped:
+                            # 标记已落盘，重启不会再续；这里只是说明临时文件为什么
+                            # 还在（等线程自己超时退出，或下次启动统一清理）。
+                            events.logger.warning(t(
+                                events.lang.get("core.log.warning.dlCancelPending")))
+                        # 卡片下一轮快照就消失（_snapshot_tasks 跳过已取消任务），
+                        # 所以下面不再管按钮。
                         return True
                     QThTimer.task(0, _do_cancel, dedicated=True,
                                   result_callback=self._after_cancel)
@@ -515,13 +530,14 @@ class DlListPage(QWidget):
                 self.delete_requested.emit(self.state_file)
 
         def _after_cancel(self, stopped):
-            """取消收尾（主线程）：没停下来就把按钮放回去，让用户能再点一次。"""
+            """取消收尾（主线程）：卡片下一轮快照就会被收走，按钮保持冻结。
+
+            线程没停下来（stopped=False）也不再放回按钮：任务已标记取消，这一秒
+            内卡片就没了，再点一次只会又排一遍 8 秒等待、而且目标目录已删。
+            """
             try:
-                self._cancelling = False
                 if stopped:
-                    return      # 任务已从路由表摘除，下一轮快照会把卡片收走
-                self.btn_primary.setEnabled(True)
-                self.btn_secondary.setEnabled(True)
+                    self._cancelling = False
             except RuntimeError:
                 pass            # 卡片在这期间已被销毁
 

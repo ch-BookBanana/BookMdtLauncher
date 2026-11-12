@@ -1411,8 +1411,13 @@ try:
                             open_overlay("core.dlList", self)
 
                         def _check_state(self, event):
-                            """子线程：读取任务表，与本地状态比对，变化才 emit。"""
-                            cur = bool(QDownloader.get_active_tasks())
+                            """子线程：读取任务表，与本地状态比对，变化才 emit。
+
+                            已点取消、但线程还卡在网络请求里的任务不算「在下载」：
+                            它们已经从列表消失，图标还亮着会让人以为没取消掉。
+                            """
+                            cur = any(not getattr(t, "_is_cancelled", False)
+                                      for t in QDownloader.get_active_tasks().values())
                             if cur != self._active_state:
                                 self._active_state = cur
                                 event.lambdas[0].emit(cur)
