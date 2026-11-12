@@ -40,7 +40,7 @@ from shiboken6 import isValid
 
 from ...bus import bus
 from ...events import events
-from ...jarImport import (base_version, blank_info, inspect_package, suggest_name,
+from ...jarImport import (upstream_version, blank_info, inspect_package, suggest_name,
                           version_text)
 from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
@@ -295,9 +295,11 @@ class ImportJar(QWidget):
                         str(info.get("members", 0)))
             else:
                 # fork 的版本号 + 基座注脚：`2026.10.X38（基于 160.5）`。
-                # 只写 160.5 会让用户以为导进来的是官方包。
+                # 只写 160.5 会让用户以为导进来的是官方包（MDTX 的 build 仍是
+                # 它 fork 的那个上游版本；ARC 这类直接改 build 的 fork 不会走到
+                # 这里，它的显示版本就是 build）。
                 vers = version_text(info, prefix="") or "?"
-                base = base_version(info)
+                base = upstream_version(info)
                 if base:
                     vers += t(events.lang.get("core.text.basedOn"), base)
                 msg = t(lang.get("core.wid.pages.importJar.info"),

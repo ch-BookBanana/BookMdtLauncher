@@ -36,10 +36,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 版本号从哪来
 ------------
-官方包的 ``version.properties`` 就够了；fork（MindustryX 等）在 jar 根上还带
-一份 ``mod.hjson``，里面才是它**自己**的发布版本（``version``）和它基于哪个
-官方构建（``minGameVersion``）。两处都读，显示时用前者、注脚用后者 —— 只读
-``version.properties`` 会把 MDTX 显示成 MDT 的版本号（见 ``version_text``）。
+一个 fork 的 jar 里有两套版本信息，各答各的问题：
+
+- ``mod.hjson`` 的 ``version`` 是它**自己**的发布版本（MindustryX 是
+  ``2026.10.X38``）。只读 ``version.properties`` 会把 MDTX 显示成 MDT 的版本号。
+- ``version.properties`` 的 ``build`` 是它**从哪个上游构建分出来**（``160.5``）。
+  这个值是上游 gradle 构建时写进 jar 的，fork 只改自己的版本线、不动它 ——
+  所以它比 ``mod.hjson`` 的 ``minGameVersion`` 可靠：后者是「**最低**能跑的
+  游戏版本」，一个基于 160.5 分出来的改端完全可以声明 146 去兼容旧存档。
+
+显示用前者（见 ``version_text``），「（基于 160.5）」的注脚用后者
+（见 ``upstream_version``）。``minGameVersion`` 只在 build 不可用时兜底。
 
 本模块不 import Qt，也不 import src 下的任何东西。校验与拷贝都能在子线程里
 跑，也能脱离界面单独测（见 ``_selftest`` 段落所对应的手工验证）。
@@ -77,14 +84,12 @@ CHUNK = 1024 * 1024
 
 # fork（MindustryX 等）在 jar 根上放的模组说明文件。官方包没有它，所以
 # 「有没有这个文件」本身就是「这是不是改端」的判据。
-MOD_FILE = "mod.hjson"
-# mod.hjson 里认识的三个键 → info 里的字段名。
 #
-# version 是 fork **自己的**发布版本（MindustryX 是 `2026.10.X38` 这种），
-# minGameVersion 是它**基于哪个官方版本**分出来的（`160.5`）。两者与
-# version.properties 的 build 是不同层面的东西：build 记的是上游构建号，
-# 直接拿它当版本号，界面上就会把 MDTX 显示成 MDT 的版本。
-_MOD_KEYS = {"name": "mod", "version": "modVersion", "minGameVersion": "baseVersion"}
+# 这里只收它的自我声明：name（界面名）、version（它自己的发布版本，落到
+# modVersion）、minGameVersion（最低兼容的游戏版本，原样存着当兜底线索）。
+# 注意 minGameVersion **不是**「基于哪一版」—— 那是 version.properties 的
+# build 说的（见 upstream_version），别拿它当基座。
+MOD_FILE = "mod.hjson"
 
 
 def _read_props(raw):
@@ -109,7 +114,7 @@ def blank_info():
     """一份空结果，字段固定 —— 界面和 mdtManager 都按这几个键读。"""
     return {"ok": False, "kind": None, "error": None,
             "build": "", "modifier": "", "number": "", "type": "",
-            "mod": "", "modVersion": "", "baseVersion": "",
+            "mod": "", "modVersion": "", "minGameVersion": "",
             "main": "", "size": 0,
             "meta": {}, "members": 0, "unpacked": 0}
 
@@ -152,7 +157,7 @@ def _read_mod_hjson(raw):
     只做行级的 `键: 值` 匹配，键名**精确**比较（`xversion:` / `versions:`
     都不许命中）。取不到的键留空串。
     """
-    out = {"mod": "", "modVersion": "", "baseVersion": ""}
+    out = {"mod": "", "modVersion": "", "minGameVersion": ""}
     for line in raw.splitlines():
         line = line.strip()
         if not line or line[0] in "#/":
@@ -160,10 +165,13 @@ def _read_mod_hjson(raw):
         key, sep, value = line.partition(":")
         if not sep:
             continue
-        field = _MOD_KEYS.get(key.strip())
-        if field is None:
-            continue
-        out[field] = _hjson_value(value)
+        key = key.strip()
+        if key == "name":
+            out["mod"] = _hjson_value(value)
+        elif key == "version":
+            out["modVersion"] = _hjson_value(value)
+        elif key == "minGameVersion":
+            out["minGameVersion"] = _hjson_value(value)
     return out
 
 
@@ -173,7 +181,7 @@ def read_fork_info(zf):
     读不到 / 不是 fork 都返回空串，调用方拿 `modVersion` 判「这是不是改端」。
     真样本只有 ~170 B；超过 64 KiB 的不猜 —— 那不是一个正经的 mod.hjson。
     """
-    empty = {"mod": "", "modVersion": "", "baseVersion": ""}
+    empty = {"mod": "", "modVersion": "", "minGameVersion": ""}
     try:
         entry = zf.getinfo(MOD_FILE)
         if entry.file_size > 64 * 1024:
@@ -275,10 +283,11 @@ def _inspect_instance(zf, infos, names, info):
     info["members"] = len(files)
     info["unpacked"] = sum(i.file_size for i in files)
     # 版本信息取标记文件里记的：解一遍 mdt.jar 只为读几个字段不值当。
-    # mod / modVersion / baseVersion 是 fork 的自我声明，老包没有这三个键，
+    # build 是上游构建号，导入方据此算基座（见 upstream_version）；mod /
+    # modVersion / minGameVersion 是 fork 的自我声明，老包没有这几个键，
     # 取到空串就按官方包显示（与 jarImport 那侧同一套回落）。
     for key in ("build", "modifier", "number", "type",
-                "mod", "modVersion", "baseVersion"):
+                "mod", "modVersion", "minGameVersion"):
         info[key] = str(meta.get(key) or "")
     info["ok"] = True
     return info
@@ -325,11 +334,14 @@ def version_text(info, prefix="v", sep=" "):
       build 记的是它基于的官方构建 —— 只读后者会把 MDTX 显示成 MDT 的版本，
       这正是「明明装的是 X38，界面上却是 v160.5」的来源。fork 的版本串自带
       一套写法，原样显示，不加 ``v`` 前缀（官方界面也不加）。
-    - ``build``：官方包才有意义。``number`` 是**主版本号**（Mindustry 源码注释：
-      *Number specifying the major version*，v8 就是 8），官方界面从不显示它，
-      只用来判断「这是哪一代」；``modifier`` 是通道标记（release / beta / steam），
-      不是版本的一部分。以前三样点号一连，出来的是 ``v8.160.4release`` ——
-      前头多了个主版本号、后头缺分隔符、还把通道塞进了版本号里。
+    - ``build``：没有 ``mod.hjson`` 的包走这条 —— 官方包，以及 CN-ARC、
+      MindustryY 这类直接把自己的构建号写进 build 的 fork（ARC 的 build 就是
+      ``30936``，本来就不带上游版本）。``number`` 是**主版本号**（Mindustry
+      源码注释 *Number specifying the major version*，v8 就是 8），官方界面
+      从不显示它，只用来判断「这是哪一代」；``modifier`` 是通道标记（release /
+      beta / steam），不是版本的一部分。以前三样点号一连，出来的是
+      ``v8.160.4release`` —— 前头多了个主版本号、后头缺分隔符、还把通道塞进
+      了版本号里。
 
     ``sep`` 给名字用：实例名不允许空格，传 ``"-"`` 得到 ``160.4-beta``。
 
@@ -366,23 +378,56 @@ def _looks_like_version(value):
     return all(ch.isdigit() or ch.isalpha() or ch in ".-_" for ch in value)
 
 
-def base_version(info):
-    """fork 声明的基座官方版本（``mod.hjson`` 的 ``minGameVersion``）。
+def _usable_build(value):
+    """``version.properties`` 里的 build 能不能当版本串用。
+
+    0 / -1 是 Mindustry 给自定义构建的占位值（``build = -1`` 表示「不是从
+    某个 release tag 构建的」），既不是版本号也不该出现在「基于 X」里。
+    """
+    build = str(value or "").strip()
+    if build in ("", "0", "-1"):
+        return ""
+    return build if _looks_like_version(build) else ""
+
+
+def upstream_version(info):
+    """这个 jar 从哪个官方构建分出来 —— ``version.properties`` 的 ``build``。
 
     返回**裸版本串**（``160.5``），拼成什么话由界面决定（「基于 160.5」）。
-    三种情形返回空串，都是有意的：
 
-    - 官方包 / 别的 fork 没声明基座 —— 没这个字段；
-    - 声明值不像版本号（gradle 默认的 ``custom``）—— 那是「没设」，不是版本；
-    - 基座与显示的版本相同 —— 官方包两个字段同源同值，缀一句「基于 160.5」
-      只是同义反复。
+    为什么是 build 而不是 ``mod.hjson`` 的 ``minGameVersion``：改端有两类，
+    build 对两类都说真话，``minGameVersion`` 只对一类勉强沾边。
+
+    - **保留上游 version.properties 的**（MindustryX）：build 仍是上游构建号
+      （``160.5``），只额外声明自己的版本线（``mod.hjson`` 的 ``version``）。
+      这时 build 精确回答「我从哪一版分出来」。
+    - **直接改 build 的**（CN-ARC、MindustryY 这类纯 fork）：build 就是它自己
+      的构建号（ARC 是 ``30936``）。这时它与显示版本相同，本函数返回空串 ——
+      不显示注脚，正好。
+
+    ``minGameVersion`` 回答的是另一个问题：「**最低**兼容哪个游戏版本」，是给
+    模组加载器做兼容判断的，可以远低于实际分支点（基于 160.5 的改端完全可以
+    声明 146 去兼容旧存档）。拿它当基座，界面上会写出「基于 146」而实例里跑
+    的其实是 160.5 的代码。
+
+    ``minGameVersion`` 只在 build 不可用时兜底：build 为 0 / -1（自定义构建的
+    占位值）或字段整个缺失时，它至少是个线索，比什么都不显示强。
+
+    返回空串的情形，都是有意的：
+
+    - 官方包 / 直接改 build 的 fork：build 就是显示版本，缀一句「基于 160.4」
+      只是同义反复；
+    - 兜底值也不像版本号（gradle 默认的 ``custom``）—— 那是「没设」，不是版本。
     """
     if not info:
         return ""
-    base = str(info.get("baseVersion") or "").strip()
-    if not _looks_like_version(base):
-        return ""
-    if base == version_text(info, prefix="", sep="-"):
+    shown = version_text(info, prefix="", sep="-")
+    base = _usable_build(info.get("build"))
+    if not base:
+        fallback = str(info.get("minGameVersion") or "").strip()
+        if _looks_like_version(fallback):
+            base = fallback
+    if not base or base == shown:
         return ""
     return base
 

@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
 from ...bus import bus
 from ...events import events
 from ...flowLayout import FlowLayout
-from ...jarImport import base_version, version_text
+from ...jarImport import upstream_version, version_text
 from ...javaManager import javaManager
 from ...mdtManager import mdtManager
 from ...options.items import Bool, Combo
@@ -436,7 +436,7 @@ class GameSettings(Scroll):
             # 基座注脚：fork（MindustryX 等）自己的版本号才是「这一版」，但那
             # 一版是从哪个官方版本分出来的同样得看得见 —— 与安卓端同一套口径，
             # 主版本号占主位，基座用灰字缀在后面（「2026.10.X38（基于 160.5）」）。
-            # 官方包没有这段，sets() 里按 base_version 的返回值显隐。
+            # 官方包没有这段，sets() 里按 upstream_version 的返回值显隐。
             self.base = QLabel()
             self.base.setProperty("wid", "text")
             self.base.setStyleSheet("font-size: 16px; color: gray;")
@@ -492,16 +492,16 @@ class GameSettings(Scroll):
             """填入实例信息（mdtManager.getMdtMsg 的返回值）；msg 为 None 则全部留空。
 
             msg 里 icon 是图标文件路径，版本号统一由 jarImport.version_text 拼：
-            fork（MindustryX 等）在 jar 根上有 mod.hjson，它自己的发布版本优先；
-            官方包 / 没有声明时才落到 version.properties 的 build。基座版本由
-            base_version 另取一句灰字注脚，官方包返回空串，这里跟着藏掉。
+            有 mod.hjson 的改端（MindustryX）用自己的发布版本，其余（官方、CN-ARC
+            这类直接改 build 的 fork）用 version.properties 的 build。基座注脚由
+            upstream_version 取 build —— 与显示版本相同就返回空串，这里跟着藏掉。
             """
             pm = QPixmap(msg["icon"]) if msg else QPixmap()
             if not pm.isNull():
                 pm = pm.scaled(self.icon.width(), self.icon.height(),
                                Qt.KeepAspectRatio, Qt.SmoothTransformation)
             vers = version_text(msg)
-            self._base = base_version(msg)
+            self._base = upstream_version(msg)
             self.icon.setPixmap(pm)
             self.name.setText(name or "")
             self.vers.setText(vers)

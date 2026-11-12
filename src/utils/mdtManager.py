@@ -878,7 +878,7 @@ class mdtManager(QObject):
         icon_path 为 null 或指向无效图片时自动写回默认图标（DEFAULT_ICON）。
         使用 (jar_mtime, png, png_mtime, png_size) 作为缓存键，避免重复读取 zip。
 
-        fork（MindustryX 等）额外带回 mod / modVersion / baseVersion 三个字段，
+        fork（MindustryX 等）额外带回 mod / modVersion / minGameVersion 三个字段，
         与 jarImport.read_fork_info 同源：官方包这三项是空串，显示层据此回落。
 
         缓存键**刻意不含 BML.json 的 mtime**：BML.json 里还存着设置的镜像

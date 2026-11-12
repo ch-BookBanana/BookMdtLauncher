@@ -295,10 +295,12 @@ class ExportInstance(QWidget):
         meta = {"name": self.game}
         try:
             version = mdtManager.getMdtMsg(self.game) or {}
-            # mod / modVersion / baseVersion 是 fork 的自报家门（MindustryX 等）：
-            # 只记 build 的话，接收方看到的又是一个「MDT 版本」而不是这一版改端
+            # mod / modVersion / minGameVersion 是 fork 的自报家门（MindustryX
+            # 等）：只记 build 的话，接收方看到的又是一个「MDT 版本」而不是这一版
+            # 改端。接收方拿 build 算基座（jarImport.upstream_version），
+            # minGameVersion 只是 build 不可用时的兜底。
             for key in ("build", "modifier", "number", "type",
-                        "mod", "modVersion", "baseVersion"):
+                        "mod", "modVersion", "minGameVersion"):
                 meta[key] = str(version.get(key) or "")
         except Exception:
             # 读不到版本就不是致命问题：包照样能导，只是标记文件里少几个字段
