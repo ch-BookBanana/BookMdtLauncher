@@ -26,7 +26,7 @@ from .javaManager import javaManager
 from .qthtimer import QThTimer
 from .resources import (ICON_MDT)
 from .jarImport import (MANIFEST_NAME, copy_jar, extract_package,
-                        inspect_jar, inspect_package)
+                        inspect_jar, inspect_package, read_fork_info)
 
 _log = logging.getLogger("Main.MdtManager")
 
@@ -872,11 +872,14 @@ class mdtManager(QObject):
 
     @classmethod
     def getMdtMsg(cls, subdir_name):
-        """返回 version.properties 解析后的字典，失败返回 None。
+        """返回版本信息字典（version.properties + fork 的 mod.hjson），失败返回 None。
 
         图标解析优先级：子目录 icon.png > BML.json 的 icon_path > 默认图标。
         icon_path 为 null 或指向无效图片时自动写回默认图标（DEFAULT_ICON）。
         使用 (jar_mtime, png, png_mtime, png_size) 作为缓存键，避免重复读取 zip。
+
+        fork（MindustryX 等）额外带回 mod / modVersion / baseVersion 三个字段，
+        与 jarImport.read_fork_info 同源：官方包这三项是空串，显示层据此回落。
 
         缓存键**刻意不含 BML.json 的 mtime**：BML.json 里还存着设置的镜像
         （mdtData），游戏每改一次设置就会让它刷新；若拿 mtime 当键，每刷新一次
@@ -939,7 +942,10 @@ class mdtManager(QObject):
                     cls._mdt_msg_cache.pop(subdir_name, None)
                     return None
                 data = zf.read('version.properties').decode('utf-8')
-                result = _parse_simple_config_typed(data) | {"icon": png}
+                # 同一个 zip 句柄顺手读 mod.hjson：fork 的版本号在那儿，
+                # 再开一次包为了读 170 字节不值当
+                result = (_parse_simple_config_typed(data)
+                          | read_fork_info(zf) | {"icon": png})
                 cls._mdt_msg_cache[subdir_name] = (cache_key, result)
                 return result
         except Exception:

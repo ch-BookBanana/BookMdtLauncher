@@ -251,6 +251,7 @@
     "core.text.done": "完了",
     "core.text.return": "戻る",
     "core.text.default": "デフォルト",
+    "core.text.basedOn": "（$1 ベース）",
     "core.text.save": "保存",
     "core.text.clear": "クリア",
     "core.text.loading": "読み込み中..."

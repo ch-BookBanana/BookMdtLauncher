@@ -256,6 +256,7 @@
     "core.text.done": "完成",
     "core.text.return": "返回",
     "core.text.default": "默认",
+    "core.text.basedOn": "（基于 $1）",
     "core.text.save": "保存",
     "core.text.clear": "清除",
     "core.text.loading": "加载中..."

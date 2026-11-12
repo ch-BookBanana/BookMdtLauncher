@@ -34,6 +34,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 所以先验后拷：验不过一个字节都不写。
 
+版本号从哪来
+------------
+官方包的 ``version.properties`` 就够了；fork（MindustryX 等）在 jar 根上还带
+一份 ``mod.hjson``，里面才是它**自己**的发布版本（``version``）和它基于哪个
+官方构建（``minGameVersion``）。两处都读，显示时用前者、注脚用后者 —— 只读
+``version.properties`` 会把 MDTX 显示成 MDT 的版本号（见 ``version_text``）。
+
 本模块不 import Qt，也不 import src 下的任何东西。校验与拷贝都能在子线程里
 跑，也能脱离界面单独测（见 ``_selftest`` 段落所对应的手工验证）。
 """
@@ -68,6 +75,17 @@ ERR_UNSAFE = "unsafeArchive"   # 包里有指向目录外的路径（zip slip）
 # 取整个文件又退化成「点一下卡住、然后突然完成」。
 CHUNK = 1024 * 1024
 
+# fork（MindustryX 等）在 jar 根上放的模组说明文件。官方包没有它，所以
+# 「有没有这个文件」本身就是「这是不是改端」的判据。
+MOD_FILE = "mod.hjson"
+# mod.hjson 里认识的三个键 → info 里的字段名。
+#
+# version 是 fork **自己的**发布版本（MindustryX 是 `2026.10.X38` 这种），
+# minGameVersion 是它**基于哪个官方版本**分出来的（`160.5`）。两者与
+# version.properties 的 build 是不同层面的东西：build 记的是上游构建号，
+# 直接拿它当版本号，界面上就会把 MDTX 显示成 MDT 的版本。
+_MOD_KEYS = {"name": "mod", "version": "modVersion", "minGameVersion": "baseVersion"}
+
 
 def _read_props(raw):
     """解析 version.properties（java Properties 的一个够用子集）。
@@ -91,8 +109,79 @@ def blank_info():
     """一份空结果，字段固定 —— 界面和 mdtManager 都按这几个键读。"""
     return {"ok": False, "kind": None, "error": None,
             "build": "", "modifier": "", "number": "", "type": "",
+            "mod": "", "modVersion": "", "baseVersion": "",
             "main": "", "size": 0,
             "meta": {}, "members": 0, "unpacked": 0}
+
+
+def _strip_hjson_comment(text):
+    """去掉引号外的行尾注释（`"160.5" # x` / `160.5 // x`）。
+
+    只看引号外的字符：值本身可能含 `#`（名字里少，但别假设），quoted 之后
+    这些字符都算正文。
+    """
+    quote = ""
+    for i, ch in enumerate(text):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return text[:i]
+        elif ch == "/" and text[i + 1:i + 2] == "/":
+            return text[:i]
+    return text
+
+
+def _hjson_value(text):
+    """取一个 hjson 标量：去引号、去行尾注释。
+
+    真样本是 `version: "2026.10.X38"` 这种，够用就行 —— 不引 hjson 库
+    （这个文件约定不 import 第三方，也避免为了四个字段把整包解析一遍）。
+    """
+    value = _strip_hjson_comment(text).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1].strip()
+    return value
+
+
+def _read_mod_hjson(raw):
+    """从 mod.hjson 文本里取 name / version / minGameVersion。
+
+    只做行级的 `键: 值` 匹配，键名**精确**比较（`xversion:` / `versions:`
+    都不许命中）。取不到的键留空串。
+    """
+    out = {"mod": "", "modVersion": "", "baseVersion": ""}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line[0] in "#/":
+            continue
+        key, sep, value = line.partition(":")
+        if not sep:
+            continue
+        field = _MOD_KEYS.get(key.strip())
+        if field is None:
+            continue
+        out[field] = _hjson_value(value)
+    return out
+
+
+def read_fork_info(zf):
+    """从已打开的 jar 里读 fork 声明（mod.hjson），返回那三个字段。
+
+    读不到 / 不是 fork 都返回空串，调用方拿 `modVersion` 判「这是不是改端」。
+    真样本只有 ~170 B；超过 64 KiB 的不猜 —— 那不是一个正经的 mod.hjson。
+    """
+    empty = {"mod": "", "modVersion": "", "baseVersion": ""}
+    try:
+        entry = zf.getinfo(MOD_FILE)
+        if entry.file_size > 64 * 1024:
+            return empty
+        raw = zf.read(MOD_FILE).decode("utf-8", "replace")
+    except (KeyError, OSError, RuntimeError, zipfile.BadZipFile, ValueError):
+        return empty
+    return _read_mod_hjson(raw)
 
 
 def inspect_package(path):
@@ -149,6 +238,9 @@ def _inspect_client(zf, info):
     props = _read_props(zf.read("version.properties"))
     for key in ("build", "modifier", "number", "type"):
         info[key] = props.get(key, "")
+    # fork 的 mod.hjson 与 version.properties 并列：前者说「我是谁、我这一版叫什么」，
+    # 后者说「我基于哪个官方构建」。两者都要，显示时取前者、注脚用后者。
+    info.update(read_fork_info(zf))
     info["main"] = _main_class(zf)
     info["kind"] = "jar"
     info["members"] = 1
@@ -182,8 +274,11 @@ def _inspect_instance(zf, infos, names, info):
     info["meta"] = meta
     info["members"] = len(files)
     info["unpacked"] = sum(i.file_size for i in files)
-    # 版本信息取标记文件里记的：解一遍 mdt.jar 只为读 4 个字段不值当
-    for key in ("build", "modifier", "number", "type"):
+    # 版本信息取标记文件里记的：解一遍 mdt.jar 只为读几个字段不值当。
+    # mod / modVersion / baseVersion 是 fork 的自我声明，老包没有这三个键，
+    # 取到空串就按官方包显示（与 jarImport 那侧同一套回落）。
+    for key in ("build", "modifier", "number", "type",
+                "mod", "modVersion", "baseVersion"):
         info[key] = str(meta.get(key) or "")
     info["ok"] = True
     return info
@@ -221,21 +316,31 @@ def _main_class(zf):
 
 
 def version_text(info, prefix="v", sep=" "):
-    """把 version.properties 的字段拼成一句人看的版本号：``v160.4`` / ``v149 beta``。
+    """把客户端声明的版本拼成一句人看的版本号：``v160.4`` / ``2026.10.X38``。
 
-    三个字段里只有 ``build`` 是版本号本身。``number`` 是**主版本号**（Mindustry
-    源码注释：*Number specifying the major version*，v8 就是 8），官方界面从不
-    显示它，只用来判断「这是哪一代」；``modifier`` 是通道标记（release / beta /
-    steam），不是版本的一部分。以前三样点号一连，出来的是 ``v8.160.4release`` ——
-    前头多了个主版本号、后头缺分隔符、还把通道塞进了版本号里。
+    两个来源，先看 fork 自己的：
+
+    - ``modVersion``：jar 根上 ``mod.hjson`` 的 ``version``。MindustryX 这类
+      改端**自己有版本线**（``2026.10.X38``），而 ``version.properties`` 里的
+      build 记的是它基于的官方构建 —— 只读后者会把 MDTX 显示成 MDT 的版本，
+      这正是「明明装的是 X38，界面上却是 v160.5」的来源。fork 的版本串自带
+      一套写法，原样显示，不加 ``v`` 前缀（官方界面也不加）。
+    - ``build``：官方包才有意义。``number`` 是**主版本号**（Mindustry 源码注释：
+      *Number specifying the major version*，v8 就是 8），官方界面从不显示它，
+      只用来判断「这是哪一代」；``modifier`` 是通道标记（release / beta / steam），
+      不是版本的一部分。以前三样点号一连，出来的是 ``v8.160.4release`` ——
+      前头多了个主版本号、后头缺分隔符、还把通道塞进了版本号里。
 
     ``sep`` 给名字用：实例名不允许空格，传 ``"-"`` 得到 ``160.4-beta``。
 
-    取不到可用的 build（自定义构建写 0 或 -1，或字段整个缺失）时返回空串，由
+    取不到可用的版本（自定义构建写 0 或 -1，或字段整个缺失）时返回空串，由
     调用方当「没有版本号」处理 —— 显示 ``v0`` 比空着更容易让人以为装错了。
     """
     if not info:
         return ""
+    fork = str(info.get("modVersion") or "").strip()
+    if fork:
+        return fork
     build = str(info.get("build") or "").strip()
     # 0 / -1 是 Mindustry 给自定义构建的占位值，不是真版本号。
     # build 缺失时退一级用主版本号：老 jar 或第三方打包可能只写了 number。
@@ -249,14 +354,49 @@ def version_text(info, prefix="v", sep=" "):
     return prefix + core
 
 
+def _looks_like_version(value):
+    """像不像一个版本号：首字符必须是数字，其余只允许数字/点/字母/`-`/`_`。
+
+    专挡 gradle 的默认值 ``"custom"``（``upstreamBuild ?: "custom"``）：真出现
+    时它表示「没设基座」，不是「基座叫 custom」。不挡的话界面上会写出
+    「基于 custom」。宁可返回 False（退化成不显示基座）。
+    """
+    if not value or not value[0].isdigit():
+        return False
+    return all(ch.isdigit() or ch.isalpha() or ch in ".-_" for ch in value)
+
+
+def base_version(info):
+    """fork 声明的基座官方版本（``mod.hjson`` 的 ``minGameVersion``）。
+
+    返回**裸版本串**（``160.5``），拼成什么话由界面决定（「基于 160.5」）。
+    三种情形返回空串，都是有意的：
+
+    - 官方包 / 别的 fork 没声明基座 —— 没这个字段；
+    - 声明值不像版本号（gradle 默认的 ``custom``）—— 那是「没设」，不是版本；
+    - 基座与显示的版本相同 —— 官方包两个字段同源同值，缀一句「基于 160.5」
+      只是同义反复。
+    """
+    if not info:
+        return ""
+    base = str(info.get("baseVersion") or "").strip()
+    if not _looks_like_version(base):
+        return ""
+    if base == version_text(info, prefix="", sep="-"):
+        return ""
+    return base
+
+
 def suggest_name(info, path, prefix="Mindustry"):
-    """给实例起个默认名：``Mindustry-<build>``（非正式版再加 ``-<modifier>``）。
+    """给实例起个默认名：``Mindustry-<build>`` / ``MindustryX-<版本>``。
 
     与下载页的「<界面名>-<版本>」同源（见下载页的 _init_name_input），
     于是在列表里，导入的实例和下载来的实例长得一样，不会一半叫
-    「Mindustry-146」一半叫「Mindustry-149-beta」。
+    「Mindustry-146」一半叫「Mindustry-149-beta」。fork 连界面名一起换：
+    MindustryX 的包默认叫 ``MindustryX-2026.10.X38``，与下载页那边
+    「MindustryX-<release 名>」对得上。
 
-    取不到 build（version.properties 写了别的字段）就退回文件名 —— 名字只是
+    取不到版本（version.properties 写了别的字段）就退回文件名 —— 名字只是
     默认值，用户在弹窗里可以改，猜错不比留空更糟。
 
     实例包优先用包里记的原实例名：用户导出的可能就叫「我的整合」，按 build
@@ -266,6 +406,12 @@ def suggest_name(info, path, prefix="Mindustry"):
         original = str((info.get("meta") or {}).get("name") or "").strip()
         if original:
             return original
+    # fork 自报的名字优先（MindustryX），官方包没有这一项就沿用调用方给的。
+    # 只在这种名字「看起来能当目录名」时采用：太长的、带 Windows 非法字符的
+    # 都退回调用方的前缀 —— 默认名再准也只是默认值，不该先给一个存不下去的。
+    mod = str((info or {}).get("mod") or "").strip()
+    if mod and len(mod) <= 16 and not any(ch in mod for ch in '\\/:*?"<>|'):
+        prefix = mod
     # 名字里不能有空格，拼接规则本身与界面上的版本号同源，只换个分隔符
     core = version_text(info, prefix="", sep="-")
     if core:

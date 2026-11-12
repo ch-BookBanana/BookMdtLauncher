@@ -251,6 +251,7 @@
     "core.text.done": "Done",
     "core.text.return": "Back",
     "core.text.default": "Default",
+    "core.text.basedOn": " (based on $1)",
     "core.text.save": "Save",
     "core.text.clear": "Clear",
     "core.text.loading": "Loading..."

@@ -40,7 +40,8 @@ from shiboken6 import isValid
 
 from ...bus import bus
 from ...events import events
-from ...jarImport import blank_info, inspect_package, suggest_name, version_text
+from ...jarImport import (base_version, blank_info, inspect_package, suggest_name,
+                          version_text)
 from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
@@ -293,9 +294,14 @@ class ImportJar(QWidget):
                         "%.1f" % (info.get("size", 0) / 1048576.0),
                         str(info.get("members", 0)))
             else:
+                # fork 的版本号 + 基座注脚：`2026.10.X38（基于 160.5）`。
+                # 只写 160.5 会让用户以为导进来的是官方包。
+                vers = version_text(info, prefix="") or "?"
+                base = base_version(info)
+                if base:
+                    vers += t(events.lang.get("core.text.basedOn"), base)
                 msg = t(lang.get("core.wid.pages.importJar.info"),
-                        version_text(info, prefix="") or "?",
-                        "%.1f" % (info.get("size", 0) / 1048576.0))
+                        vers, "%.1f" % (info.get("size", 0) / 1048576.0))
             if not text:
                 msg = msg + "  " + lang.get("core.wid.pages.importJar.name.none")
             else:

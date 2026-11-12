@@ -251,6 +251,7 @@
     "core.text.done": "畢",
     "core.text.return": "歸",
     "core.text.default": "本設",
+    "core.text.basedOn": "（本於 $1）",
     "core.text.save": "存之",
     "core.text.clear": "清之",
     "core.text.loading": "載入中..."

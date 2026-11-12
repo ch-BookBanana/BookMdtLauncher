@@ -251,6 +251,7 @@
     "core.text.done": "완료",
     "core.text.return": "뒤로",
     "core.text.default": "기본값",
+    "core.text.basedOn": " ($1 기반)",
     "core.text.save": "저장",
     "core.text.clear": "삭제",
     "core.text.loading": "로딩 중..."

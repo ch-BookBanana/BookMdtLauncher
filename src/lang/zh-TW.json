@@ -251,6 +251,7 @@
     "core.text.done": "完成",
     "core.text.return": "返回",
     "core.text.default": "預設",
+    "core.text.basedOn": "（基於 $1）",
     "core.text.save": "儲存",
     "core.text.clear": "清除",
     "core.text.loading": "載入中..."
