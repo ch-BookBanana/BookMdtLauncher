@@ -228,16 +228,33 @@ class DlListPage(QWidget):
             events.logger.error(t(events.lang.get("core.log.error.dlResumeFailed"), task_id, e))
 
     def _delete_task(self, state_file):
+        # 先读状态、再删目录：反过来写的话 state_file 已经不存在了，
+        # dest 永远读到空串，mdt 目标文件夹（含 downloading.json）就留了下来，
+        # 下次启动又会被当成「未完成的下载」续传回来 —— 用户视角是「删不掉」。
+        #
+        # 两个文件都要看：下到一半被关掉的任务只有 download.json（state.json
+        # 每 10 个块才写一次），只认 state.json 的话恰恰是这批最难缠的任务删不掉。
         task_dir = os.path.dirname(state_file) if state_file else None
+        dest = ""
+        for name in ("state.json", "download.json"):
+            if not task_dir:
+                break
+            path = os.path.join(task_dir, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    dest = (json.load(f) or {}).get("dest_path", "") or ""
+            except Exception:
+                dest = ""
+            if dest:
+                break
+
         if task_dir and os.path.isdir(task_dir):
             shutil.rmtree(task_dir, ignore_errors=True)
         # 若是 mdt 游戏下载：同时删除目标文件夹（含 downloading.json），
         # 避免残留记录导致下次启动又被续传
         try:
-            dest = ""
-            if state_file and os.path.isfile(state_file):
-                with open(state_file, "r", encoding="utf-8") as f:
-                    dest = (json.load(f) or {}).get("dest_path", "") or ""
             if dest and _is_mdt_download(dest):
                 mdir = os.path.dirname(dest)
                 if os.path.isdir(mdir):
@@ -260,6 +277,7 @@ class DlListPage(QWidget):
             self.task = None      # 运行中任务的 QDownloader 实例（pending 为 None）
             self.state_file = ""
             self.task_info = {}
+            self._cancelling = False   # 取消请求已发出、还在等线程退出
             self.init_ui()
 
         def init_ui(self):
@@ -451,6 +469,14 @@ class DlListPage(QWidget):
             # 待续传：请求页面删除
             if self.task_info.get("kind") == "active":
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
+                    if self._cancelling:
+                        return
+                    # 取消要在网络读上等，最多 8 秒。这期间把两个按钮冻住：
+                    # 连点会再排一次 cancel，第二次照样得把 timeout 走完。
+                    self._cancelling = True
+                    self.btn_primary.setEnabled(False)
+                    self.btn_secondary.setEnabled(False)
+
                     def _do_cancel(e, task=self.task, dest=self.task_info.get("dest") or ""):
                         try:
                             stopped = task.cancel(timeout=8)
@@ -463,7 +489,15 @@ class DlListPage(QWidget):
                         if not stopped:
                             events.logger.warning(t(
                                 events.lang.get("core.log.warning.dlCancelPending")))
-                            return
+                            return False
+                        # 卡片最长会陈旧 1 秒：点下去的那一刻任务可能刚好下完、
+                        # 线程已经退出。那不算「取消」，不能把刚下好的实例删掉。
+                        try:
+                            _done, _total = task.get_progress()
+                        except Exception:
+                            _done, _total = 0, 0
+                        if _total and _done >= _total:
+                            return True
                         # mdt 游戏下载：取消后删除目标文件夹（含 downloading.json）
                         if dest and _is_mdt_download(dest):
                             mdir = os.path.dirname(dest)
@@ -474,9 +508,22 @@ class DlListPage(QWidget):
                                                         os.path.basename(mdir) or mdir))
                             except Exception:
                                 pass
-                    QThTimer.task(0, _do_cancel, dedicated=True)
+                        return True
+                    QThTimer.task(0, _do_cancel, dedicated=True,
+                                  result_callback=self._after_cancel)
             else:
                 self.delete_requested.emit(self.state_file)
+
+        def _after_cancel(self, stopped):
+            """取消收尾（主线程）：没停下来就把按钮放回去，让用户能再点一次。"""
+            try:
+                self._cancelling = False
+                if stopped:
+                    return      # 任务已从路由表摘除，下一轮快照会把卡片收走
+                self.btn_primary.setEnabled(True)
+                self.btn_secondary.setEnabled(True)
+            except RuntimeError:
+                pass            # 卡片在这期间已被销毁
 
 
 def register():

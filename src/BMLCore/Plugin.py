@@ -362,8 +362,10 @@ class Plugin:
         downloads, self._downloads = self._downloads, []
         for dl in downloads:
             try:
-                dl.cancel()
-                dl.wait_thread(5)
+                # cancel 的 timeout 是秒：不传会一直等到线程退出，插件卸载会把
+                # 界面卡在这里；传 5 秒，剩下的交给下面的 wait_thread 兜底
+                dl.cancel(timeout=5)
+                dl.wait_thread(5000)
             except Exception:
                 pass
         threads, self._threads = self._threads, []
