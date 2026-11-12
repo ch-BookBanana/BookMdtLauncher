@@ -286,7 +286,11 @@ class Start(Page):
                     pm = pm.scaled(120, 120, Qt.KeepAspectRatio, Qt.FastTransformation)
                 self.icon.setPixmap(pm)
             if gameTxt[0]:
-                self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, 150))
+                # 省略宽度按栏宽算（-30 是左右各 15px 的呼吸位），不再写死 150：
+                # 150 时「Mindustry-160.4」刚好放不下，截出来的正是版本号那一段
+                # （「Mindustry-16…」），而版本号下一行又要再说一遍。
+                budget = max(140, self.width() - 30)
+                self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, budget))
             if versTxt[0]:
                 self.versTxt.setText(QFontMetrics(self.versTxt.font()).elidedText(versTxt[1], Qt.ElideRight, 130))
             # 图标悬浮提示：名称 + 版本（二者都可能为空，拼一起即可；无实例时自动清空）
