@@ -146,6 +146,7 @@ from . import download             # noqa: E402,F401
 from . import game                 # noqa: E402,F401
 from . import setting              # noqa: E402,F401
 from .Modal import githubSetting    # noqa: E402,F401
+from .Modal import exportInstance   # noqa: E402,F401
 from .Modal import importJar        # noqa: E402,F401
 from .Stack import dlList             # noqa: E402,F401
 from .downloads import game as _download_sources   # noqa: E402,F401
@@ -158,6 +159,7 @@ start.register()                   # core.start.bottom（底部按钮页）
 download.register()                # core.download.tabs（左栏页签）
 setting.register()                 # core.setting.pages + core.setting.items
 githubSetting.register()           # core.overlays：GitHub 设置页（叠加层）
+exportInstance.register()          # core.overlays：导出实例（叠加层）
 importJar.register()               # core.overlays：导入本地 JAR（叠加层）
 dlList.register()                  # core.overlays：下载列表（浮层栈）
 _download_sources.register()       # core.download.sources（三个下载源）

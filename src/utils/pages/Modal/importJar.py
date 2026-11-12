@@ -40,7 +40,7 @@ from shiboken6 import isValid
 
 from ...bus import bus
 from ...events import events
-from ...jarImport import inspect_jar, suggest_name
+from ...jarImport import blank_info, inspect_package, suggest_name
 from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
@@ -211,7 +211,10 @@ class ImportJar(QWidget):
         # 也能到几百毫秒 —— 那点卡顿正好落在「选完文件」这一刻，最像卡死。
         # 路径按值绑定（p=path）而不是让线程去读 self._jar：用户可能连着换两个
         # 文件，读实例字段会让「A 的结果」落到「B 的路径」上。
-        QThTimer.task(0, lambda e, p=path: (p, inspect_jar(p)),
+        #
+        # inspect_package 而不是 inspect_jar：同一个入口要同时认客户端 jar 与
+        # BML 导出的实例包，按包内标记分流，界面不必让用户先选「我要导哪种」。
+        QThTimer.task(0, lambda e, p=path: (p, inspect_package(p)),
                       result_callback=self._on_probe)
 
     def _on_probe(self, result):
@@ -220,14 +223,13 @@ class ImportJar(QWidget):
             return
         if isinstance(result, Exception):
             # QThTimer 把 job 里漏出来的异常原样回传（见 task 的 _wrapped_job）
-            path, info = self._jar, {"ok": False, "error": "notZip", "build": "",
-                                     "modifier": "", "number": "", "type": "",
-                                     "main": "", "size": 0}
+            path, info = self._jar, blank_info()
+            info["error"] = "notZip"
         else:
             path, info = result
             if isinstance(info, Exception):
-                info = {"ok": False, "error": "notZip", "build": "", "modifier": "",
-                        "number": "", "type": "", "main": "", "size": 0}
+                info = blank_info()
+                info["error"] = "notZip"
         if path != self._jar:
             return      # 期间又选了别的文件，这份结果已经过期
         self._info = info
@@ -263,9 +265,17 @@ class ImportJar(QWidget):
             msg = lang.get("core.wid.pages.importJar.err." + str(info.get("error") or "notZip"))
             style = "color: red;"
         else:
-            msg = t(lang.get("core.wid.pages.importJar.info"),
-                    self._version_text(info),
-                    "%.1f" % (info.get("size", 0) / 1048576.0))
+            if info.get("kind") == "instance":
+                # 实例包报体积与条目数，不报版本号：用户此刻想知道的是「这个包
+                # 里到底有没有东西」，而 83 MB 的空壳和 83 MB 带二十个存档的包
+                # 从大小上看不出区别，条目数能。
+                msg = t(lang.get("core.wid.pages.importJar.info.instance"),
+                        "%.1f" % (info.get("size", 0) / 1048576.0),
+                        str(info.get("members", 0)))
+            else:
+                msg = t(lang.get("core.wid.pages.importJar.info"),
+                        self._version_text(info),
+                        "%.1f" % (info.get("size", 0) / 1048576.0))
             if not text:
                 msg = msg + "  " + lang.get("core.wid.pages.importJar.name.none")
             else:
@@ -278,10 +288,12 @@ class ImportJar(QWidget):
                     style, border, name_bad = "color: red;", "border: 1px solid red;", True
                 elif events.mdtManager.name_conflict(text):
                     # 撞名不拦：加后缀照样能导 —— 与下载页、改名页同一处理。
-                    # 「将用某个名字」比「名字重复」有用得多。
+                    # 「将用某个名字」接在包信息后面，而不是整行替换掉：用户
+                    # 此刻在看的是「这个包是什么」，名字只是顺带确认一下，
+                    # 把它上面那句「实例包 · 83 MB · 含 7 个文件」冲掉不划算。
                     self._final_name = events.mdtManager.unique_name(text)
-                    msg = t(lang.get("core.wid.pages.download.item.name.willBe"),
-                            self._final_name)
+                    msg = msg + "  " + t(lang.get("core.wid.pages.download.item.name.willBe"),
+                                         self._final_name)
                     style = "color: #d8b64a;"
                     enabled = True
                 else:

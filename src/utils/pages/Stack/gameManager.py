@@ -47,6 +47,7 @@ from ...path_utils import getPath
 from ...registry import Box, registry
 from ...resources import FILE_FOLDER, TBT_CLOSE
 from ...utils import change_color, openFolder, t
+from ..Modal.exportInstance import ExportInstance
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
 _FIELDS = {
@@ -437,6 +438,8 @@ class GameSettings(Scroll):
             self.buttons = [
                 self._button("core.wid.pages.gameManage.rename", self.Rename),
                 self._button("core.wid.pages.gameManage.group", self.Group),
+                # 导出插在删除之前：删除不可逆，用户手滑时中间多隔一个按钮
+                self._button("core.wid.pages.gameManage.export", ExportInstance),
                 self._button("core.wid.pages.gameManage.delete", self.Delete, danger=True)
             ]
 
