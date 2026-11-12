@@ -46,7 +46,7 @@ from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...registry import Box, registry
 from ...resources import FILE_FOLDER, TBT_CLOSE
-from ...utils import change_color, openFolder, t
+from ...utils import change_color, openFolder, primary_btn_style, t
 from ..Modal.exportInstance import ExportInstance
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
@@ -511,13 +511,12 @@ class GameSettings(Scroll):
             WIDTH = 320
             HEIGHT = 190
             TITLE_KEY = ""
-            # 确定按钮的两套配色：可用=实心黄，禁用=半透明黄（与下载页确定按钮同源）
-            BTN_ON = "background-color: #f0b731; border: none;"
-            BTN_OFF = "background-color: rgba(240, 183, 49, 100); border: none;"
 
             def __init__(self, parent=None):
                 super().__init__()
                 self.parent = parent
+                # 禁用灰按主题取，先落初值再交给 lighting 校准
+                self._light = bool(events.settings.get("theme"))
                 self.setAttribute(Qt.WA_StyledBackground, True)
                 self.init_wid()
                 self.langing()
@@ -583,9 +582,9 @@ class GameSettings(Scroll):
                 return self.parent.game
 
             def _set_ok_enabled(self, enabled):
-                """确定按钮的可用态与配色一起切（禁用时压成半透明）。"""
+                """确定按钮的可用态与配色一起切（禁用时是中性灰，不是压暗的黄）。"""
                 self.btn_ok.setEnabled(enabled)
-                self.btn_ok.setStyleSheet(self.BTN_ON if enabled else self.BTN_OFF)
+                self.btn_ok.setStyleSheet(primary_btn_style(self._light, enabled))
 
             def langing(self):
                 self.title.setText(events.lang.get(self.TITLE_KEY))
@@ -596,6 +595,10 @@ class GameSettings(Scroll):
                 color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
                 icon = change_color(TBT_CLOSE, color)
                 self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
+                # 禁用灰是按主题取的；切主题时按钮已存在就按当前可用态重刷一遍
+                self._light = bool(light)
+                if hasattr(self, "btn_ok"):
+                    self._set_ok_enabled(self.btn_ok.isEnabled())
 
             def _close(self):
                 """出叠并销毁（on_close 由浮层在出叠时统一调）。"""

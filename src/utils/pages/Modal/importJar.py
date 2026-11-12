@@ -45,15 +45,11 @@ from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
 from ...resources import TBT_CLOSE
-from ...utils import change_color, t
+from ...utils import change_color, primary_btn_style, t
 
 
 class ImportJar(QWidget):
     """选一个本地 jar，收成实例。"""
-
-    # 确定按钮的两套配色：可用=实心黄，禁用=半透明黄（与下载页/改名弹层同源）
-    BTN_ON = "background-color: #f0b731; border: none;"
-    BTN_OFF = "background-color: rgba(240, 183, 49, 100); border: none;"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,6 +60,9 @@ class ImportJar(QWidget):
         self._user_named = False
         self._busy = False
         self._closed = False
+        # 浅色/深色：确定按钮的禁用灰度按主题取，先按当前设置落一个初值，
+        # 随后 lighting() 会把它校准（bus.bind 补主题时会立刻回调一次）
+        self._light = bool(events.settings.get("theme"))
         # 遮罩与居中由叠加浮层统一提供，本页自身即弹窗面板
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setProperty("wid", "color2")
@@ -87,6 +86,7 @@ class ImportJar(QWidget):
         self.layout.setAlignment(Qt.AlignTop)
 
         self.top = QWidget()
+        self.top.setProperty("wid", "plain")    # 裸 QWidget 会被全局规则刷成底色
         self.top.setFixedHeight(30)
         self.layout.addWidget(self.top, 0)
         self.top_l = QHBoxLayout(self.top)
@@ -120,6 +120,9 @@ class ImportJar(QWidget):
 
         # 文件行：只读输入框（路径多半比按钮长，能选中复制）+ 浏览
         self.file_row = QWidget()
+        # 容器自身不画底：否则「浏览」按钮的透明背景会透出这层被全局 QWidget
+        # 规则染深一档的颜色，看上去就像按钮自己变暗了
+        self.file_row.setProperty("wid", "plain")
         self.body_l.addWidget(self.file_row, 0)
         self.file_l = QHBoxLayout(self.file_row)
         self.file_l.setContentsMargins(0, 0, 0, 0)
@@ -158,7 +161,7 @@ class ImportJar(QWidget):
         self.body_l.addWidget(self.tip, 1)
 
         self.bottom = QWidget()
-        self.bottom.setStyleSheet("background: transparent;")
+        self.bottom.setProperty("wid", "plain")
         self.body_l.addWidget(self.bottom, 0)
         self.bottom_l = QHBoxLayout(self.bottom)
         self.bottom_l.setContentsMargins(0, 0, 0, 0)
@@ -168,7 +171,7 @@ class ImportJar(QWidget):
         self.btn_ok = QPushButton()
         self.btn_ok.setProperty("wid", "btn")
         self.btn_ok.setFixedSize(80, 30)
-        self.btn_ok.setStyleSheet(self.BTN_OFF)
+        self.btn_ok.setStyleSheet(primary_btn_style(self._light, False))
         self.btn_ok.setEnabled(False)
         self.btn_ok.clicked.connect(self._on_ok)
         self.bottom_l.addWidget(self.btn_ok, 0)
@@ -188,6 +191,12 @@ class ImportJar(QWidget):
         color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
         icon = change_color(TBT_CLOSE, color)
         self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
+        # 禁用态的中性灰按主题取不同的值，切主题后必须重算一遍；_refresh 顺带
+        # 把「能否点确定」也重新判断一次，两件事都落在同一条路径上。
+        # 导入中不刷：_refresh 会重写提示行，把「导入中 45%」冲掉。
+        self._light = bool(light)
+        if not self._busy:
+            self._refresh()
 
     # ---------- 选文件与验包 ----------
 
@@ -317,9 +326,9 @@ class ImportJar(QWidget):
         return build
 
     def _set_ok(self, enabled):
-        """确定按钮的可用态与配色一起切（禁用时压成半透明）。"""
+        """确定按钮的可用态与配色一起切（禁用时是中性灰，不是压暗的黄）。"""
         self.btn_ok.setEnabled(enabled)
-        self.btn_ok.setStyleSheet(self.BTN_ON if enabled else self.BTN_OFF)
+        self.btn_ok.setStyleSheet(primary_btn_style(self._light, enabled))
 
     # ---------- 导入 ----------
 

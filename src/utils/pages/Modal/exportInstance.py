@@ -59,14 +59,11 @@ from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
 from ...resources import TBT_CLOSE
-from ...utils import change_color, t
+from ...utils import change_color, primary_btn_style, t
 
 
 class ExportInstance(QWidget):
     """把一个实例打包成 zip。"""
-
-    BTN_ON = "background-color: #f0b731; border: none;"
-    BTN_OFF = "background-color: rgba(240, 183, 49, 100); border: none;"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,6 +74,8 @@ class ExportInstance(QWidget):
         self._busy = False
         self._done = False
         self._closed = False
+        # 浅色/深色：确定按钮的禁用灰度按主题取（lighting() 会随后校准）
+        self._light = bool(events.settings.get("theme"))
         # 取消标志用 Event：子线程里读，界面线程里 set，不依赖 Qt 的线程亲和性
         self._cancel = threading.Event()
 
@@ -102,6 +101,7 @@ class ExportInstance(QWidget):
         self.layout.setAlignment(Qt.AlignTop)
 
         self.top = QWidget()
+        self.top.setProperty("wid", "plain")    # 裸 QWidget 会被全局规则刷成底色
         self.top.setFixedHeight(30)
         self.layout.addWidget(self.top, 0)
         self.top_l = QHBoxLayout(self.top)
@@ -144,7 +144,8 @@ class ExportInstance(QWidget):
         # 用不上 zip，直接拷 mdt.jar 更省事，所以这里不把它做成默认。
         self.opt = QCheckBox()
         self.opt.setChecked(True)
-        self.opt.setStyleSheet("font-size: 13px;")
+        # 复选框自带底板会被全局 QWidget 规则刷成一整条深色横带（同容器问题）
+        self.opt.setStyleSheet("font-size: 13px; background: transparent;")
         self.opt.toggled.connect(lambda _: self._refresh())
         self.body_l.addWidget(self.opt, 0)
 
@@ -154,12 +155,14 @@ class ExportInstance(QWidget):
         # 换机自用的人看得到这行字，取消勾选即可。
         self.priv = QCheckBox()
         self.priv.setChecked(True)
-        self.priv.setStyleSheet("font-size: 13px;")
+        self.priv.setStyleSheet("font-size: 13px; background: transparent;")
         self.priv.toggled.connect(lambda _: self._refresh())
         self.body_l.addWidget(self.priv, 0)
 
         # 保存位置行：输入框可编辑（用户能自己粘路径），浏览按钮给不会拼路径的人
         self.path_row = QWidget()
+        # 同导入浮层：容器不画底，否则「浏览」按钮的透明背景会透出深一档的色
+        self.path_row.setProperty("wid", "plain")
         self.body_l.addWidget(self.path_row, 0)
         self.path_l = QHBoxLayout(self.path_row)
         self.path_l.setContentsMargins(0, 0, 0, 0)
@@ -184,7 +187,7 @@ class ExportInstance(QWidget):
         self.body_l.addWidget(self.tip, 1)
 
         self.bottom = QWidget()
-        self.bottom.setStyleSheet("background: transparent;")
+        self.bottom.setProperty("wid", "plain")
         self.body_l.addWidget(self.bottom, 0)
         self.bottom_l = QHBoxLayout(self.bottom)
         self.bottom_l.setContentsMargins(0, 0, 0, 0)
@@ -194,7 +197,7 @@ class ExportInstance(QWidget):
         self.btn_ok = QPushButton()
         self.btn_ok.setProperty("wid", "btn")
         self.btn_ok.setFixedSize(80, 30)
-        self.btn_ok.setStyleSheet(self.BTN_OFF)
+        self.btn_ok.setStyleSheet(primary_btn_style(self._light, False))
         self.btn_ok.setEnabled(False)
         self.btn_ok.clicked.connect(self._on_ok)
         self.bottom_l.addWidget(self.btn_ok, 0)
@@ -215,6 +218,9 @@ class ExportInstance(QWidget):
         color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
         icon = change_color(TBT_CLOSE, color)
         self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
+        # 禁用灰按主题取值，切主题后要重算；_refresh 在导出中/已完成时会自己早退
+        self._light = bool(light)
+        self._refresh()
 
     def _default_dest(self):
         """桌面/实例名.zip。桌面取不到（无此目录的精简系统）就退回用户目录。"""
@@ -251,7 +257,7 @@ class ExportInstance(QWidget):
         lang = events.lang
         ok = bool(self.path.text().strip())
         self.btn_ok.setEnabled(ok)
-        self.btn_ok.setStyleSheet(self.BTN_ON if ok else self.BTN_OFF)
+        self.btn_ok.setStyleSheet(primary_btn_style(self._light, ok))
         self.tip.setStyleSheet("font-size: 13px;")
         if not ok:
             self.tip.setText(lang.get("core.wid.pages.exportInstance.path.none"))
@@ -282,7 +288,7 @@ class ExportInstance(QWidget):
         self.opt.setEnabled(False)
         self.priv.setEnabled(False)
         self.btn_ok.setEnabled(False)
-        self.btn_ok.setStyleSheet(self.BTN_OFF)
+        self.btn_ok.setStyleSheet(primary_btn_style(self._light, False))
         self.tip.setStyleSheet("font-size: 13px;")
         self.tip.setText(t(events.lang.get("core.wid.pages.exportInstance.exporting"), 0))
 
@@ -337,7 +343,7 @@ class ExportInstance(QWidget):
                              + events.lang.get("core.wid.pages.exportInstance.err." + str(code)))
             # 路径还在：用户换块盘/腾出空间后可以直接重试
             self.btn_ok.setEnabled(True)
-            self.btn_ok.setStyleSheet(self.BTN_ON)
+            self.btn_ok.setStyleSheet(primary_btn_style(self._light, True))
             detail = ""
             if not isinstance(result, Exception) and isinstance(result[2], dict):
                 detail = str(result[2].get("detail") or "")
@@ -348,7 +354,7 @@ class ExportInstance(QWidget):
         self._done = True
         self.btn_ok.setText(events.lang.get("core.text.done"))
         self.btn_ok.setEnabled(True)
-        self.btn_ok.setStyleSheet(self.BTN_ON)
+        self.btn_ok.setStyleSheet(primary_btn_style(self._light, True))
         self.tip.setStyleSheet("font-size: 13px; color: #4a9a4a;")
         msg = t(events.lang.get("core.wid.pages.exportInstance.done"),
                 str(stats.get("files", 0)),

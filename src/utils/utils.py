@@ -67,6 +67,21 @@ def t(text, *args):
     return text
 
 
+def primary_btn_style(light, enabled):
+    """浮层「确定」这类主按钮的样式：可用=实心品牌黄，禁用=中性灰。
+
+    禁用态刻意不沿用品牌黄。半透明的黄压上去，深色主题下混成暗橄榄金、
+    浅色主题下发虚发脏 —— 两种都读不出「现在不能按」，倒像「按过了没反应」。
+    改成中性灰后形状、尺寸都不变，只剩明度差：位置还在，但一眼看出按不动。
+
+    light 为该主题是否为浅色（与 lighting(light) 的入参同义）。
+    """
+    if enabled:
+        return "background-color: #f0b731; border: none;"
+    return ("background-color: rgba(0, 0, 0, 24); border: none;"
+            if light else "background-color: rgba(0, 0, 0, 60); border: none;")
+
+
 def openFolder(path):
     """在系统文件管理器里打开目录（不存在就先建出来），返回是否成功打开。
 

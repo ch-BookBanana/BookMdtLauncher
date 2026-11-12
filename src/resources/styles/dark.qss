@@ -5,6 +5,13 @@ QWidget {
 QWidget[wid="color2"] {
     background: rgb(55, 55, 55);
 }
+/* 纯布局容器：不画自己的底，露出宿主面板。
+   上面那条 QWidget 规则会把每一层裸 QWidget 都刷成 rgb(43,43,43)，
+   于是浮层里「文件行」「按钮行」比面板深一档，行内的透明按钮再把这块
+   深色透出来 —— 看起来就像按钮自己变深了。 */
+QWidget[wid="plain"] {
+    background: transparent;
+}
 QWidget[wid="line"] {
     background: rgb(134, 134, 134)
 }
