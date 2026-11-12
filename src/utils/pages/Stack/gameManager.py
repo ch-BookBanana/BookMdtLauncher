@@ -372,10 +372,15 @@ class GameSettings(Scroll):
             self.layout = QVBoxLayout(self)
             self.layout.setContentsMargins(10, 0, 10, 10)
             self.layout.setSpacing(0)
-            # 只钉垂直方向：l2 要拿满整列宽度才能自己决定折不折行
-            # （原先还带 AlignLeft，那一行只能拿到「四颗按钮的宽度」，
-            #  窗口一窄就被右边缘切掉，连折行的机会都没有）
-            self.layout.setAlignment(Qt.AlignTop)
+            # 这里**不能**给布局设对齐（原先写过 AlignLeft|AlignTop）：
+            #   - AlignLeft：l2 只拿得到「四颗按钮的宽度」，窗口一窄就被右边缘
+            #     切掉，连折行的机会都没有；
+            #   - AlignTop：给顶层布局设对齐后，Qt 按**最小尺寸**（148）而不是
+            #     实际高度给子项分空间 —— 图标行被压到 64、按钮行也只拿到 64，
+            #     第二排按钮溢出布局矩形，末尾多出的 48px 全落在分割线上方，
+            #     看起来就是「按钮离分割线老远」（而按钮本身早画到矩形外了）。
+            # 不给对齐时，父级已经用 sizeHint 把 Top 定高，布局内部会按实际
+            # 高度分：80 / 10 / 96，按钮底边到分割线正好是 10 的边距。
 
             # l1：图标 + 实例信息（名称 / 分组 ･ 版本）
             self.l1 = QHBoxLayout()
