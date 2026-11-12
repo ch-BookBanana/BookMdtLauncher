@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
 
 from ...bus import bus
 from ...events import events
+from ...jarImport import version_text
 from ...javaManager import javaManager
 from ...mdtManager import mdtManager
 from ...options.items import Bool, Combo
@@ -470,13 +471,14 @@ class GameSettings(Scroll):
         def sets(self, name, msg):
             """填入实例信息（mdtManager.getMdtMsg 的返回值）；msg 为 None 则全部留空。
 
-            msg 里 icon 是图标文件路径，number/build/modifier 拼出版本号。
+            msg 里 icon 是图标文件路径，版本号统一由 jarImport.version_text 拼
+            （只认 build；number 是主版本号，不是版本串的一部分）。
             """
             pm = QPixmap(msg["icon"]) if msg else QPixmap()
             if not pm.isNull():
                 pm = pm.scaled(self.icon.width(), self.icon.height(),
                                Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            vers = "v%s.%s%s" % (msg["number"], msg["build"], msg["modifier"]) if msg else ""
+            vers = version_text(msg)
             self.icon.setPixmap(pm)
             self.name.setText(name or "")
             self.vers.setText(vers)

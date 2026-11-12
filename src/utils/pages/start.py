@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBut
 from src.utils.path_utils import getPath
 
 from ..events import events
+from ..jarImport import version_text
 from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
@@ -310,10 +311,10 @@ class Start(Page):
                     self.sets((True,QPixmap()),(True,events.lang.get("core.wid.pages.start.gameNotfound")),(True,events.lang.get("core.wid.pages.start.gameNotfound2")))
                 else:
                     self.game["name"] = default_game
-                    self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}" if game_msg else None
+                    self.game["vers"] = version_text(game_msg) or None
                     self.sets((False,None),(True,default_game),(True,self.game["vers"] or ""))
             elif self.game["name"] and game_msg:
-                new_vers = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}"
+                new_vers = version_text(game_msg)
                 if self.game["vers"] != new_vers:
                     self.game["vers"] = new_vers
                     self.sets((False,None),(False,None),(True,new_vers))
@@ -954,7 +955,7 @@ class Start(Page):
                         if vers:
                             self.acquire()
                             self.title.setText(self.game)
-                            self.version.setText(f"v{vers['number']}.{vers['build']}{vers['modifier']}")
+                            self.version.setText(version_text(vers))
 
                     def acquire(self, force=False):
                         """取图标 +1 引用；force 先释放旧引用再重取（iconChanged 用）。"""

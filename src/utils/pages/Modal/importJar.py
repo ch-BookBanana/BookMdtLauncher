@@ -40,7 +40,7 @@ from shiboken6 import isValid
 
 from ...bus import bus
 from ...events import events
-from ...jarImport import blank_info, inspect_package, suggest_name
+from ...jarImport import blank_info, inspect_package, suggest_name, version_text
 from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
@@ -283,7 +283,7 @@ class ImportJar(QWidget):
                         str(info.get("members", 0)))
             else:
                 msg = t(lang.get("core.wid.pages.importJar.info"),
-                        self._version_text(info),
+                        version_text(info, prefix="") or "?",
                         "%.1f" % (info.get("size", 0) / 1048576.0))
             if not text:
                 msg = msg + "  " + lang.get("core.wid.pages.importJar.name.none")
@@ -315,15 +315,6 @@ class ImportJar(QWidget):
         self.input.setStyleSheet(border if name_bad else "")
         if not self._busy:
             self._set_ok(enabled)
-
-    @staticmethod
-    def _version_text(info):
-        """版本号：160.4 / 149 beta。取不到 build 就报问号 —— 不猜。"""
-        build = str(info.get("build") or "").strip() or "?"
-        modifier = str(info.get("modifier") or "").strip()
-        if modifier and modifier != "release":
-            return "%s %s" % (build, modifier)
-        return build
 
     def _set_ok(self, enabled):
         """确定按钮的可用态与配色一起切（禁用时是中性灰，不是压暗的黄）。"""

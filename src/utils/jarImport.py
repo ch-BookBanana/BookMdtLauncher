@@ -220,6 +220,35 @@ def _main_class(zf):
     return ""
 
 
+def version_text(info, prefix="v", sep=" "):
+    """把 version.properties 的字段拼成一句人看的版本号：``v160.4`` / ``v149 beta``。
+
+    三个字段里只有 ``build`` 是版本号本身。``number`` 是**主版本号**（Mindustry
+    源码注释：*Number specifying the major version*，v8 就是 8），官方界面从不
+    显示它，只用来判断「这是哪一代」；``modifier`` 是通道标记（release / beta /
+    steam），不是版本的一部分。以前三样点号一连，出来的是 ``v8.160.4release`` ——
+    前头多了个主版本号、后头缺分隔符、还把通道塞进了版本号里。
+
+    ``sep`` 给名字用：实例名不允许空格，传 ``"-"`` 得到 ``160.4-beta``。
+
+    取不到可用的 build（自定义构建写 0 或 -1，或字段整个缺失）时返回空串，由
+    调用方当「没有版本号」处理 —— 显示 ``v0`` 比空着更容易让人以为装错了。
+    """
+    if not info:
+        return ""
+    build = str(info.get("build") or "").strip()
+    # 0 / -1 是 Mindustry 给自定义构建的占位值，不是真版本号。
+    # build 缺失时退一级用主版本号：老 jar 或第三方打包可能只写了 number。
+    core = build if build not in ("", "0", "-1") else str(info.get("number") or "").strip()
+    if core in ("", "0", "-1"):
+        return ""
+    modifier = str(info.get("modifier") or "").strip()
+    # 正式版不缀 modifier：用户要看的是版本，不是「它属于 release 通道」
+    if modifier and modifier != "release":
+        return prefix + core + sep + modifier
+    return prefix + core
+
+
 def suggest_name(info, path, prefix="Mindustry"):
     """给实例起个默认名：``Mindustry-<build>``（非正式版再加 ``-<modifier>``）。
 
@@ -237,13 +266,10 @@ def suggest_name(info, path, prefix="Mindustry"):
         original = str((info.get("meta") or {}).get("name") or "").strip()
         if original:
             return original
-    build = str(info.get("build") or "").strip()
-    modifier = str(info.get("modifier") or "").strip()
-    if build:
-        name = "%s-%s" % (prefix, build)
-        if modifier and modifier != "release":
-            name += "-" + modifier
-        return name
+    # 名字里不能有空格，拼接规则本身与界面上的版本号同源，只换个分隔符
+    core = version_text(info, prefix="", sep="-")
+    if core:
+        return "%s-%s" % (prefix, core)
     stem = os.path.splitext(os.path.basename(path or ""))[0]
     return stem or prefix
 
