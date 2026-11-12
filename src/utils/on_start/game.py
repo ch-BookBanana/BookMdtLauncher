@@ -17,12 +17,31 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """启动时未完成的 mdt 游戏下载续传。"""
 
 import hashlib
+import json
 import os
 
 from ..QDownloader import QDownloader
 from ..mdtManager import mdtManager
 from ..path_utils import getPath
 from ..utils import t
+
+
+def _dest_dir(path):
+    """dest 的父目录（规范化后），用于比较两条记录是不是指着同一个实例。"""
+    try:
+        return os.path.normcase(os.path.normpath(os.path.dirname(path or "")))
+    except Exception:
+        return ""
+
+
+def _rewrite_record(name, info):
+    """把修正后的 dest 写回 downloading.json；失败不影响本次续传。"""
+    try:
+        path = os.path.join(mdtManager.base_dir, name, "downloading.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        pass
 
 
 def resume_mdt_downloads(root):
@@ -52,6 +71,15 @@ def resume_mdt_downloads(root):
         url = info.get("url") or ""
         if not (dest and url):
             continue
+        # 记录可能是启动器整个搬过家之前写的：dest 指着已经不存在的旧目录。
+        # 按实例名把目标改回当前位置并写回 —— 不修的话续传会往旧路径写（甚至在
+        # 旧位置重新建出目录），取消时按 dest 也找不回这个实例
+        # （见 utils.mdt_dir_of_dest），于是「取消完重启又出现」。
+        fixed = os.path.join(mdtManager.base_dir, name, "mdt.jar")
+        if _dest_dir(dest) != _dest_dir(fixed):
+            dest = fixed
+            info["dest"] = dest
+            _rewrite_record(name, info)
         task_id = hashlib.md5(dest.encode("utf-8")).hexdigest()
         paused = bool(info.get("paused"))
         try:

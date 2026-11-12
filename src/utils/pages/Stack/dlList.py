@@ -42,7 +42,7 @@ from ...options.scrolls import Scroll
 from ...QDownloader import QDownloader
 from ...qthtimer import QThTimer
 from ...registry import Box, registry
-from ...utils import _is_mdt_download, t
+from ...utils import mdt_dir_of_dest, mdt_rmtree, t
 
 
 class DlListPage(QWidget):
@@ -217,8 +217,9 @@ class DlListPage(QWidget):
             # 用户主动续传：清除 downloading.json 中的暂停状态（恢复下载）
             try:
                 dest = getattr(dl, "dest_path", "") or ""
-                if dest and _is_mdt_download(dest):
-                    dfile = os.path.join(os.path.dirname(dest), "downloading.json")
+                mdir = mdt_dir_of_dest(dest)
+                if mdir:
+                    dfile = os.path.join(mdir, "downloading.json")
                     if os.path.isfile(dfile):
                         with open(dfile, "r", encoding="utf-8") as f:
                             info = json.load(f)
@@ -260,10 +261,8 @@ class DlListPage(QWidget):
         # 若是 mdt 游戏下载：同时删除目标文件夹（含 downloading.json），
         # 避免残留记录导致下次启动又被续传
         try:
-            if dest and _is_mdt_download(dest):
-                mdir = os.path.dirname(dest)
-                if os.path.isdir(mdir):
-                    shutil.rmtree(mdir, ignore_errors=True)
+            mdir = mdt_dir_of_dest(dest)
+            if mdir and mdt_rmtree(mdir):
                 events.logger.info(t(events.lang.get("core.log.info.dlMdtDeleteCleaned"),
                                         os.path.basename(mdir) or mdir))
         except Exception:
@@ -449,9 +448,10 @@ class DlListPage(QWidget):
             启动时通过 getDownloadingMdts 读取该状态同步暂停。
             """
             dest = getattr(self.task, "dest_path", "") or ""
-            if not _is_mdt_download(dest):
+            mdir = mdt_dir_of_dest(dest)
+            if not mdir:
                 return
-            dfile = os.path.join(os.path.dirname(dest), "downloading.json")
+            dfile = os.path.join(mdir, "downloading.json")
             try:
                 info = {}
                 if os.path.isfile(dfile):
@@ -500,15 +500,10 @@ class DlListPage(QWidget):
                         # mdt 游戏下载：立刻删目标文件夹（含 downloading.json）。
                         # 与线程停没停无关 —— 分片只往临时目录写，_is_cancelled 之后
                         # 目标目录不会再被碰。（合并阶段上前面的进度判断已经拦掉了）
-                        if dest and _is_mdt_download(dest):
-                            mdir = os.path.dirname(dest)
-                            try:
-                                if os.path.isdir(mdir):
-                                    shutil.rmtree(mdir, ignore_errors=True)
-                                events.logger.info(t(events.lang.get("core.log.info.dlMdtCancelCleaned"),
-                                                        os.path.basename(mdir) or mdir))
-                            except Exception:
-                                pass
+                        mdir = mdt_dir_of_dest(dest)
+                        if mdir and mdt_rmtree(mdir):
+                            events.logger.info(t(events.lang.get("core.log.info.dlMdtCancelCleaned"),
+                                                    os.path.basename(mdir) or mdir))
                         # 取消是「用户说了算」的动作，不因线程停不下来而作废：
                         # cancel() 第一件事就是置位并落盘取消标记，后面的等待
                         # 只决定「现在能不能顺手把临时目录也删了」。

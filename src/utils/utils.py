@@ -99,13 +99,70 @@ def openFolder(path):
 
 
 def _is_mdt_download(dest):
-    """dest 是否属于 mdt 游戏下载目标（BML/.Mindustrys/ 下）。"""
+    """dest 是否指向当前实例目录下的 mdt 游戏下载目标（BML/.Mindustrys/ 下）。"""
     if not dest:
         return False
     try:
         base = os.path.normcase(os.path.normpath(mdtManager.base_dir))
         path = os.path.normcase(os.path.normpath(dest))
         return path == base or path.startswith(base + os.sep)
+    except Exception:
+        return False
+
+
+def mdt_dir_of_dest(dest):
+    """dest 指向某个 mdt 实例时，返回该实例**当前**所在的目录（绝对路径）。
+
+    为什么不直接用 ``os.path.dirname(dest)``：dest 是绝对路径，被抄进了
+    ``downloading.json`` 和 ``.tmp/QDownloader/*/state.json``。启动器整个目录
+    搬过家之后（比如从 ``新版MDT/`` 挪到 ``新版MDT/归档/``），这些记录仍指着
+    旧位置 —— ``dirname`` 拿到的是个不存在的目录，删它什么也删不掉，于是
+    「取消」看起来毫无效果，重启又按记录续回来。
+
+    实例名是唯一的（见 ``mdtManager.unique_name``），所以按目录名回到当前的
+    base_dir 下就能找回同一个实例。只认「里面确实有 downloading.json」的目录，
+    避免把同名的别的文件夹当实例删了。
+
+    找不到 / 不像 mdt 下载时返回空串。
+    """
+    if not dest:
+        return ""
+    try:
+        parent = os.path.dirname(os.path.normpath(dest))
+        name = os.path.basename(parent)
+        if not name:
+            return ""
+        if _is_mdt_download(dest):
+            return parent
+        candidate = os.path.join(mdtManager.base_dir, name)
+        if os.path.isfile(os.path.join(candidate, "downloading.json")):
+            return candidate
+    except Exception:
+        pass
+    return ""
+
+
+def mdt_rmtree(path):
+    """删一个 mdt 实例目录（含存档），只允许删 base_dir 下的**直接**子目录。
+
+    取消/删除下载会连实例目录一起删，路径一旦算错就是用户数据没了。所以即使
+    调用方已经从 ``mdt_dir_of_dest`` 拿到了路径，这里再挡一道：越界、等于
+    base_dir、不是目录，一律不删。返回是否真的删了。
+    """
+    if not path:
+        return False
+    try:
+        base = os.path.normcase(os.path.abspath(mdtManager.base_dir))
+        target = os.path.normcase(os.path.abspath(path))
+        if target == base or not target.startswith(base + os.sep):
+            return False
+        if os.path.dirname(target) != base:
+            return False
+        if not os.path.isdir(path):
+            return False
+        import shutil
+        shutil.rmtree(path, ignore_errors=True)
+        return True
     except Exception:
         return False
 
