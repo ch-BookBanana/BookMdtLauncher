@@ -77,6 +77,8 @@ try:
     from src.utils.javaManager import javaManager
     from src.utils import javaDownload
     from src.utils.QDownloader import QDownloader, shutdown_all as _qd_shutdown_all
+    from src.utils.dropImport import (DropHint, disable_child_drops,
+                                      drop_candidates, open_import)
     from src.utils.utils import  change_color, t
     from src.utils.bus import bus
     from src.utils.events import events
@@ -564,6 +566,8 @@ try:
                 self.setWindowTitle("Book MDT Launcher")
                 self.setWindowFlags(Qt.FramelessWindowHint)
                 self.setGeometry(50, 50, 700, 500)
+                # 整窗都是导入的落点：文件从桌面拖到哪儿都行，不必对准某个按钮
+                self.setAcceptDrops(True)
 
             def changeEvent(self, event):
                 if event.type() == QEvent.WindowStateChange:
@@ -662,6 +666,11 @@ try:
                 _sig.register("dragRequested", Signal(str, object))
                 _sig.connect("dragRequested", self._on_drag_requested)
 
+                # 拖放导入的提示层：平时隐藏，文件拖进窗口时铺满盖住一切。
+                # 放在最后建，层序天然在浮层之上（它显示时浮层一定是关着的）。
+                self._dropHint = DropHint(self)
+                self._dropHint.setGeometry(0, 0, self.width(), self.height())
+
             def _on_drag_requested(self, phase, event):
                 """遮罩层请求拖动无边框窗口：转给窗口自己那套 drag_begin/move/end。"""
                 handler = getattr(self, "drag_" + str(phase), None)
@@ -741,6 +750,90 @@ try:
                 super().resizeEvent(event)
                 self.floatingStack.setGeometry(0,40,self.width(),self.height()-40)
                 self.floatingOverlay.setGeometry(0,0,self.width(),self.height())
+                # init_ui 里的 setGeometry 可能早于 init_wid 触发一次 resize
+                hint = getattr(self, "_dropHint", None)
+                if hint is not None:
+                    hint.setGeometry(0,0,self.width(),self.height())
+
+            # ---------- 拖放导入 ----------
+
+            def _drop_page(self):
+                """栈顶是导入浮层就返回它 —— 拖第二个文件时换掉它的文件。
+
+                「能收一个路径」的浮层只要实现 set_path 就自动接入，不必让窗口
+                认识 ImportJar 这个类；将来别的面板想接拖放，加这个方法即可。
+                """
+                pages = getattr(getattr(self, "floatingOverlay", None), "_pages", [])
+                if not pages:
+                    return None
+                top = pages[-1]
+                return top if hasattr(top, "set_path") else None
+
+            def _drop_blocked(self):
+                """有别的浮层开着时不受理拖放。
+
+                此刻用户正对着某个面板（设置、游戏管理…）操作，再叠一层只会让人
+                分不清哪个在前。导入浮层是例外：它本身就是拖放的目的地。
+                """
+                stack = getattr(self, "floatingStack", None)
+                if stack is not None and stack.isVisible():
+                    return True          # 整页浮层压在窗口上（游戏管理、下载列表）
+                pages = getattr(getattr(self, "floatingOverlay", None), "_pages", [])
+                if not pages:
+                    return False
+                return not hasattr(pages[-1], "set_path")
+
+            def _drop_desc(self, paths):
+                """提示卡片第二行：一个文件报类型，多个文件说明只取第一个。"""
+                if len(paths) > 1:
+                    return self.root.langer.get("core.wid.dropHint.multi")
+                return self.root.langer.get("core.wid.dropHint.desc")
+
+            def dragEnterEvent(self, event):
+                # 子控件（控制台、输入框）默认接受拖放，会把文件当成待插入的
+                # 文本吃掉。每次进入时校准一遍，浮层里后建的控件也覆盖得到。
+                disable_child_drops(self)
+                paths = [] if self._drop_blocked() else drop_candidates(event.mimeData())
+                if not paths:
+                    self._dropHint.hide_hint()
+                    event.ignore()
+                    return
+                self._dropHint.show_hint(
+                    bool(self.root.settings.get("theme")),
+                    self.root.langer.get("core.wid.dropHint.title"),
+                    self._drop_desc(paths))
+                event.acceptProposedAction()
+
+            def dragMoveEvent(self, event):
+                # 必须一路 accept，否则 Qt 认为这里不是落点，drop 根本不会来
+                if not self._drop_blocked() and drop_candidates(event.mimeData()):
+                    event.acceptProposedAction()
+                else:
+                    event.ignore()
+
+            def dragLeaveEvent(self, event):
+                # 拖出窗口或按 Esc 都会走这里，提示得收掉
+                self._dropHint.hide_hint()
+                super().dragLeaveEvent(event)
+
+            def dropEvent(self, event):
+                self._dropHint.hide_hint()
+                paths = [] if self._drop_blocked() else drop_candidates(event.mimeData())
+                if not paths:
+                    event.ignore()
+                    return
+                event.acceptProposedAction()
+                # 多个文件只导第一个：一次导入只产出一个实例，静默忽略其余的
+                # 比弹一句「只能拖一个」省事，提示卡片已经提前说明过。
+                try:
+                    page = self._drop_page()
+                    if page is not None:
+                        page.set_path(paths[0])
+                    else:
+                        open_import(self, paths[0])
+                    self.root.logger.info("拖放导入: %s" % paths[0])
+                except Exception as e:
+                    self.root.logger.error("拖放导入失败: %r" % e)
 
             def drag_begin(self, event):
                 # 拖动开始：记录窗口与鼠标起点

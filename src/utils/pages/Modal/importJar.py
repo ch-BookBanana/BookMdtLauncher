@@ -211,6 +211,17 @@ class ImportJar(QWidget):
             lang.get("core.wid.pages.importJar.filter"))
         if not path:
             return
+        self.set_path(path)
+
+    def set_path(self, path):
+        """选定一个包并开始验包。
+
+        浏览与拖放共用这一条：拖进来的文件不该走另一套「先落盘再说」的逻辑，
+        否则同一个包从两个入口进来会有两种校验口径（以及两处要单独修）。
+        浮层刚建好、还没显示时也能调 —— 控件在 __init__ 里就全建好了。
+        """
+        if self._busy or not path:
+            return
         self._jar = path
         self._info = None
         self.file.setText(path)
