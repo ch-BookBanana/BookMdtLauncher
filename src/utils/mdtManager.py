@@ -25,6 +25,7 @@ from .path_utils import getPath
 from .javaManager import javaManager
 from .qthtimer import QThTimer
 from .resources import (ICON_MDT)
+from .jarImport import copy_jar, inspect_jar
 
 _log = logging.getLogger("Main.MdtManager")
 
@@ -1290,6 +1291,66 @@ class mdtManager(QObject):
             if os.path.normcase(candidate) not in taken:
                 return candidate
             index += 1
+
+    # ==================== 导入本地 jar ====================
+
+    def importJar(self, jar_path, name, progress=None):
+        """把一个本地 jar 收成一个实例，返回 ``(ok, code, final_name)``。
+
+        code 成功时为 None，失败时是 ``check_name`` 的失败码（invalidName /
+        dot）、``jarImport`` 的失败码（missing / notZip / noVersion / noMain），
+        或这里自己的 ioError。final_name 是**实际用上的**名字（撞名加过后缀）。
+
+        四条口径，与下载页那条路保持一致：
+
+        1. **名字先过 check_name**：名字就是目录名，``..\\evil`` 这种输入不能等到
+           makedirs 才被系统拒掉。
+        2. **撞名不覆盖**，交给 unique_name 加 (1)(2)。覆盖等于连带删掉那个实例
+           data/ 里的存档 —— 下载页的重名输入框也是这个处理。
+        3. **先验后拷**：inspect_jar 验的正是 isMdtFile 与 ``java -jar`` 要求的两样
+           （version.properties、Main-Class），验不过一个字节都不落盘。
+        4. **失败不留垃圾**：只清自己新建的目录。已经存在同名目录时 unique_name
+           不会选中它，所以这里的 rmtree 不会碰到别人的数据。
+
+        是实例方法而不是类方法，原因很实在：unique_name / taken_names 要读
+        self.settings["gameList"]，而 settings 是构造时注入的实例字段。
+
+        progress 是给界面的 0.0–1.0 进度回调，在调用方线程里被调（导入时是子线程）。
+        """
+        error = self.check_name(name)
+        if error:
+            return False, error, None
+
+        info = inspect_jar(jar_path)
+        if not info["ok"]:
+            return False, info["error"], None
+
+        self.ensure_dirs()
+        final = self.unique_name(str(name).strip())
+        target = os.path.join(self.base_dir, final)
+        # unique_name 已保证这个名字没被占；但目录也可能刚好在这一瞬间被别的
+        # 进程建出来（两个启动器实例同时导入）。只有「我建的」才允许清理。
+        created = not os.path.isdir(target)
+        try:
+            os.makedirs(target, exist_ok=True)
+            _log.info(f"导入实例 {final}: {jar_path} -> {target}")
+            copy_jar(jar_path, os.path.join(target, "mdt.jar"), progress)
+            # BML.json 走与下载完成同一条路：_retrieve_mdt_data 补默认字段
+            # （javaPath），再写身份与图标。file 里已有的字段会被保留，
+            # 所以顺序反过来也不丢，但先补默认值这步不能省。
+            self._retrieve_mdt_data(final)
+            self.setData(final, ["name"], final)
+            self.setData(final, ["icon_path"], self.DEFAULT_ICON)
+        except Exception as exc:
+            _log.error(f"导入实例失败 {final}: {exc!r}")
+            if created:
+                shutil.rmtree(target, ignore_errors=True)
+            return False, "ioError", None
+
+        # 目录 mtime 变了缓存本来也会失效，但下一次 getMdts 可能就在同一毫秒里，
+        # 这里显式清一次，导入后立刻刷新列表不会看到「少一个」。
+        self.invalidate_cache()
+        return True, None, final
 
     class Editor:
         """单个实例的编辑接口（mdtManager.edit(name) 返回，勿直接构造）。

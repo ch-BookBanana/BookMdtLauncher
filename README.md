@@ -23,6 +23,7 @@ Book MDT Launcher（简称 **BML**）是一款面向 Windows 的 Mindustry 启�
 ## 功能特性
 
 - **多来源游戏下载**：实时拉取 GitHub Release 列表，区分原版 / MindustryX 等不同源
+- **本地 JAR 导入**：离线环境或自己编译的客户端可直接选包收成实例；先验 `version.properties` 与 `Main-Class` 再落盘，撞名自动加后缀，不覆盖已有实例
 - **多版本并存**：每份游戏副本独立目录，启动时可自由切换目标游戏
 - **Java 全自动管理**：并发嗅探 PATH、注册表、常见目录中的 JDK；缺失时自动从清华镜像 / Adoptium 等多源竞速下载 JDK 17 并解压，支持断点续传
 - **GitHub Token 集成**：设置页粘贴 Token 即校验并显示头像与 API 剩余额度（core / search 分开计数，到点自动重置）
