@@ -186,8 +186,9 @@ class mdtLauncher(QProcess):
                 return True
             self._disconnect_signals()
             self.kill()
-            if not self.waitForFinished(3000):
-                _log.warning("game process still alive after 3s: pid=%s" % self.processId())
+            # 等 1 秒就够：这是退出路径，卡住窗口比留个未收尾的句柄难受得多
+            if not self.waitForFinished(1000):
+                _log.warning("game process still alive after 1s: pid=%s" % self.processId())
                 return False
             self.going = 0
             self._locker.unlock()

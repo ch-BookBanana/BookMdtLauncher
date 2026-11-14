@@ -281,9 +281,10 @@ try:
                 self.launcher.kill_game(blocking=True)
             except Exception:
                 pass
-            # 取消 Java 下载/解压流程（并清掉 javaDownload.json：取消即放弃，不再续传）
+            # 停掉 Java 下载/解压流程，但**保留** javaDownload.json：关掉启动器
+            # 不是放弃下载，下次启动该接着下（用户主动取消才丢，那走 flow.cancel()）
             try:
-                self._java_cancel_all()
+                self._java_cancel_all(persist=False)
             except Exception:
                 pass
             try:

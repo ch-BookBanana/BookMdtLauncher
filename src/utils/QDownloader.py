@@ -159,13 +159,16 @@ CANCELLED_FLAG = "cancelled.flag"
 _ABORT_EVENT = threading.Event()
 
 
-def _interruptible_sleep(seconds):
-    """可被全局退出打断的休眠（替代 time.sleep，避免退出时被重试等待卡住）。"""
-    end = time.time() + seconds
-    while time.time() < end:
-        if _ABORT_EVENT.is_set():
-            return
-        time.sleep(0.1)
+def _interruptible_sleep(seconds, stop_event=None):
+    """休眠一段时间，可被提前唤醒（替代 time.sleep，避免退避期卡住取消/退出）。
+
+    直接等 Event：置位即返回，不等满、也不轮询。两个来源：
+    - 不传 stop_event：等全局退出标志 _ABORT_EVENT（整进程停机）；
+    - 传任务的 self._cancel_event：用户点取消时置位，工作线程立刻从
+      2**attempt 的退避里醒来 —— 否则最长要空等 16 秒，界面上早点了取消、
+      线程却还在睡，看起来就是「取消不掉」。
+    """
+    (stop_event or _ABORT_EVENT).wait(seconds)
 
 
 def shutdown_all(timeout=5):
@@ -347,6 +350,9 @@ class QDownloader(QObject):
         self._pause_allowed = bool(pause_allowed)
         self._pause_event = threading.Event()
         self._pause_event.set()   # 默认未暂停
+        # 取消即置位：用来立刻唤醒「重试退避」里的等待（见 _interruptible_sleep）。
+        # 与 _ABORT_EVENT 分工 —— 那个管整进程退出，这个管单个任务的取消。
+        self._cancel_event = threading.Event()
 
         # 停滞监控（供诊断/看门狗）
         self._watch_tick = 0               # 主下载线程轮询次数
@@ -495,7 +501,8 @@ class QDownloader(QObject):
         目标目录/临时文件」，不再代表「取消成功没有」。
         """
         self._is_cancelled = True
-        self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
+        self._cancel_event.set()   # 唤醒正在退避重试的线程（不等满 2**attempt）
+        self._pause_event.set()    # 唤醒暂停等待中的线程，使其退出
         if persist:
             self._user_cancelled = True
             # 标记先落盘，再去打断网络读：线程可能卡在 _prepare（连不上的源），
@@ -1089,7 +1096,7 @@ class QDownloader(QObject):
                     requests.exceptions.ChunkedEncodingError) as e:
                 # 网络抖动/断流：指数退避重试，并从断点位置继续
                 if attempt < max_retries - 1:
-                    _interruptible_sleep(2 ** attempt)
+                    _interruptible_sleep(2 ** attempt, self._cancel_event)
                     if os.path.exists(tmp_path):
                         cur = os.path.getsize(tmp_path)
                         resume_from = start + cur
@@ -1101,7 +1108,7 @@ class QDownloader(QObject):
                 # 服务器 5xx / 429 限流可重试，其余（4xx）直接失败
                 status = e.response.status_code if e.response is not None else 0
                 if status in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
-                    _interruptible_sleep(2 ** attempt)
+                    _interruptible_sleep(2 ** attempt, self._cancel_event)
                     continue
                 raise
 

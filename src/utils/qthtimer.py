@@ -1,4 +1,4 @@
-﻿"""
+"""
 QThTimer 使用文档（简洁版，中文）
 
 简介
@@ -364,7 +364,7 @@ class QThTimer(QObject):
             _dedicated_threads.discard(thr)
             try:
                 thr.quit()
-                if not thr.wait(3000):
+                if not thr.wait(500):
                     _zombie_threads.append(thr)
             except Exception:
                 pass
@@ -564,7 +564,7 @@ def shutdown():
     for thr in list(_dedicated_threads):
         try:
             thr.quit()
-            if not thr.wait(15000):
+            if not thr.wait(1000):
                 _zombie_threads.append(thr)
         except Exception:
             pass
@@ -572,7 +572,7 @@ def shutdown():
     _shutdown_qthtimer_thread()
     for thr in list(_zombie_threads):
         try:
-            thr.wait(15000)
+            thr.wait(300)
         except Exception:
             pass
 

@@ -302,12 +302,24 @@ class Scope:
         return f"{self.owner}/{self.name}" if self.owner else f"{actor}/{self.name}"
 
     def _chain(self, actor):
-        """条目链 → [(owner, seg)]：& 接上一段的 owner，# 回到自己。"""
+        """条目链 → [(owner, seg)]。
+
+        `&seg` 沿用**前一节点**的 owner，`#seg` 用**调用方**的 owner —— 两者都是
+        在「这一段没写 owner」时把 owner 补全。所以 mode 决定的是**当前这一段**
+        的 owner，不是下一段的（写成后者的话，第一段永远跟着接口 owner 走，
+        `#` 等于没生效）：
+
+            core/tools&shared     → [("core", "shared")]          接接口 owner
+            core/tools#private    → [("myplugin", "private")]     回调用方
+            main/a&b&c            → [("main", "b"), ("main", "c")]
+            main/a#b&c            → [("myplugin", "b"), ("myplugin", "c")]
+        """
         out = []
         cur = self.owner or actor
         for mode, seg in self.entries:
-            out.append((cur, seg))
-            cur = cur if mode == "&" else actor
+            owner = cur if mode == "&" else actor   # 当前段自己决定
+            out.append((owner, seg))
+            cur = owner                              # 下一段接的是这一段
         return out
 
     def _key(self, actor):
@@ -316,17 +328,6 @@ class Scope:
             return None
         first = chain[0][0]
         return "/".join([first] + [seg for _o, seg in chain])
-
-    def _sub_point(self, actor):
-        """条目链对应的子接口路径（"core/tools/mdtManager"）；没声明就是 None。"""
-        if not self.entries:
-            return None
-        sub = f"{self.owner or actor}/{self.name}/" + "/".join(
-            seg for _m, seg in self.entries)
-        try:
-            return sub if registry.declared(sub) else None
-        except Exception:
-            return None
 
     def _exec(self, verb, name, fields, fn):
         actor = self._actor()
@@ -527,12 +528,11 @@ class Scope:
             return {"namespace": "signals", "prefix": f"{actor}."}
         raise ValueError(f"signals 不支持动词 {verb!r}")
 
-    # 工具：宿主把 mdtManager / launcher / githubAPI … 登记到 core/tools
+    # 工具：宿主把 mdtManager / launcher / githubAPI … 登记到 core/tools。
+    # 接口永远是 owner/point，条目永远是 owner/name；条目链只补全「条目 key 里
+    # 那一段 owner」，不会把路径变成子接口（见 _chain）。
     def _tools(self, verb, name, fields, actor, fn=None):
         point = self._base_point(actor)
-        sub = self._sub_point(actor)
-        if sub is not None and verb not in ("contract",):
-            point = sub
         key = self._key(actor)
         if verb == "get":
             entry = registry.entry(point, key) if key else None
@@ -543,8 +543,6 @@ class Scope:
             return [e.key for e in registry.entries(point)
                     if e.key.startswith(f"{actor}/")]
         if verb == "contract":
-            if self.entries:
-                return registry.declare(sub, registrant=actor, **fields)
             return registry.declare(point, registrant=actor, **fields)
         if verb == "add":
             return registry.add(point, key, **fields)
@@ -556,16 +554,12 @@ class Scope:
             return registry.remove(point, key)
         raise ValueError(f"tools 不支持动词 {verb!r}")
 
-    # 普通扩展点：registry 那套（条目链若已声明成子接口，就按接口操作）
+    # 普通扩展点：registry 那套。接口永远是 owner/point，条目永远是 owner/name；
+    # 条目链只补全「条目 key 里那一段 owner」，不改变接口。
     def _registry(self, verb, name, fields, fn, actor):
         point = self._base_point(actor)
         key = self._key(actor)
-        sub = self._sub_point(actor)
-        if sub is not None and verb not in ("contract",):
-            point, key = sub, None
         if verb == "contract":
-            if self.entries:
-                return registry.declare(sub, registrant=actor, **fields)
             return registry.declare(point, registrant=actor, **fields)
         if key is None and name:
             key = f"{actor}/{name}"
@@ -585,12 +579,17 @@ class Scope:
         if verb == "list":
             return [e.key for e in registry.entries(point)]
         if verb == "owned":
-            return registry.owned(actor)
+            # owned(point, owner=None)：第一个位置参数是接口路径，不是发起方。
+            # 只传 actor 会被当成接口名去解析（"接口 'core' 不合法"）。
+            return registry.owned(point, actor)
         if verb == "watch":
             cb = fields.get("callback")
             if cb is None:
                 raise ValueError("watch 需要一个回调")
-            return registry.watch(cb)
+            # watch(point=None, callback=None)：回调必须走位置/关键字的正确形状，
+            # 否则它会被当成 point 存进 _watchers，_notify 里拿函数去比路径，
+            # 于是回调一次都不会触发（异常还被 except 吞掉，看起来「没坏」）。
+            return registry.watch(point, cb)
         raise ValueError(f"不支持动词 {verb!r}")
 
 

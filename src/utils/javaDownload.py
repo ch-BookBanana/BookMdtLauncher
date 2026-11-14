@@ -307,15 +307,23 @@ class JavaDownloadFlow(QObject):
         """取消流程：停止 QDownloader 与解压线程，并清掉下载记录（放弃续传）。"""
         _log.info(_tr("core.log.info.javaCancel"))
         self._is_cancelled = True
-        self.shutdown()
+        self.shutdown(persist=True)   # 用户主动取消：作废，不再续传
         clear_info()
 
-    def shutdown(self):
-        """停止并等待所有内部子线程退出（下载线程 + 解压线程）。
+    def shutdown(self, persist=False):
+        """停止所有内部子线程（下载线程 + 解压线程）。
 
         幂等：可在流程结束、取消、销毁前多次调用。
         调用后所有 QThread 均已退出，可安全释放引用而不触发
         "QThread: Destroyed while thread is still running"。
+
+        persist: 是否把「这次下载作废」落盘。
+            False（默认）—— 收尾/停机：只停线程，断点与记录原样保留，下次启动
+                     接着下。关掉启动器、或流程失败后重试，都不该丢掉已下的字节。
+            True  —— 用户主动取消（cancel() 走这条）：写取消标记、删临时文件与
+                     javaDownload.json，重启不再续传。
+        等待都取短值：这是收尾/退出路径，用户已经点了关闭，卡住界面比留下一个
+        僵尸线程难受得多 —— 退不掉的线程本来就有进程退出兜底。
         """
         _log.info(_tr("core.log.info.javaShutdown"))
         # 1. 下载线程
@@ -323,9 +331,11 @@ class JavaDownloadFlow(QObject):
         self._downloader = None
         if dl is not None:
             try:
-                dl.cancel(timeout=3)
-                dl.wait_thread(5000)
-                dl.deleteLater()
+                # 只有确认线程已退出才 deleteLater：销毁仍在运行的 QThread 会触发
+                # "QThread: Destroyed while thread is still running" 并直接崩进程。
+                # 没退出的留到进程退出兜底（句柄随进程释放）。
+                if dl.cancel(timeout=1.0, persist=persist):
+                    dl.deleteLater()
             except Exception:
                 pass
         # 2. 解压线程
@@ -335,7 +345,7 @@ class JavaDownloadFlow(QObject):
             try:
                 if thread.isRunning():
                     thread.quit()
-                thread.wait(5000)
+                thread.wait(1000)
             except Exception:
                 pass
         self._extract_worker = None
@@ -446,8 +456,11 @@ class JavaDownloadFlow(QObject):
         self._downloader = None
         if dl is not None:
             try:
-                dl.wait_thread(5000)
-                dl.deleteLater()
+                # 这里是 UI 线程，不能长等。线程一般已被 _interrupt_inflight 打断、
+                # 转瞬即退；万一没退，宁可留到进程退出兜底，也不要把界面卡在这
+                # （运行中的 QThread 被销毁才是致命的）。
+                if dl.wait_thread(500):
+                    dl.deleteLater()
             except Exception:
                 pass
         clear_info()
