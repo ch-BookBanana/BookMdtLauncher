@@ -145,6 +145,16 @@ _REGISTRY_LOCK = Lock()
 
 TMP_PATH = getPath(os.path.join("BML", ".tmp", "QDownloader"))
 
+# 用户点了取消、但工作线程还没停下来的标记文件（放在各自的临时任务目录里）。
+#
+# 为什么需要它：cancel() 只能等线程自己退出，线程要是正卡在 _prepare 的
+# 网络请求里（连不上的 GitHub），8 秒根本等不回来 —— 真实日志里那一串
+# 「下载线程仍在网络请求中，未能及时停止」就是这种。此时临时目录还在，
+# 光看磁盘分不出「下到一半」和「已经取消」，重启后扫描照样把它列成待续传、
+# 甚至按 downloading.json 再下一遍。标记文件是跨进程的唯一凭据：
+# 扫描时跳过、启动时连目录一起删（见 clean_cancelled_tasks）。
+CANCELLED_FLAG = "cancelled.flag"
+
 # 全局退出标志：应用退出时置位，工作线程据此快速结束网络请求
 _ABORT_EVENT = threading.Event()
 
@@ -161,7 +171,9 @@ def _interruptible_sleep(seconds):
 def shutdown_all(timeout=5):
     """停止所有活动下载任务（应用退出时调用）。
 
-    置位全局退出标志 → 逐个取消任务（有界等待）→ 等待注册表清空。
+    置位全局退出标志 → 逐个让任务停下（有界等待）→ 等待注册表清空。
+    注意用 persist=False：关掉启动器只是停机，不是「放弃下载」——
+    临时文件与断点状态留着，下次启动接着下（mdt 任务由 downloading.json 拉起）。
     若有线程仍在网络请求中未能及时退出，由进程退出兜底处理。
     """
     _ABORT_EVENT.set()
@@ -170,7 +182,7 @@ def shutdown_all(timeout=5):
     deadline = time.time() + timeout
     for task in tasks:
         try:
-            task.cancel(timeout=3)
+            task.cancel(timeout=3, persist=False)
         except Exception:
             pass
     while time.time() < deadline:
@@ -202,6 +214,55 @@ def register_task(task_id, instance):
 def unregister_task(task_id):
     with _REGISTRY_LOCK:
         _TASK_REGISTRY.pop(task_id, None)
+
+
+def _read_json(path):
+    """读一个 json 文件；读不到、坏掉、不是对象都返回 None（不抛）。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _state_from_download(d):
+    """用 download.json 重建一份等价于 state.json 的状态；字段不够就返回 None。
+
+    为什么要这条兜底：state.json 每完成 10 个块才写一次（_save_state_if_needed），
+    所以「下到一半被关掉/取消」的任务常常只有 download.json。只认 state.json
+    的话，这些任务在下载列表里既不显示、也就删不掉，而启动时又会按
+    downloading.json 自动续传 —— 用户看到的就是「取消不掉、删不了、每次开
+    都自己下」。download.json 里块状态、块大小、目标路径、源都在，够重建。
+    """
+    if not isinstance(d, dict):
+        return None
+    try:
+        total = int(d.get("total_size") or 0)
+        block_size = int(d.get("block_size") or 0)
+    except (TypeError, ValueError):
+        return None
+    if total <= 0 or block_size <= 0:
+        return None
+    blocks = d.get("blocks") or []
+    done = []
+    for i, b in enumerate(blocks):
+        try:
+            if int((b or {}).get("p", 0)) >= 100:
+                done.append(i)
+        except (TypeError, ValueError, AttributeError):
+            pass
+    urls = d.get("urls") or ([d["url"]] if d.get("url") else [])
+    return {
+        "total_size": total,
+        "block_count": int(d.get("block_count") or len(blocks)),
+        "block_size": block_size,
+        "completed_blocks": done,
+        "url": urls[0] if urls else "",
+        "urls": urls,
+        "dest_path": d.get("dest_path", "") or "",
+        "title": d.get("title", "") or "",
+    }
 
 
 # ==================== 3. 下载器主类 ====================
@@ -280,6 +341,7 @@ class QDownloader(QObject):
         self._json_save_counter = 0
         self._is_paused = False
         self._is_cancelled = False
+        self._user_cancelled = False   # 用户主动取消（区别于退出时的停机，见 cancel）
         self._is_running = False
         self._cancel_allowed = bool(cancel_allowed)
         self._pause_allowed = bool(pause_allowed)
@@ -313,9 +375,18 @@ class QDownloader(QObject):
         # QThread::quit 线程安全，可在任意线程直接调用。
         # 删除对象统一由持有方（JavaDownloadFlow）在 wait_thread 确保线程退出后执行。
         self.finished.connect(self._thread.quit, Qt.DirectConnection)
-        self.finished.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
         self.cancelled.connect(self._thread.quit, Qt.DirectConnection)
-        self.cancelled.connect(lambda: unregister_task(self.task_id) if self.task_id else None)
+        # 摘路由表挂在「线程真的结束了」上，不挂 finished/cancelled 信号：
+        # 取消时 _run 先发 cancelled、再在 finally 里 shutdown(wait=True) 等
+        # 分片收尾，中间那段线程还活着。信号上就摘掉的话，界面会立刻收走这张
+        # 卡，而它仍在往临时目录里写 —— 用户看到的是「取消了却在下」，紧接着
+        # 重新下载同一个目标还会复用同一个 task_id。
+        self._thread.finished.connect(self._on_thread_finished)
+
+    def _on_thread_finished(self):
+        """内部线程彻底退出：这时才把任务从路由表摘掉（见 __init__ 里的说明）。"""
+        if self.task_id:
+            unregister_task(self.task_id)
 
     def _init_task_id(self):
         """根据目标路径生成任务ID，并创建对应的临时目录结构"""
@@ -405,32 +476,70 @@ class QDownloader(QObject):
             self._pause_allowed = allowed
             self.pause_allowed_changed.emit(allowed)
 
-    def cancel(self, timeout=None):
+    def cancel(self, timeout=None, persist=True):
         """取消下载并清理临时文件（不可恢复）。
 
-        timeout: 等待工作线程退出的秒数；None 表示无限等待（默认）。
-        线程未能及时退出时保留临时文件（下次可断点续传），不强行删除。
+        timeout: 等待工作线程退出的**秒数**；None 表示无限等待。
+        persist: 是否把「这个任务作废」落盘。
+            True  —— 用户主动取消：写取消标记、删临时文件，重启不再续传。
+            False —— 应用退出时的停机：只让线程停下，临时文件与状态原样保留，
+                     下次启动照常续传（关掉启动器不等于放弃下载）。
 
         返回线程是否已退出。分片线程通常会被直接打断（见 _interrupt_inflight），
-        因此绝大多数情况下这里是 True；返回 False 说明连 shutdown 都没能
-        唤醒读（极少数平台/连接状态），此时临时文件原样保留，调用方据此
-        决定能不能紧接着删目标目录 —— 删了也没用，分片收尾时还会把数据写回
-        同一个临时目录。
+        因此绝大多数情况下这里是 True；返回 False 说明线程还卡在某个请求里
+        （最典型的是 _prepare 拿响应头，那条连接没有可 shutdown 的 socket），
+        临时文件原样保留，等它自己超时退出后再由 _run 的 finally 收尾。
+
+        注意：**取消这件事本身已经生效**，与返回值无关 —— _is_cancelled 已置位、
+        取消标记已落盘（见 CANCELLED_FLAG）。返回值只说明「现在能不能立刻删
+        目标目录/临时文件」，不再代表「取消成功没有」。
         """
         self._is_cancelled = True
         self._pause_event.set()   # 唤醒暂停等待中的线程，使其退出
+        if persist:
+            self._user_cancelled = True
+            # 标记先落盘，再去打断网络读：线程可能卡在 _prepare（连不上的源），
+            # 8 秒也停不下来，那时目录和状态都还在，只有这个标记能告诉下次启动
+            # 「这条不是待续传，是用户取消的」。
+            self._mark_cancelled()
         # 打断在途网络读：不这么做的话，分片线程要一直阻塞到读超时（60 秒）
         # 才看得到取消标志，cancel() 也就跟着卡同样久。
         self._interrupt_inflight()
         stopped = True
         if self._thread.isRunning():
-            stopped = self._thread.wait(timeout)
-        if stopped:
+            # QThread.wait 收的是毫秒，而本方法的 timeout 是秒。直接把它传进去
+            # 就是「等 8 毫秒」—— 取消立刻判超时返回 False，调用方以为失败，
+            # 实际线程还在一路把块写完（真实日志里那两条「未能及时停止」）。
+            if timeout is None:
+                stopped = self._thread.wait()
+            else:
+                stopped = self._thread.wait(max(0, int(timeout * 1000)))
+        if stopped and persist:
             self._cleanup(keep_state=False)
-        # 线程从未启动（未 start 即 cancel）：finished/cancelled 信号不会发射，
-        # 需要手动注销，避免僵尸任务残留在注册表中
-        unregister_task(self.task_id)
+        # 线程没停下来就先别从路由表里摘：摘了界面上这张卡会直接消失，而它
+        # 仍在往同一个 task_id 的临时目录里写块。紧接着重下一次同一个目标会
+        # 复用这个 id，两批数据就写进同一批分块文件了。等它自己收尾时 _run
+        # 的 finally 会摘。
+        if not self._thread.isRunning():
+            unregister_task(self.task_id)
         return stopped
+
+    def _mark_cancelled(self):
+        """把「已取消」写进临时任务目录（best effort，失败不影响取消本身）。
+
+        目录可能还不存在（卡在 _prepare 时 _prepare_temp_files 还没跑），
+        这里一并建出来 —— 空目录没有 state.json / download.json，扫描本来就
+        不会把它当任务，删目录时也不会漏。
+        """
+        if not self.temp_root:
+            return
+        try:
+            os.makedirs(self.temp_root, exist_ok=True)
+            with open(os.path.join(self.temp_root, CANCELLED_FLAG), "w",
+                      encoding="utf-8") as f:
+                f.write("%d\n" % int(time.time()))
+        except OSError:
+            pass
 
     def _interrupt_inflight(self):
         """打断所有进行中的网络读，让阻塞在 recv 上的分片线程立刻返回。
@@ -464,12 +573,15 @@ class QDownloader(QObject):
     def wait_thread(self, timeout=None):
         """等待内部下载线程完全退出（返回是否已退出）。
 
+        timeout 是**毫秒**（与 QThread.wait 同单位，调用方传 5000 = 5 秒）；
+        None 表示一直等。注意 cancel() 的 timeout 是秒，两者别混。
+
         在释放/删除本对象前调用，确保 QThread 不再运行，
         避免销毁运行中的线程导致 Qt 致命崩溃。
         """
         t = self._thread
         if t is not None and t.isRunning():
-            return t.wait(timeout)
+            return t.wait() if timeout is None else t.wait(max(0, int(timeout)))
         return True
 
     def __del__(self):
@@ -764,6 +876,12 @@ class QDownloader(QObject):
             self.finished.emit(False)
         finally:
             self._is_running = False
+            if self._user_cancelled:
+                # 用户取消时线程可能比 cancel() 等的 8 秒更晚才走到这里（卡在
+                # 网络读上）。那时 cancel() 已经跳过清理，留下的临时目录只有
+                # 这里能收 —— 不收的话它会以「待续传」的样子一直躺在列表里。
+                # 退出时的停机不算（_user_cancelled=False），状态要留着续传。
+                self._cleanup(keep_state=False)
             unregister_task(self.task_id)
 
     def _prepare(self):
@@ -1021,7 +1139,14 @@ class QDownloader(QObject):
         # 原子性移动（同盘符下极快）
         shutil.move(self.merged_temp, self.dest_path)
 
-        # 删除空临时目录
+        # 删除空临时目录。目录里还躺着 state.json / download.json，不先删掉
+        # 的话 rmdir 必然失败，留下一个「只剩两个 json 的任务目录」——扫描时
+        # 会被当成一条待续传任务（见 get_pending_tasks）。
+        for name in ("state.json", "download.json"):
+            try:
+                os.remove(os.path.join(self.temp_root, name))
+            except OSError:
+                pass
         try:
             os.rmdir(self.temp_root)
         except OSError:
@@ -1049,8 +1174,15 @@ class QDownloader(QObject):
 
         for task_id in os.listdir(temp_root_dir):
             task_dir = os.path.join(temp_root_dir, task_id)
+            if not os.path.isdir(task_dir):
+                continue
+            # 用户取消过、但线程当时没停下来：目录里已经写了取消标记。
+            # 这不是「待续传」，不能列出来（否则用户看到的就是「删了又回来」）。
+            if os.path.isfile(os.path.join(task_dir, CANCELLED_FLAG)):
+                continue
             state_file = os.path.join(task_dir, "state.json")
-            if not os.path.isfile(state_file):
+            if not os.path.isfile(state_file) and not os.path.isfile(
+                    os.path.join(task_dir, "download.json")):
                 continue
 
             # 跳过已在路由表中的任务（正在运行）
@@ -1058,25 +1190,38 @@ class QDownloader(QObject):
                 continue
 
             try:
-                with open(state_file, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
+                djson = _read_json(os.path.join(task_dir, "download.json"))
+                if os.path.isfile(state_file):
+                    with open(state_file, 'r', encoding='utf-8') as f:
+                        state = json.load(f)
+                else:
+                    # 只有 download.json 的残局（下到一半就被关掉）：也要列出来，
+                    # 否则界面上既看不见也删不掉，而它每次启动都会自己续传。
+                    state = _state_from_download(djson)
+                    if not state:
+                        continue
+                djson = djson or {}
                 total = state.get('total_size', 0)
                 blocks = state.get('completed_blocks', [])
                 block_size = state.get('block_size', 1)
+                # 目标文件已经在、大小也对得上：这是合并完没清干净的残局，不是
+                # 待续传任务。列出来只会让用户看到一条永远「待续传」的假任务。
+                dest = state.get('dest_path', '')
+                if dest and total > 0:
+                    try:
+                        if os.path.isfile(dest) and os.path.getsize(dest) == total:
+                            continue
+                    except OSError:
+                        pass
                 # 优先取 download.json 的实时字节进度，否则按完成块数估算
-                done = 0
-                try:
-                    with open(os.path.join(task_dir, "download.json"), 'r', encoding='utf-8') as df:
-                        djson = json.load(df)
-                    done = djson.get('done_bytes', 0)
-                    urls = djson.get('urls') or None
-                except Exception:
-                    urls = None
+                done = djson.get('done_bytes') or 0
+                urls = djson.get('urls') or state.get('urls') or None
+                if not done and 'done_bytes' not in djson:
                     done = len(blocks) * block_size
                 percent = (done / total * 100) if total > 0 else 0.0
 
                 pending[task_id] = {
-                    "url": state.get('url', ''),
+                    "url": state.get('url', '') or (urls[0] if urls else ''),
                     "urls": urls or [state.get('url', '')],
                     "dest_path": state.get('dest_path', ''),
                     "title": state.get('title', '') or '',
@@ -1105,11 +1250,20 @@ class QDownloader(QObject):
 
         temp_root = os.path.join(TMP_PATH, task_id)
         state_file = os.path.join(temp_root, "state.json")
-        if not os.path.exists(state_file):
-            raise FileNotFoundError(f"未找到任务 {task_id} 的状态文件")
-
-        with open(state_file, 'r') as f:
-            state = json.load(f)
+        # 用户取消过、线程当时还没停下来的任务：目录带着取消标记。不能接管 ——
+        # 接管就是「取消了又开始下」。顺手把这个残留清掉。
+        if os.path.isfile(os.path.join(temp_root, CANCELLED_FLAG)):
+            shutil.rmtree(temp_root, ignore_errors=True)
+            raise FileNotFoundError(f"任务 {task_id} 已被取消")
+        if os.path.exists(state_file):
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+        else:
+            # 只有 download.json 也能续：块文件都还在盘上，_download_block 会从
+            # 每个块已有的字节接着写（ab 模式），不必从头再来。
+            state = _state_from_download(_read_json(os.path.join(temp_root, "download.json")))
+            if not state:
+                raise FileNotFoundError(f"未找到任务 {task_id} 的状态文件")
 
         # 优先读取 download.json 的多源列表（含竞速结果），否则退回单源 url
         urls = None
@@ -1139,6 +1293,25 @@ class QDownloader(QObject):
         # 启动
         downloader.start()
         return downloader
+
+    @classmethod
+    def clean_cancelled_tasks(cls):
+        """删除带取消标记的临时任务目录，返回删掉的数量。
+
+        取消的那一刻线程可能还卡在网络请求里，目录里的文件还开着，Windows 上
+        删不干净；进程重启后那些线程已经不存在了，正好一次收干净。启动时调
+        （见 on_start.game.resume_mdt_downloads），别在运行期调 —— 可能正在写。
+        """
+        if not os.path.isdir(TMP_PATH):
+            return 0
+        removed = 0
+        for name in os.listdir(TMP_PATH):
+            path = os.path.join(TMP_PATH, name)
+            if os.path.isfile(os.path.join(path, CANCELLED_FLAG)):
+                shutil.rmtree(path, ignore_errors=True)
+                if not os.path.exists(path):
+                    removed += 1
+        return removed
 
     @classmethod
     def clean_orphan_tasks(cls):

@@ -42,7 +42,7 @@ from ...options.scrolls import Scroll
 from ...QDownloader import QDownloader
 from ...qthtimer import QThTimer
 from ...registry import Box, registry
-from ...utils import _is_mdt_download, t
+from ...utils import mdt_dir_of_dest, mdt_rmtree, t
 
 
 class DlListPage(QWidget):
@@ -123,6 +123,11 @@ class DlListPage(QWidget):
         try:
             actives = {}
             for task_id, task in QDownloader.get_active_tasks().items():
+                # 已经点了取消的任务不再上卡：线程可能还卡在网络请求里几十秒
+                # （见 QDownloader.cancel 的说明），留着卡片只会让用户以为
+                # 「取消没反应」，再点一次又排一遍 8 秒等待。
+                if getattr(task, "_is_cancelled", False):
+                    continue
                 done, total = 0, 0
                 try:
                     done, total = task.get_progress()
@@ -212,8 +217,9 @@ class DlListPage(QWidget):
             # 用户主动续传：清除 downloading.json 中的暂停状态（恢复下载）
             try:
                 dest = getattr(dl, "dest_path", "") or ""
-                if dest and _is_mdt_download(dest):
-                    dfile = os.path.join(os.path.dirname(dest), "downloading.json")
+                mdir = mdt_dir_of_dest(dest)
+                if mdir:
+                    dfile = os.path.join(mdir, "downloading.json")
                     if os.path.isfile(dfile):
                         with open(dfile, "r", encoding="utf-8") as f:
                             info = json.load(f)
@@ -228,20 +234,35 @@ class DlListPage(QWidget):
             events.logger.error(t(events.lang.get("core.log.error.dlResumeFailed"), task_id, e))
 
     def _delete_task(self, state_file):
+        # 先读状态、再删目录：反过来写的话 state_file 已经不存在了，
+        # dest 永远读到空串，mdt 目标文件夹（含 downloading.json）就留了下来，
+        # 下次启动又会被当成「未完成的下载」续传回来 —— 用户视角是「删不掉」。
+        #
+        # 两个文件都要看：下到一半被关掉的任务只有 download.json（state.json
+        # 每 10 个块才写一次），只认 state.json 的话恰恰是这批最难缠的任务删不掉。
         task_dir = os.path.dirname(state_file) if state_file else None
+        dest = ""
+        for name in ("state.json", "download.json"):
+            if not task_dir:
+                break
+            path = os.path.join(task_dir, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    dest = (json.load(f) or {}).get("dest_path", "") or ""
+            except Exception:
+                dest = ""
+            if dest:
+                break
+
         if task_dir and os.path.isdir(task_dir):
             shutil.rmtree(task_dir, ignore_errors=True)
         # 若是 mdt 游戏下载：同时删除目标文件夹（含 downloading.json），
         # 避免残留记录导致下次启动又被续传
         try:
-            dest = ""
-            if state_file and os.path.isfile(state_file):
-                with open(state_file, "r", encoding="utf-8") as f:
-                    dest = (json.load(f) or {}).get("dest_path", "") or ""
-            if dest and _is_mdt_download(dest):
-                mdir = os.path.dirname(dest)
-                if os.path.isdir(mdir):
-                    shutil.rmtree(mdir, ignore_errors=True)
+            mdir = mdt_dir_of_dest(dest)
+            if mdir and mdt_rmtree(mdir):
                 events.logger.info(t(events.lang.get("core.log.info.dlMdtDeleteCleaned"),
                                         os.path.basename(mdir) or mdir))
         except Exception:
@@ -260,6 +281,7 @@ class DlListPage(QWidget):
             self.task = None      # 运行中任务的 QDownloader 实例（pending 为 None）
             self.state_file = ""
             self.task_info = {}
+            self._cancelling = False   # 取消请求已发出、还在等线程退出
             self.init_ui()
 
         def init_ui(self):
@@ -426,9 +448,10 @@ class DlListPage(QWidget):
             启动时通过 getDownloadingMdts 读取该状态同步暂停。
             """
             dest = getattr(self.task, "dest_path", "") or ""
-            if not _is_mdt_download(dest):
+            mdir = mdt_dir_of_dest(dest)
+            if not mdir:
                 return
-            dfile = os.path.join(os.path.dirname(dest), "downloading.json")
+            dfile = os.path.join(mdir, "downloading.json")
             try:
                 info = {}
                 if os.path.isfile(dfile):
@@ -451,32 +474,67 @@ class DlListPage(QWidget):
             # 待续传：请求页面删除
             if self.task_info.get("kind") == "active":
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
+                    if self._cancelling:
+                        return
+                    # 取消要在网络读上等，最多 8 秒。这期间把两个按钮冻住：
+                    # 连点会再排一次 cancel，第二次照样得把 timeout 走完。
+                    self._cancelling = True
+                    self.btn_primary.setEnabled(False)
+                    self.btn_secondary.setEnabled(False)
+
                     def _do_cancel(e, task=self.task, dest=self.task_info.get("dest") or ""):
+                        # 顺序是「先删记录、再等线程」：
+                        #   线程最可能卡在 _prepare 的建连上（源连不通），那里没有
+                        #   可打断的 socket，cancel 要等满 8 秒才返回。要是先等，
+                        #   用户在这 8 秒里关掉启动器，downloading.json 还在，
+                        #   下次开又被续回来 —— 正是「取消完重启又出现」。
+                        #
+                        # 已经下满的任务不能当取消处理：卡片最长陈旧 1 秒，点下去
+                        # 的那一刻可能刚好下完，删了就是删掉一个刚装好的实例。
+                        try:
+                            _done, _total = task.get_progress()
+                        except Exception:
+                            _done, _total = 0, 0
+                        if _total and _done >= _total:
+                            return True
+                        # mdt 游戏下载：立刻删目标文件夹（含 downloading.json）。
+                        # 与线程停没停无关 —— 分片只往临时目录写，_is_cancelled 之后
+                        # 目标目录不会再被碰。（合并阶段上前面的进度判断已经拦掉了）
+                        mdir = mdt_dir_of_dest(dest)
+                        if mdir and mdt_rmtree(mdir):
+                            events.logger.info(t(events.lang.get("core.log.info.dlMdtCancelCleaned"),
+                                                    os.path.basename(mdir) or mdir))
+                        # 取消是「用户说了算」的动作，不因线程停不下来而作废：
+                        # cancel() 第一件事就是置位并落盘取消标记，后面的等待
+                        # 只决定「现在能不能顺手把临时目录也删了」。
                         try:
                             stopped = task.cancel(timeout=8)
                         except Exception:
                             stopped = False
-                        # 分片线程没停下来就别删目标目录：它还阻塞在网络读上，
-                        # 收尾时会继续往临时目录里写。这时删掉目录，用户看到的
-                        # 是「取消了但文件又回来了」，而紧接着重新下载同一个目标
-                        # 会复用同一个 task_id，两个线程写同一批分块文件。
                         if not stopped:
+                            # 标记已落盘，重启不会再续；这里只是说明临时文件为什么
+                            # 还在（等线程自己超时退出，或下次启动统一清理）。
                             events.logger.warning(t(
                                 events.lang.get("core.log.warning.dlCancelPending")))
-                            return
-                        # mdt 游戏下载：取消后删除目标文件夹（含 downloading.json）
-                        if dest and _is_mdt_download(dest):
-                            mdir = os.path.dirname(dest)
-                            try:
-                                if os.path.isdir(mdir):
-                                    shutil.rmtree(mdir, ignore_errors=True)
-                                events.logger.info(t(events.lang.get("core.log.info.dlMdtCancelCleaned"),
-                                                        os.path.basename(mdir) or mdir))
-                            except Exception:
-                                pass
-                    QThTimer.task(0, _do_cancel, dedicated=True)
+                        # 卡片下一轮快照就消失（_snapshot_tasks 跳过已取消任务），
+                        # 所以下面不再管按钮。
+                        return True
+                    QThTimer.task(0, _do_cancel, dedicated=True,
+                                  result_callback=self._after_cancel)
             else:
                 self.delete_requested.emit(self.state_file)
+
+        def _after_cancel(self, stopped):
+            """取消收尾（主线程）：卡片下一轮快照就会被收走，按钮保持冻结。
+
+            线程没停下来（stopped=False）也不再放回按钮：任务已标记取消，这一秒
+            内卡片就没了，再点一次只会又排一遍 8 秒等待、而且目标目录已删。
+            """
+            try:
+                if stopped:
+                    self._cancelling = False
+            except RuntimeError:
+                pass            # 卡片在这期间已被销毁
 
 
 def register():

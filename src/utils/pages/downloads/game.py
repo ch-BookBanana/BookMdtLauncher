@@ -32,12 +32,14 @@ from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...options.scrolls import Scroll
 from ...path_utils import getPath
-from ...utils import _apply_md_image, change_color, md_to_html, t
+from ...utils import (_apply_md_image, change_color, md_to_html,
+                      primary_btn_style, t)
 from ...bus import bus
 from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
 from ...registry import Box, registry
+from .._init import open_overlay
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
 _FIELDS = {
@@ -280,6 +282,15 @@ class Game(QWidget):
                 # 统一注册搜索按钮（增量/全量），子类无需重复注册
                 self.add_action_btn("core.wid.pages.download.origin.search", lambda: self.search())
                 self.add_action_btn("core.wid.pages.download.origin.searchAll", lambda: self.searchAll())
+
+                # 本地导入：装新实例的第二条路（第一条是下面的下载列表）。
+                # 挂在下载页这排而不是主页那颗大按钮下面 —— 主页只留一个主动作；
+                # 「从本地文件装一个」本质上也是「获取游戏本体」，跟搜索下载同一件事。
+                # 三个下载源共用这一排，所以只写在这一处；拖放仍是全局快捷方式。
+                self.action_bar_layout.addSpacing(16)
+                self.add_action_btn("core.wid.pages.download.import",
+                                    lambda: open_overlay("core.importJar", self))
+
                 self.action_bar_layout.addStretch()
 
                 self.main = QWidget()
@@ -1076,7 +1087,7 @@ class Game(QWidget):
                     self.btn_ok.setProperty("wid", "btn")
                     self.btn_ok.setFixedSize(80, 30)
                     self.btn_ok.setEnabled(False)
-                    self.btn_ok.setStyleSheet("background-color: rgba(240, 183, 49, 100); border: none;")
+                    self.btn_ok.setStyleSheet(primary_btn_style(bool(events.settings.get("theme")), False))
                     self.btn_ok.clicked.connect(self._on_ok)
                     self.bottom_layout.addWidget(self.btn_ok, 0)
 
@@ -1176,25 +1187,25 @@ class Game(QWidget):
                         self.label2.setStyleSheet("font-size: 13px; color: red;")
                         self.label2.setText(msg)
                         self.btn_ok.setEnabled(False)
-                        self.btn_ok.setStyleSheet("background-color: rgba(240, 183, 49, 100); border: none;")
+                        self.btn_ok.setStyleSheet(primary_btn_style(bool(events.settings.get("theme")), False))
                     elif state == "dup":
                         self.input.setStyleSheet("border: 1px solid yellow;")
                         self.label2.setStyleSheet("font-size: 13px; color: yellow;")
                         self.label2.setText(msg)
                         self.btn_ok.setEnabled(True)
-                        self.btn_ok.setStyleSheet("background-color: #f0b731; border: none;")
+                        self.btn_ok.setStyleSheet(primary_btn_style(bool(events.settings.get("theme")), True))
                     elif state == "empty":
                         self.input.setStyleSheet("")
                         self.label2.setStyleSheet("font-size: 13px;")
                         self.label2.setText("")
                         self.btn_ok.setEnabled(False)
-                        self.btn_ok.setStyleSheet("background-color: rgba(240, 183, 49, 100); border: none;")
+                        self.btn_ok.setStyleSheet(primary_btn_style(bool(events.settings.get("theme")), False))
                     else:
                         self.input.setStyleSheet("")
                         self.label2.setStyleSheet("font-size: 13px;")
                         self.label2.setText("")
                         self.btn_ok.setEnabled(True)
-                        self.btn_ok.setStyleSheet("background-color: #f0b731; border: none;")
+                        self.btn_ok.setStyleSheet(primary_btn_style(bool(events.settings.get("theme")), True))
 
                 # ---------- 确定：创建下载任务 ----------
                 def _on_ok(self):

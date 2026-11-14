@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushBut
 from src.utils.path_utils import getPath
 
 from ..events import events
+from ..jarImport import version_text
 from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
 from ..utils import change_color, t
@@ -285,7 +286,11 @@ class Start(Page):
                     pm = pm.scaled(120, 120, Qt.KeepAspectRatio, Qt.FastTransformation)
                 self.icon.setPixmap(pm)
             if gameTxt[0]:
-                self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, 150))
+                # 省略宽度按栏宽算（-30 是左右各 15px 的呼吸位），不再写死 150：
+                # 150 时「Mindustry-160.4」刚好放不下，截出来的正是版本号那一段
+                # （「Mindustry-16…」），而版本号下一行又要再说一遍。
+                budget = max(140, self.width() - 30)
+                self.gameTxt.setText(QFontMetrics(self.gameTxt.font()).elidedText(gameTxt[1], Qt.ElideRight, budget))
             if versTxt[0]:
                 self.versTxt.setText(QFontMetrics(self.versTxt.font()).elidedText(versTxt[1], Qt.ElideRight, 130))
             # 图标悬浮提示：名称 + 版本（二者都可能为空，拼一起即可；无实例时自动清空）
@@ -310,10 +315,10 @@ class Start(Page):
                     self.sets((True,QPixmap()),(True,events.lang.get("core.wid.pages.start.gameNotfound")),(True,events.lang.get("core.wid.pages.start.gameNotfound2")))
                 else:
                     self.game["name"] = default_game
-                    self.game["vers"] = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}" if game_msg else None
+                    self.game["vers"] = version_text(game_msg) or None
                     self.sets((False,None),(True,default_game),(True,self.game["vers"] or ""))
             elif self.game["name"] and game_msg:
-                new_vers = f"v{game_msg['number']}.{game_msg['build']}{game_msg['modifier']}"
+                new_vers = version_text(game_msg)
                 if self.game["vers"] != new_vers:
                     self.game["vers"] = new_vers
                     self.sets((False,None),(False,None),(True,new_vers))
@@ -396,7 +401,12 @@ class Start(Page):
                         # main 是构建期回填的产物（core.pages 声明了槽位）。
                         download = registry.entry("core.pages", "core.download").main
                         download.click()
-                        download.main.game.btn.click()
+                        # 下载页里的「游戏本体」页签同样按 key 取：注册表把 tab 的
+                        # 属性名存成「download/game」（点号统一规范成斜杠），所以
+                        # download.main.game 那个写法根本取不到。
+                        game = registry.entry("core.download.tabs",
+                                              "core.download.game").main
+                        game.btn.click()
 
                 def set_have_game(self, have: bool):
                     if self.have_game == have:
@@ -943,7 +953,7 @@ class Start(Page):
                         if vers:
                             self.acquire()
                             self.title.setText(self.game)
-                            self.version.setText(f"v{vers['number']}.{vers['build']}{vers['modifier']}")
+                            self.version.setText(version_text(vers))
 
                     def acquire(self, force=False):
                         """取图标 +1 引用；force 先释放旧引用再重取（iconChanged 用）。"""

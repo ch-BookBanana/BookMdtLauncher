@@ -25,6 +25,8 @@ from .path_utils import getPath
 from .javaManager import javaManager
 from .qthtimer import QThTimer
 from .resources import (ICON_MDT)
+from .jarImport import (MANIFEST_NAME, copy_jar, extract_package,
+                        inspect_jar, inspect_package, read_fork_info)
 
 _log = logging.getLogger("Main.MdtManager")
 
@@ -870,11 +872,14 @@ class mdtManager(QObject):
 
     @classmethod
     def getMdtMsg(cls, subdir_name):
-        """返回 version.properties 解析后的字典，失败返回 None。
+        """返回版本信息字典（version.properties + fork 的 mod.hjson），失败返回 None。
 
         图标解析优先级：子目录 icon.png > BML.json 的 icon_path > 默认图标。
         icon_path 为 null 或指向无效图片时自动写回默认图标（DEFAULT_ICON）。
         使用 (jar_mtime, png, png_mtime, png_size) 作为缓存键，避免重复读取 zip。
+
+        fork（MindustryX 等）额外带回 mod / modVersion / minGameVersion 三个字段，
+        与 jarImport.read_fork_info 同源：官方包这三项是空串，显示层据此回落。
 
         缓存键**刻意不含 BML.json 的 mtime**：BML.json 里还存着设置的镜像
         （mdtData），游戏每改一次设置就会让它刷新；若拿 mtime 当键，每刷新一次
@@ -937,7 +942,10 @@ class mdtManager(QObject):
                     cls._mdt_msg_cache.pop(subdir_name, None)
                     return None
                 data = zf.read('version.properties').decode('utf-8')
-                result = _parse_simple_config_typed(data) | {"icon": png}
+                # 同一个 zip 句柄顺手读 mod.hjson：fork 的版本号在那儿，
+                # 再开一次包为了读 170 字节不值当
+                result = (_parse_simple_config_typed(data)
+                          | read_fork_info(zf) | {"icon": png})
                 cls._mdt_msg_cache[subdir_name] = (cache_key, result)
                 return result
         except Exception:
@@ -1290,6 +1298,140 @@ class mdtManager(QObject):
             if os.path.normcase(candidate) not in taken:
                 return candidate
             index += 1
+
+    # ==================== 导入本地 jar ====================
+
+    def importJar(self, archive_path, name, progress=None):
+        """把一个本地 jar 或 BML 实例包收成一个实例，返回 ``(ok, code, final_name)``。
+
+        code 成功时为 None，失败时是 ``check_name`` 的失败码（invalidName /
+        dot）、``jarImport`` 的失败码（missing / notZip / noVersion / noMain /
+        noClient / badManifest / unsafeArchive），或这里自己的 ioError。
+        final_name 是**实际用上的**名字（撞名加过后缀）。
+
+        两种输入，同一套收尾：
+
+        - **客户端 jar**：目录里只放一个 mdt.jar，实例是空存档。
+        - **实例包**（导出的 zip）：解包后连同 data/、mods/ 一起搬进来，
+          得到与导出前一样的实例。
+
+        四条口径，与下载页那条路保持一致：
+
+        1. **名字先过 check_name**：名字就是目录名，``..\\evil`` 这种输入不能等到
+           makedirs 才被系统拒掉。
+        2. **撞名不覆盖**，交给 unique_name 加 (1)(2)。覆盖等于连带删掉那个实例
+           data/ 里的存档 —— 下载页的重名输入框也是这个处理。
+        3. **先验后落盘**：inspect_package 认包、inspect_jar 认客户端，验不过
+           一个字节都不写进 .Mindustrys。
+        4. **失败不留垃圾**：只清自己新建的目录。已经存在同名目录时 unique_name
+           不会选中它，所以这里的 rmtree 不会碰到别人的数据。
+
+        是实例方法而不是类方法，原因很实在：unique_name / taken_names 要读
+        self.settings["gameList"]，而 settings 是构造时注入的实例字段。
+
+        progress 是给界面的 0.0–1.0 进度回调，在调用方线程里被调（导入时是子线程）。
+        """
+        error = self.check_name(name)
+        if error:
+            return False, error, None
+
+        info = inspect_package(archive_path)
+        if not info["ok"]:
+            return False, info["error"], None
+
+        self.ensure_dirs()
+        final = self.unique_name(str(name).strip())
+        target = os.path.join(self.base_dir, final)
+        # unique_name 已保证这个名字没被占；但目录也可能刚好在这一瞬间被别的
+        # 进程建出来（两个启动器实例同时导入）。只有「我建的」才允许清理。
+        created = not os.path.isdir(target)
+
+        if info["kind"] == "instance":
+            return self._import_instance(archive_path, final, target, created, progress)
+
+        try:
+            os.makedirs(target, exist_ok=True)
+            _log.info(f"导入实例 {final}: {archive_path} -> {target}")
+            copy_jar(archive_path, os.path.join(target, "mdt.jar"), progress)
+            # BML.json 走与下载完成同一条路：_retrieve_mdt_data 补默认字段
+            # （javaPath），再写身份与图标。file 里已有的字段会被保留，
+            # 所以顺序反过来也不丢，但先补默认值这步不能省。
+            self._retrieve_mdt_data(final)
+            self.setData(final, ["name"], final)
+            self.setData(final, ["icon_path"], self.DEFAULT_ICON)
+        except Exception as exc:
+            _log.error(f"导入实例失败 {final}: {exc!r}")
+            if created:
+                shutil.rmtree(target, ignore_errors=True)
+            return False, "ioError", None
+
+        # 目录 mtime 变了缓存本来也会失效，但下一次 getMdts 可能就在同一毫秒里，
+        # 这里显式清一次，导入后立刻刷新列表不会看到「少一个」。
+        self.invalidate_cache()
+        return True, None, final
+
+    def _import_instance(self, package, final, target, created, progress):
+        """解一个实例包到 target，返回 ``(ok, code, final_name)``。
+
+        先解到 BML/.tmp 下的临时目录、验过 mdt.jar 再整体搬进 .Mindustrys：
+
+        - 包是坏的（半截下载、压制时漏了 mdt.jar）→ 一个字节都不进实例目录，
+          用户不会看到「列表里多了一个打不开的实例」；
+        - 临时目录与实例目录同盘时，最后的搬运是 rename 而不是复制，几百 MB
+          的包不会因为「搬一次」再等一遍。
+        """
+        tmp_root = getPath("BML/.tmp")
+        tmp = os.path.join(tmp_root,
+                           "import-%x-%x" % (int(time.time() * 1000), os.getpid()))
+        try:
+            os.makedirs(tmp, exist_ok=True)
+        except OSError as exc:
+            _log.error(f"导入实例包失败，建临时目录: {exc!r}")
+            return False, "ioError", None
+
+        try:
+            shard = None if progress is None else (lambda f: progress(f * 0.95))
+            ok, code = extract_package(package, tmp, shard)
+            if not ok:
+                return False, code, None
+
+            # 解出来的客户端再验一遍：标记文件只说「包里有 mdt.jar」，没说
+            # 它是完好的。半截文件、被换成别的东西都在这道拦下。
+            check = inspect_jar(os.path.join(tmp, "mdt.jar"))
+            if not check["ok"]:
+                _log.error(f"实例包里的 mdt.jar 不合格: {check['error']}")
+                return False, check["error"], None
+
+            os.makedirs(target, exist_ok=True)
+            _log.info(f"导入实例包 {final}: {package} -> {target}")
+            for entry in os.listdir(tmp):
+                if entry == MANIFEST_NAME:
+                    # 标记文件是包的信封，不属于实例内容：留着的话下次导出
+                    # 会把它当普通文件再收一遍，目录里也多一份看不明白的 json
+                    continue
+                shutil.move(os.path.join(tmp, entry), os.path.join(target, entry))
+
+            # 包里的 BML.json 记着导出方的 javaPath —— 那是他自己机器上的
+            # 绝对路径（例如 D:\\JDK\\bin\\java.exe）。原样带过来，接收方一启动
+            # 就是「找不到 Java」。一律改回跟随全局，让它在本地重挑。
+            self._retrieve_mdt_data(final)
+            self.setData(final, ["javaPath"], self.FOLLOW)
+            # 目录名才是这个名字的唯一真相：BML.json 里的旧名会让列表显示
+            # 「我的整合」，目录却叫「我的整合(1)」
+            self.setData(final, ["name"], final)
+            if progress is not None:
+                progress(1.0)
+        except Exception as exc:
+            _log.error(f"导入实例包失败 {final}: {exc!r}")
+            if created:
+                shutil.rmtree(target, ignore_errors=True)
+            return False, "ioError", None
+        finally:
+            # 成功时里面已被搬空，失败时是半截解压物，两种都该清
+            shutil.rmtree(tmp, ignore_errors=True)
+
+        self.invalidate_cache()
+        return True, None, final
 
     class Editor:
         """单个实例的编辑接口（mdtManager.edit(name) 返回，勿直接构造）。

@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
 
 from ...bus import bus
 from ...events import events
+from ...flowLayout import FlowLayout
+from ...jarImport import upstream_version, version_text
 from ...javaManager import javaManager
 from ...mdtManager import mdtManager
 from ...options.items import Bool, Combo
@@ -46,7 +48,8 @@ from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...registry import Box, registry
 from ...resources import FILE_FOLDER, TBT_CLOSE
-from ...utils import change_color, openFolder, t
+from ...utils import change_color, openFolder, primary_btn_style, t
+from ..Modal.exportInstance import ExportInstance
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
 _FIELDS = {
@@ -369,7 +372,15 @@ class GameSettings(Scroll):
             self.layout = QVBoxLayout(self)
             self.layout.setContentsMargins(10, 0, 10, 10)
             self.layout.setSpacing(0)
-            self.layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            # 这里**不能**给布局设对齐（原先写过 AlignLeft|AlignTop）：
+            #   - AlignLeft：l2 只拿得到「四颗按钮的宽度」，窗口一窄就被右边缘
+            #     切掉，连折行的机会都没有；
+            #   - AlignTop：给顶层布局设对齐后，Qt 按**最小尺寸**（148）而不是
+            #     实际高度给子项分空间 —— 图标行被压到 64、按钮行也只拿到 64，
+            #     第二排按钮溢出布局矩形，末尾多出的 48px 全落在分割线上方，
+            #     看起来就是「按钮离分割线老远」（而按钮本身早画到矩形外了）。
+            # 不给对齐时，父级已经用 sizeHint 把 Top 定高，布局内部会按实际
+            # 高度分：80 / 10 / 96，按钮底边到分割线正好是 10 的边距。
 
             # l1：图标 + 实例信息（名称 / 分组 ･ 版本）
             self.l1 = QHBoxLayout()
@@ -422,21 +433,34 @@ class GameSettings(Scroll):
             self.vers.setStyleSheet("font-size: 16px;")
             self.vers_l.addWidget(self.vers, 0)
 
+            # 基座注脚：fork（MindustryX 等）自己的版本号才是「这一版」，但那
+            # 一版是从哪个官方版本分出来的同样得看得见 —— 与安卓端同一套口径，
+            # 主版本号占主位，基座用灰字缀在后面（「2026.10.X38（基于 160.5）」）。
+            # 官方包没有这段，sets() 里按 upstream_version 的返回值显隐。
+            self.base = QLabel()
+            self.base.setProperty("wid", "text")
+            self.base.setStyleSheet("font-size: 16px; color: gray;")
+            self.vers_l.addWidget(self.base, 0)
+
             self.vers_l.addStretch(1)
 
             self.layout.addSpacing(10)
 
-            # l2：操作按钮行（并排）。样式沿用左侧栏那套 wid="btn"，
+            # l2：操作按钮行（并排，放不下就折行）。样式沿用左侧栏那套 wid="btn"，
             # 只有删除是危险操作，单独压成红色。文案挂 property，切语言时统一刷。
-            self.l2 = QHBoxLayout()
-            self.l2.setContentsMargins(0, 8, 0, 0)
-            self.l2.setSpacing(8)
-            self.l2.setAlignment(Qt.AlignLeft)
+            #
+            # 用 FlowLayout 而不是 QHBoxLayout：四颗定宽 122 的按钮加起来 536，
+            # 正文列最宽 600、窗口一窄就只剩 500 出头，横排布局不会折行，只会
+            # 把最右边那颗顶出可视区（字还在、边框被切）。折行后最小宽度只剩
+            # 一颗按钮，正文列跟着窗口一起缩，行高由布局按实际宽度算。
+            self.l2 = FlowLayout(spacing=8, margins=(0, 8, 0, 0))
             self.layout.addLayout(self.l2)
 
             self.buttons = [
                 self._button("core.wid.pages.gameManage.rename", self.Rename),
                 self._button("core.wid.pages.gameManage.group", self.Group),
+                # 导出插在删除之前：删除不可逆，用户手滑时中间多隔一个按钮
+                self._button("core.wid.pages.gameManage.export", ExportInstance),
                 self._button("core.wid.pages.gameManage.delete", self.Delete, danger=True)
             ]
 
@@ -452,7 +476,7 @@ class GameSettings(Scroll):
             if danger:
                 btn.setStyleSheet("color: rgb(214, 62, 62); border: 1px solid rgb(214, 62, 62);")
             btn.clicked.connect(lambda: self.open_page(page))
-            self.l2.addWidget(btn, 0)
+            self.l2.addWidget(btn)
             return btn
 
         def open_page(self, page):
@@ -467,19 +491,37 @@ class GameSettings(Scroll):
         def sets(self, name, msg):
             """填入实例信息（mdtManager.getMdtMsg 的返回值）；msg 为 None 则全部留空。
 
-            msg 里 icon 是图标文件路径，number/build/modifier 拼出版本号。
+            msg 里 icon 是图标文件路径，版本号统一由 jarImport.version_text 拼：
+            有 mod.hjson 的改端（MindustryX）用自己的发布版本，其余（官方、CN-ARC
+            这类直接改 build 的 fork）用 version.properties 的 build。基座注脚由
+            upstream_version 取 build —— 与显示版本相同就返回空串，这里跟着藏掉。
             """
             pm = QPixmap(msg["icon"]) if msg else QPixmap()
             if not pm.isNull():
                 pm = pm.scaled(self.icon.width(), self.icon.height(),
                                Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            vers = "v%s.%s%s" % (msg["number"], msg["build"], msg["modifier"]) if msg else ""
+            vers = version_text(msg)
+            self._base = upstream_version(msg)
             self.icon.setPixmap(pm)
             self.name.setText(name or "")
             self.vers.setText(vers)
             self._name = name or ""
             self._sync_group()
-            self.icon.setToolTip("\n".join(x for x in (name, vers) if x))
+            self._sync_base()
+
+        def _sync_base(self):
+            """基座注脚：`（基于 160.5）`。语言切换要重拼，所以单独一个入口。
+
+            只在 fork 声明了基座、且基座与显示的版本不同才有内容 —— 官方包
+            两个字段同源同值，缀一句「基于 160.5」只是同义反复。图标悬浮提示
+            也跟着这里刷，否则切语言后提示还是旧的说法。
+            """
+            base = getattr(self, "_base", "")
+            text = t(events.lang.get("core.text.basedOn"), base) if base else ""
+            self.base.setText(text)
+            self.base.setVisible(bool(text))
+            self.icon.setToolTip("\n".join(x for x in (self._name, self.vers.text() + text)
+                                           if x))
 
         def _sync_group(self):
             """把分组名落到版本号前面；没有归属（实例无效/没登记）连分隔点一起藏掉。
@@ -495,6 +537,7 @@ class GameSettings(Scroll):
 
         def langing(self):
             self._sync_group()
+            self._sync_base()
             for btn in self.buttons:
                 btn.setText(events.lang.get(btn.property("lang")))
 
@@ -508,13 +551,12 @@ class GameSettings(Scroll):
             WIDTH = 320
             HEIGHT = 190
             TITLE_KEY = ""
-            # 确定按钮的两套配色：可用=实心黄，禁用=半透明黄（与下载页确定按钮同源）
-            BTN_ON = "background-color: #f0b731; border: none;"
-            BTN_OFF = "background-color: rgba(240, 183, 49, 100); border: none;"
 
             def __init__(self, parent=None):
                 super().__init__()
                 self.parent = parent
+                # 禁用灰按主题取，先落初值再交给 lighting 校准
+                self._light = bool(events.settings.get("theme"))
                 self.setAttribute(Qt.WA_StyledBackground, True)
                 self.init_wid()
                 self.langing()
@@ -580,9 +622,9 @@ class GameSettings(Scroll):
                 return self.parent.game
 
             def _set_ok_enabled(self, enabled):
-                """确定按钮的可用态与配色一起切（禁用时压成半透明）。"""
+                """确定按钮的可用态与配色一起切（禁用时是中性灰，不是压暗的黄）。"""
                 self.btn_ok.setEnabled(enabled)
-                self.btn_ok.setStyleSheet(self.BTN_ON if enabled else self.BTN_OFF)
+                self.btn_ok.setStyleSheet(primary_btn_style(self._light, enabled))
 
             def langing(self):
                 self.title.setText(events.lang.get(self.TITLE_KEY))
@@ -593,6 +635,10 @@ class GameSettings(Scroll):
                 color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
                 icon = change_color(TBT_CLOSE, color)
                 self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
+                # 禁用灰是按主题取的；切主题时按钮已存在就按当前可用态重刷一遍
+                self._light = bool(light)
+                if hasattr(self, "btn_ok"):
+                    self._set_ok_enabled(self.btn_ok.isEnabled())
 
             def _close(self):
                 """出叠并销毁（on_close 由浮层在出叠时统一调）。"""
