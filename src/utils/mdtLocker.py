@@ -22,8 +22,6 @@ _OPEN_EXISTING = 3
 _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000   # 打开目录必需的标志，对文件无副作用
 _INVALID_HANDLE = ctypes.c_void_p(-1).value
 
-# 共享模式就是锁的语义（Win32 的改名/删除都要 DELETE 访问权，缺 FILE_SHARE_DELETE 即被拒）：
-# 目录带 WRITE 是为了目录里还能建文件——实例目录里常要放下载中的临时文件
 _DIR_SHARE = _FILE_SHARE_READ | _FILE_SHARE_WRITE
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)

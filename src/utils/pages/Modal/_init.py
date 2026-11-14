@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QGridLayout
 
-from ...events import events
+from src.utils.events import events
 
 
 class FloatingOverlay(QWidget):
@@ -95,8 +95,6 @@ class FloatingOverlay(QWidget):
         self.raise_()
 
     def mousePressEvent(self, event):
-        # 灰色遮罩区域按下：拖动无边框窗口（与 Left.Logo 共用 Window 的拖动逻辑）。
-        # 走事件而不是直接点 window：遮罩不需要知道窗口长什么样，谁想接管拖动谁订阅。
         events.emit("dragRequested", "begin", event)
         super().mousePressEvent(event)
 

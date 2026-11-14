@@ -21,29 +21,6 @@ from PySide6.QtCore import QObject
 
 from .githubAPI import _get_ca_bundle # 还有复用环节
 
-# ---------------------------------------------------------------
-# WayZer资源站(www.mindustry.top) 地图部分 API 封装
-# ---------------------------------------------------------------
-# 站点前端是 Nuxt SPA，后端 API 基址为 https://api.mindustry.top/
-# （前端把 "/api/xxx" 路径转换为该基址，跨域需带 cookie）。
-#
-# 地图接口（无需登录，全部实测）:
-#   GET /maps/list?begin={begin}&search={search}
-#       -> JSON 数组，每批 15 条；begin 从 0 开始递增分页。
-#          筛选 NOT 用 mode=/version=/sort= 参数（会被忽略），
-#          而是写在 search 里的 @语法（空格分隔，多个可组合）:
-#             @mode:Survive       模式（Survive/Pvp/Attack/Sandbox/Editor/UnKnown）
-#             @version:5          版本内部号（见 VERSION_MAP）
-#             @sort:download      排序（updateTime/createTime/download/rating/like）
-#          排序默认按热度，无需传 @sort。
-#   GET /maps/{id}.json
-#       -> 地图详情（含完整地图 tags 数据）。
-#   GET /maps/{id}.msav
-#       -> 地图文件，Content-Type: application/zlib（zlib 压缩流，即标准 .msav）。
-#          下载地址由 map_url() 拼出，由调用方（如 QDownloader）负责下载。
-#   GET /users/info
-#       -> 当前用户信息（未登录为 guest）。
-# ---------------------------------------------------------------
 
 
 class WayzerMapAPI(QObject):
@@ -71,8 +48,6 @@ class WayzerMapAPI(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 复用 githubAPI 的合并 CA bundle（certifi + Windows 系统证书库），
-        # 加速器/抓包工具把根证书装进系统库时不会误报 SSL 错误。
         self._session = requests.Session()
         self._session.trust_env = True
         self._session.verify = _get_ca_bundle()

@@ -125,6 +125,8 @@
     "core.wid.pages.importJar.err.unsafeArchive": "包裡有指向目錄外的路徑，已拒絕解壓",
     "core.wid.pages.importJar.err.badManifest": "這個包的 bml-export.json 讀不懂，或來自更新版本的 BML",
     "core.wid.pages.importJar.err.noClient": "實例包裡沒有 mdt.jar，可能打包時漏掉了用戶端",
+    "core.wid.pages.importJar.err.invalidName": "實例名稱不合法（不能含 \\ / : * ? \" < > | ，不能以點或空格結尾，也不能用 CON 之類保留名）",
+    "core.wid.pages.importJar.err.dot": "實例名稱不能以點開頭",
     "core.wid.pages.importJar.info.instance": "實例包 · $1 MB · 含 $2 個檔案",
     "core.wid.pages.exportInstance.title": "匯出實例",
     "core.wid.pages.exportInstance.desc": "把「$1」打包成一個 zip，裡面是用戶端本體、存檔、模組與藍圖。",

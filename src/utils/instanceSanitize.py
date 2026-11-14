@@ -131,6 +131,7 @@ class Plan:
         self._drop_dirs = ()        # "data/Mindustry/crashes/" 这类前缀
         self._log_dirs = ()         # 这些目录下的 *.log 都丢
         self.rewrites = {}          # 相对路径 -> 新字节
+        self._rewrites_low = {}     # 同一批，键是小写（查表见 rewrite_for）
         self.settings = []          # 参与剥键的 settings.bin 相对路径
         self.removed = []           # [(settings 相对路径, 键名)]
 
@@ -150,8 +151,23 @@ class Plan:
                     return True
         return False
 
+    def set_rewrite(self, rel, data):
+        """登记一个改写：正表按原样存，旁边再存一份小写索引。"""
+        self.rewrites[rel] = data
+        self._rewrites_low[rel.lower()] = data
+
     def rewrite_for(self, rel):
-        return self.rewrites.get(rel)
+        """取某个相对路径的改写字節；没有就 None。
+
+        查表按小写：计划里的路径是常量拼出来的（"data/Mindustry/settings.bin"），
+        而打包时用的是 os.walk 给出的**磁盘真实大小写**。Windows 上两者可能不同
+        （目录被别的程序建成 "Data"），精确匹配会查不到 —— 那样原始 settings.bin
+        就会带着 usid-* 进包，而包上还标着 sanitized=true。
+        """
+        hit = self.rewrites.get(rel)
+        if hit is None:
+            hit = self._rewrites_low.get(rel.lower())
+        return hit
 
     # ---- 计数 ----
 
@@ -190,7 +206,7 @@ def _plan_settings(plan, root, data_dir):
     plan.settings.append(rel)
     plan.removed.extend((rel, key) for key in removed)
     if new is not raw:
-        plan.rewrites[rel] = new
+        plan.set_rewrite(rel, new)
 
 
 def _plan_bml(plan, root):
@@ -228,8 +244,8 @@ def _plan_bml(plan, root):
         changed = True
     if not changed:
         return
-    plan.rewrites["BML.json"] = json.dumps(
-        data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    plan.set_rewrite("BML.json", json.dumps(
+        data, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
 
 
 def _follow_token():

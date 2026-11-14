@@ -19,10 +19,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
-from ...events import events
-from ...bus import bus
-from ...utils import change_color
-from ...resources import (NAV_BACK, TBT_CLOSE)
+from src.utils.events import events
+from src.utils.bus import bus
+from src.utils.utils import change_color
+from src.utils.resources import (NAV_BACK, TBT_CLOSE)
 
 
 class FloatingStack(QWidget):
@@ -156,8 +156,6 @@ class FloatingStack(QWidget):
                 self.lighting(events.settings["theme"])
                 bus.bind(self)
                 if callback is not None:
-                    # clicked 自带 checked(bool) 参数，必须丢弃：
-                    # 否则会顶替 pop_page(wid) 的 wid 或 clear(deletable) 的 deletable
                     self.clicked.connect(lambda: callback())
 
             def lighting(self, light: bool):

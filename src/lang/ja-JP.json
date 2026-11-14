@@ -125,6 +125,8 @@
     "core.wid.pages.importJar.err.unsafeArchive": "パッケージにフォルダ外を指すパスがあります。展開を中止しました",
     "core.wid.pages.importJar.err.badManifest": "このパッケージの bml-export.json を読めません。より新しい BML の可能性があります",
     "core.wid.pages.importJar.err.noClient": "インスタンスパックに mdt.jar がありません（作成時にクライアントが漏れた可能性）",
+    "core.wid.pages.importJar.err.invalidName": "インスタンス名に使えない文字が含まれています（\\ / : * ? \" < > | は不可、末尾の点や空白、CON などの予約名も不可）",
+    "core.wid.pages.importJar.err.dot": "インスタンス名を点で始めることはできません",
     "core.wid.pages.importJar.info.instance": "インスタンスパック · $1 MB · $2 ファイル",
     "core.wid.pages.exportInstance.title": "インスタンスの書き出し",
     "core.wid.pages.exportInstance.desc": "「$1」を 1 つの zip にまとめます。クライアント本体、セーブ、MOD、設計図が入ります。",

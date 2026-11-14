@@ -69,10 +69,6 @@ BAD_DIR = "BML/badSettings"          # 损坏 settings 的备份目录
 BAD_KEEP = 5                         # 损坏备份最多保留份数
 _MISSING = object()
 
-# 顶层键的分法（v2）：宿主自己的设置在 "core" 桶里，每个插件各占一格，
-# 键就是插件 id。盘上的形状：
-#     {"core": {...language/theme/...}, "example_hello": {...}}
-# 宿主代码仍按老写法 settings["language"] 取 —— 见 __getitem__ 的分流。
 CORE = "core"
 
 
@@ -82,20 +78,12 @@ DEFAULT_SCHEMA = {
     "language": None,
     "theme": 0,
     "maxLogNum": 50,
-    # 点右上角 × 时怎么办：True = 隐藏到托盘，False = 退出启动器，
-    # None（默认）= 每次弹一层问，用户勾「保存到设置」才定下来
     "closeByTray": None,
     "defaultGame": None,
     "javaPath": None,
     "github": {
-        # 授权包（access + refresh + 两个到期时间 + scope）整块加密后的密文与
-        # 密钥。为什么只留这两个键：refresh_token 是单次使用的，跟 access 分开
-        # 存迟早配错一次（配错就是永久失效），一块进一块出最不容易错。
         "auth_enc": None,
         "auth_key": None,
-        # 老格式（一个裸 token）的两个键：读路径已经不看了，只为了让 logout
-        # 还能把历史遗留的值抹掉 —— 删掉这两行会让老用户的 token 永远留在
-        # settings.json 里，谁也不知道那份东西还有没有效。
         "token_enc": None,
         "token_key": None,
         "useful": None,
@@ -110,9 +98,6 @@ DEFAULT_SCHEMA = {
     },
     "javaPaths": [],
     "gameList": {"<:|default|:>": []},
-    # 插件设置不在这儿：每个插件是**顶层**的一格（"example_hello": {...}），
-    # 见模块顶部 CORE 的说明。宿主代码按老写法 settings["language"] 读 core 桶。
-    # 上次加载失败、已被标注停用的插件 id（下次启动不再加载它们）
     "disabledPlugins": []
 }
 
@@ -323,11 +308,6 @@ class Settings(MutableMapping):
         """盘上现有的桶名（core + 各插件 id）。"""
         return list(self.data)
 
-    # ── MutableMapping ──
-    #
-    # 顶层键分流：`settings["core"]` / `settings["<插件id>"]` 取整桶；
-    # 其余键按老写法在 core 桶里找 —— 宿主的 138 处 `settings["x"]` 因此
-    # 一行都不用改。插件自己的键要走 self.settings 视图（见 pluginSettings）。
 
     def __getitem__(self, key):
         if key == CORE:
@@ -584,11 +564,6 @@ class Settings(MutableMapping):
             pass
 
 
-# ═══════════════════════ 第二级：浮层（要 Qt）═══════════════════════
-#
-# 见模块说明「两级：基础 + 浮层」。上面是第一级（一行 Qt 都不碰），
-# 从这里往下是第二级。QWidget 是类体上的基类，躲不掉 —— 所以 Qt 的 import
-# 就摆在这儿，而不装成「用到才拉」。
 
 from PySide6.QtCore import Qt                                     # noqa: E402
 from PySide6.QtGui import QColor, QIcon                            # noqa: E402
@@ -603,9 +578,6 @@ from .registry import registry                                     # noqa: E402
 from .resources import TBT_CLOSE                                   # noqa: E402
 from .utils import change_color                                    # noqa: E402
 
-# 关闭询问的两个选项：值 → 文案键。第一个是默认勾上的那个。
-# closeByTray 是三态（见 DEFAULT_SCHEMA）：True = 藏到托盘，False = 退出，
-# None = 每次问 —— 这一层就是为 None 准备的，谁来弹见 main.py 的 close_()。
 CLOSE_CHOICES = (("tray", "core.wid.closeAsk.tray"),
                  ("quit", "core.wid.closeAsk.quit"))
 
@@ -664,8 +636,6 @@ class AskClose(QWidget):
             self.init_wid()
             self.langing()
             self.lighting(bool(events.settings.get("theme")))
-            # 接总线必须在控件建好之后：bus.bind 会立刻补一次 lighting，
-            # 那时 btn_close 还不存在，直接炸 AttributeError。
             bus.bind(self)
 
         def init_wid(self):
@@ -716,8 +686,6 @@ class AskClose(QWidget):
             self.body_l.addWidget(self.tip, 0)
             self.body_l.addSpacing(10)
 
-            # 选项底：和分组弹层一样用 color2 —— 滚动区自己只画 viewport，
-            # 颜色得由装在它里面的容器给，滚起来才是一整块。
             self.box = QWidget()
             self.box.setProperty("wid", "color2")
             self.box.setAttribute(Qt.WA_StyledBackground, True)

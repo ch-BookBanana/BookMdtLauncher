@@ -47,17 +47,10 @@ _MASK = 0xFFFFFFFF
 # "expand 32-byte k"
 _CONST = (0x61707865, 0x3320646E, 0x79622D32, 0x6B206574)
 
-# 三段素材的中间一段（base64）。三段分开放在三个文件/函数里，就是为了
-# 不让「key 是怎么拼出来的」一眼被串起来 —— 单独看到任何一段都没用。
-# 由 scripts/seal_secret.py 每次随机生成，不同构建的二进制里这一段不同。
 _SB_B = "wmadwSeFESLhsOgD6ap/tWLt"
 
-# PBKDF2 的盐。盐不是机密，放在这里当唯一真源：生成工具和运行时都读它，
-# 免得两边各写一份、改了一边忘了另一边，结果「解不开」。
 _SB_SALT = "bml-github-app-salt-2026"
 
-# 迭代次数：故意偏高。总共只算一次（githubAuth 会缓存派生结果），
-# 每次启动多花几十毫秒，换篡改/爆破的成本高一个量级。
 _KDF_ROUNDS = 120000
 
 # 认证标签的域分隔串：同一把 key 干别的事时标签前缀不同，防止跨用途重放。
@@ -101,8 +94,6 @@ def _block(key, counter, nonce):
         _quarterround(w, 1, 6, 11, 12)
         _quarterround(w, 2, 7, 8, 13)
         _quarterround(w, 3, 4, 9, 14)
-    # 最后一步是和初始 state 相加（不是异或）—— 漏了这步加密照样「能跑」，
-    # 但解出来的东西就跟标准 ChaCha20 不是一个东西了
     return struct.pack("<16I", *[(w[i] + init[i]) & _MASK
                                  for i in range(16)])
 
@@ -181,8 +172,6 @@ def open_sealed(blob, key32):
             return None
         nonce, tag, ct = raw[:12], raw[12:44], raw[44:]
         want = hmac.new(key32, _TAG_AAD + nonce + ct, hashlib.sha256).digest()
-        # 常数时间比较：这里虽然没有远程攻击者，但没必要留一个「按字节比」
-        # 的坏习惯在代码里被人抄走
         if not hmac.compare_digest(want, tag):
             return None
         return chacha20_xor(key32, nonce, 1, ct)

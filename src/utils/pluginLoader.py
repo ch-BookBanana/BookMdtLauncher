@@ -124,21 +124,11 @@ MANIFESTS = ("data.hjson", "data.json", "data.toml")
 # 2.0 不再认的旧名：发现它们就报「请改名」，不静默忽略（否则表现为「插件凭空没装」）
 LEGACY_MANIFESTS = ("manifest.toml", "plugin.json")
 
-# 插件 id 的字符规约：与 Python 的包 / 模块名同一套 —— 字母、数字、下划线，
-# 且首字符是字母（数字开头不是合法标识符，当不了包名）。
-#
-# 为什么不用反向域名那种带点的写法：这个 id 要兼四件事 —— 注册表命名空间、
-# 事件名前缀、插件私有目录名，以及**模块名 / import 别名**（bmlplugin.<id>）。
-# 带点就只当得成前三样，第四样得一路 `replace(".", "_")` 猜；两种写法并存，
-# 迟早对不上。限制成标识符之后，id 与它落成的包名、模块名是同一个字符串。
 ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 # 不能用的 id：core 是内置命名空间，其余是加载器/宿主自己要占的名字
 RESERVED_IDS = ("core", "src", "main", "bmlcore", "bmlplugin", "bml_plugin")
 
-# 插件包的根：插件加载后就是 `bmlplugin.<id>`，它自己的模块是 `bmlplugin.<id>.<模块>`。
-# 好处是「实名」—— 别的插件要拿它的类就 from bmlplugin.<id> import X，
-# 不必靠 sys.path 上那条全局路径撞名字（两个插件都带 utils.py 就不会打架了）。
 PACKAGE_ROOT = "bmlplugin"
 
 # 插件不得触达的顶层模块名（BMLCore 是唯一的合法入口）
@@ -203,8 +193,6 @@ class PluginInfo:
         return os.path.basename(self.path)
 
 
-# zip 解压的两道上限：分发形态鼓励「下一个 zip 丢进 plugins/ 就能用」，
-# 而 zip 头部声明的解压后体积是可以随便写的 —— 一个几十 KB 的 zip 能铺满磁盘。
 ZIP_MAX_BYTES = 64 * 1024 * 1024      # 解压后总字节
 ZIP_MAX_FILES = 2000                  # 条目数
 
@@ -298,10 +286,6 @@ def _load_manifest_data(path):
         return json.load(f)
 
 
-# 依赖约束表达式的几种写法：
-#   "example_base"              只要装着
-#   "example_base>=1.2,<2.0"    单边 / 多条件
-#   "1.2<=example_base<=1.5"    两边夹（名字在中间）
 _DEP_OPS = ("<=", ">=", "==", "!=", "<", ">")
 _VER_RE = re.compile(r"\d+(?:\.\d+)*")
 
@@ -389,11 +373,6 @@ def _read_manifest(folder):
     if not isinstance(data, dict):
         raise PluginLoadError(f"{os.path.basename(path)} 顶层必须是一个对象")
 
-    # 每个字段都过一遍 _text()：清单是**别人写的文件**，里面出现什么类型都不奇怪
-    # （id 写成数字、name 写成数组…）。这里一律收成字符串或当场报 PluginLoadError ——
-    # 直接 .strip() 会在字段是数字时抛 AttributeError，而那是**非清单错误**，
-    # 会穿出 discover() 直达启动流程的顶层，表现成「启动失败」弹窗：
-    # 一个坏插件因此有了拖垮启动的权力，这条底线不能被清单格式破掉。
     base = os.path.basename(path)
     pid = _text(data.get("id"), "id", base)
     if not pid:
@@ -429,8 +408,6 @@ def _read_manifest(folder):
 
     entry = _text(data.get("entry"), "entry", base) or \
         _text(data.get("main"), "main", base) or "main"
-    # 入口两种写法：模块名（main）或「模块.类名」（main.ExampleV3）。
-    # 都不允许出现路径分隔符/以点开头 —— 那意味着可能跑出插件目录去。
     if "/" in entry or "\\" in entry or entry.startswith("."):
         raise PluginLoadError(
             f"{base} 的入口文件名 {entry!r} 不合法：只能是模块名（main）"
@@ -508,9 +485,6 @@ def _api_ok(want, have):
 
 # ─────────────────────────── import 闸门 ───────────────────────────
 
-# importlib.__import__ 就是内建 import 的实现本身，不经过任何第三方钩子
-# （PySide6 会用 __feature_import__ / __lazy_import__ 顶掉 builtins.__import__）。
-# 只在闸门拿不到可用转交对象时兜底用，正常路径用不上。
 _STD_IMPORT = importlib.__import__
 
 
@@ -567,8 +541,6 @@ class _SrcImportGuard:
         # 先关闸：即使下面不还原，这个闭包也只是穿透，不再拦也不炸
         if self._state is not None:
             self._state["active"] = False
-        # 只在自己的闭包还挂着时还原。中途被别人顶掉过就随它去 —— 跟别人抢
-        # 同一个全局正是这次崩溃的由来（我们退出时把它装的钩子又踩了回去）。
         if self._mine is not None and builtins.__import__ is self._mine:
             builtins.__import__ = self._prev
         return False
@@ -709,23 +681,12 @@ def plugin_langs(lang):
 
 # ─────────────────────────── 发现 / 加载 ───────────────────────────
 
-# 加载状态机：三张表就是全部状态，别处不再各留一份
-#   pending  未加载：已发现、还没轮到（load_all 从它取活，取走就移出）
-#   loading  加载中：正在加载的那条链，**有序** —— 报成环时从这儿截
-#   loaded   已加载：加载成功的，按加载顺序（plugin_langs 靠它决定谁盖谁的文案）
-# 三张表都存 PluginInfo；失败的不进 loaded，失败原因在 info.error 上。
 _STATE = {"pending": [], "loading": [], "loaded": []}
 
-# 一批加载的深度：>0 时 _notify_changed 只记账不发（load_all 自己会在末尾收口）。
-# 一批中间可能失败、回滚好几回，每回都让宿主重读语言、重建样式表纯属白干。
 _BATCH = 0
 
-# 插件语言包相关状态的版本号：已加载集合一变就 +1。Langer 拿它当「要不要重读
-# 语言表」的输入之一 —— 语言没变、插件集合也没变，就不该重读、更不该再广播。
 _LANGS_REV = 0
 
-# 上次通知时「已加载」长什么样：没它就得无条件 +1，于是一个插件都没有的启动
-# 也会被当成「语言包变了」，白读一遍语言。
 _LAST_NOTIFIED_IDS = ()
 
 
@@ -815,8 +776,6 @@ def discover(base=None, cache=None):
             except Exception as e:
                 found.append(_bad(name, full, e, source=full))
 
-    # 同一个 id 出现两次：以前是 by_id 里后一个盖掉前一个，于是有一个插件
-    # 「凭空没加载」而且一声不吭。id 现在短了，撞名的机会更大，所以两个都标错。
     seen = {}
     for info in found:
         if info.error:
@@ -907,8 +866,6 @@ def _abort_session(info, token, why=""):
     try:
         return registry.abort(token)
     except Exception:
-        # 凭据对不上（有别的代码动过会话）：强行关掉，再按命名空间把它的条目清掉。
-        # 会话绝不能留着 —— 留着的话之后谁都开不了新会话，只有重启能救。
         try:
             registry.abort(force=True)
         except Exception:
@@ -938,8 +895,6 @@ def load_one(info):
     from ..BMLCore import API_VERSION
     from .registry import registry
 
-    # 插件是 `bmlplugin.<id>` 这个包里的模块，包根得先在 sys.modules 里，
-    # 否则插件自己的相对导入（from . import x）会找不到父包。
     _expose_api()
 
     if info.error:
@@ -960,37 +915,22 @@ def load_one(info):
         info.error = f"入口文件不存在：{os.path.basename(entry_path)}"
         return info
 
-    # 同一个 id 已经装着一份，就别再装第二份：第二次会因为「条目已存在」失败，
-    # 而失败路径会把**第一份（还活着的那份）**的事件、包、控件台账一起拆掉，
-    # 第一份却仍然报 ok 还留在 loaded 表里 —— 一个自相矛盾的残局。
     for old in _STATE["loaded"]:
         if old.id == info.id:
             info.error = (f"{info.id} 已经加载着（{old.path}）；"
                           f"要重装先 unload 它")
             return info
 
-    # 模块名就是包名：插件目录即一个真包（bmlplugin.<id>），入口文件是它的顶层模块。
-    # 于是插件自己的模块可以用相对导入（from . import widgets），别的插件则可以
-    # from bmlplugin.<id> import Widgets —— 都是实名的，不靠 sys.path 上的路径。
     mod_name = f"{PACKAGE_ROOT}.{info.id}"
     inst = None
     # 先记下当前有哪些控件：插件跑完（或炸掉）之后，多出来的就是它造的
     widgets_before = _widget_snapshot()
-    # 登记走一次**加载会话**：插件写进暂存区，跑完才并进正表。
-    # 这样「构造跑到一半抛异常」不会在正表里留下半截条目（界面会冒出点不动
-    # 的项，重试还撞「已存在条目」）—— 而且不必靠事后按命名空间去擦。
-    # 会话的主人也在这里告诉注册表：插件顶掉别人条目时，归属才认得出是谁。
-    # 凭据（token）攥在自己手里：有主人的会话只有拿着它的一方关得掉，
-    # 插件在构造里随手 registry.abort() 是关不掉的（关掉了的话，这里「失败整块
-    # 舍弃」的那一下就成了空操作，半截条目会留在正表里）。
     token = registry.begin(info.id)
     from ..BMLCore import btypes
     btoken = btypes.begin(info.id)
     try:
         _add_plugin_paths(info)
         with _SrcImportGuard(), _PluginDir(info.path):
-            # submodule_search_locations 给上插件目录：这个入口模块于是同时是个包，
-            # 插件自己的 .py 用 `from . import x` 就找得到（不必动 sys.path）。
             spec = importlib.util.spec_from_file_location(
                 mod_name, entry_path, submodule_search_locations=[info.path])
             if spec is None or spec.loader is None:
@@ -1002,8 +942,6 @@ def load_one(info):
             cls = _find_plugin_class(mod, entry_module, entry_cls)
             host = _Host(info)
             inst = cls(host) if _accepts_host(cls) else cls()
-            # 构造里没把 host 存下来（旧写法的无参构造、或忘了 super().__init__）
-            # 也补上：self.log / self.path 这些助手全靠它。
             inst.host = host
             # 清单与类上都有 id 时以清单为准（清单才是加载器认的那个）
             inst.id = info.id
@@ -1011,10 +949,6 @@ def load_one(info):
             from ..BMLCore import registrar
             registrar.apply(inst)
     except (Exception, SystemExit):
-        # SystemExit 也要接住：插件在构造里 sys.exit() 时 except Exception
-        # 抓不到它，会一路穿到宿主那个「启动失败」弹窗 —— 而这里的规矩是
-        # 一个插件坏掉不许拖垮别的（更不能拖垮启动）。
-        # KeyboardInterrupt 故意不接：那是用户在按 Ctrl+C，得让它出去。
         info.error = _fmt_exc(limit=6)
         sys.modules.pop(mod_name, None)
         _drop_plugin_modules(info)       # 连它的子模块一起，别留半份代码在 sys.modules 里
@@ -1024,15 +958,11 @@ def load_one(info):
             btypes.abort(btoken)
         except Exception:
             pass
-        # on_ready 的回调不在注册表里，abort 滚不到（否则重载成功时会把
-        # 上一次那个已经回滚掉的旧实例一起叫起来）
         from ..BMLCore import registrar as _reg
         _reg.discard(info.id)
         _cleanup_failed(info, inst, widgets_before)
         return info
     except BaseException:
-        # 上面不接的那些（比如 Ctrl+C）：会话必须关掉，否则下一个插件会注册进
-        # 一个没人提交的陈旧暂存区
         _abort_session(info, token)
         try:
             btypes.abort(btoken)
@@ -1040,13 +970,6 @@ def load_one(info):
             pass
         raise
     else:
-        # 跑完了：暂存区并进正表。插件登记到这一刻才对别人可见 ——
-        # 也就是说别的插件不可能看到它「一半」的样子。
-        #
-        # 这一步原来裸写在 else 分支里，而 else 的异常两个 except 都盖不到：
-        # commit 中途炸掉（有个点没声明上之类）就带着半截登记穿出 load_all、
-        # 直达宿主启动弹窗，而且会话还开着 —— 之后谁都开不了新会话，只能重启。
-        # 现在失败一律当成「这个插件没加载起来」处理。
         try:
             registry.commit(token)
             btypes.commit(btoken)
@@ -1238,8 +1161,6 @@ def disabled_ids():
     ids = settings.get(DISABLED_KEY) if settings is not None else None
     if not isinstance(ids, list):
         return []
-    # 逐项收成字符串：settings.json 是被手改过的重灾区，列表里塞了 dict / list
-    # 时 set(...) 会抛 TypeError，而这条路径在 load_all 里没人接 —— 表现成启动失败。
     out = []
     for x in ids:
         if isinstance(x, str) and x.strip() and x not in out:
@@ -1320,8 +1241,6 @@ def load_all(base=None, *, retry_disabled=False):
 
     _batch_begin()
     try:
-        # 先把自己上一轮加载的卸掉 —— load_all 于是可以反复调（「重载插件」就是
-        # 这么用的）。不卸的话第二次会撞「已存在条目」，而且三张表会和正表对不上。
         for old in list(_STATE["loaded"]):
             unload(old)
 
@@ -1353,9 +1272,6 @@ def load_all(base=None, *, retry_disabled=False):
     finally:
         _batch_end()
 
-    # 加载完也通知一声：谁按注册表建界面（页面 / 托盘 / 样式 / 语言）都得在
-    # **集合稳定之后**收口一次。只在卸载/失败时发是不够的 —— 重载这条路最后
-    # 一次重建会落在卸载阶段（那时注册表是空的），插件的托盘项就这么没了。
     _notify_changed()
     _run_ready()
     return infos
@@ -1416,14 +1332,10 @@ def _load_tree(info, by_id):
                 _fail(info, f"缺少依赖：{dep_id}（没有这个插件，或者它的清单没读出来）")
                 return
             if dep_id in _loading_ids():
-                # 回边：环就是加载中表里从 dep_id 那一段，末尾补回它自己。
-                # 这样报出来的是**环本身**，不带「从入口怎么走到这儿」那一段。
                 ids = _loading_ids()
                 _fail(info, "依赖成环：" + " -> ".join(ids[ids.index(dep_id):] + [dep_id]))
                 return
             if dep.disabled:
-                # 依赖被停用了：依赖者这轮也起不来。**不**把它也标进停用名单 ——
-                # 用户把依赖放行之后，它就该跟着起来。
                 _fail(info, f"依赖已被停用：{dep_id}")
                 return
             if not dep.ok:
@@ -1484,8 +1396,6 @@ def _report_fail(info, disable_it=True):
     events.logger.error(f"[{info.id}]加载失败:\n{info.error}", name="Plugin")
     if not disable_it or not info.id or info.id.startswith("<"):
         return
-    # 「已标注停用」单独打一行、排在失败之后 —— 它是**后果**不是原因，
-    # 所以不追加进 info.error（那会坑到所有比对错误文本的地方）。
     if disable(info.id, "加载失败"):
         events.logger.info(
             f"[{info.id}]已标注停用，下次启动不再加载它"
@@ -1510,8 +1420,6 @@ def unload(info):
     if not info.ok:
         return False
     if info not in _STATE["loaded"]:
-        # 还活着但不在已加载表里：说明是「同一个 id 装了两份」的那种残局，
-        # 这里别动它 —— 否则会把活着的那一份的事件/包/控件台账拆掉。
         events.logger.warning(f"[{info.id}]不在已加载表里，跳过卸载（先查重装/重复加载）",
                               name="Plugin")
         return False
@@ -1535,9 +1443,6 @@ def unload(info):
         # 同 load_one：SystemExit 也得接住，卸载一个插件不该把启动器带走
         events.logger.error(f"插件 teardown 抛异常：{info.id}\n{_fmt_exc(limit=4)}",
                             name="Plugin")
-    # 析构跑完再删它加载时造出来的控件（那时没法回溯，所以加载成功时就记下了）。
-    # 由扩展点构建出来的那些（页面等）不在这里 —— 那是装配方按注册表建的，
-    # 摘条目的时候它们自己会走。
     n = _destroy_widgets(_OWNED_WIDGETS.pop(info.id, ()))
     if n:
         events.logger.info(f"卸载时删掉插件造的控件：{info.id} × {n}", name="Plugin")
@@ -1546,7 +1451,5 @@ def unload(info):
     info.reported = False
     for table in ("pending", "loading", "loaded"):
         _STATE[table] = [i for i in _STATE[table] if i.id != info.id]
-    # 摘完登记还得让宿主重算「它盖过的」：语言包、样式片段、托盘菜单项。
-    # 这三样都不在注册表里，光摘条目它们不会自己回去。
     _notify_changed()
     return True

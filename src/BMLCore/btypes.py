@@ -265,6 +265,7 @@ class BPoint(BType):
         接受表  point —— 这个点允许收的条目类型（子类可覆盖）
     """
 
+
     point = ("core/value", "core/signal", "core/point",        # 接受的条目类型
              "core/log", "core/lang", "core/settings", "core/setting")
     _entry_type = "core/value"                            # 默认条目类型
@@ -708,14 +709,6 @@ BTypes._types.update({
 })
 
 
-# ─────────────────────────── 取自己的注册点（register()）──
-#
-# register() 不带参数：当前 owner 自己的那个 BPoint。
-#     - 插件加载期（会话主人 = 插件 id）→ 插件自己的点
-#     - 宿主启动期（没有会话）→ core 的点
-# 自己的子点/条目都往它上面 add；宿主（core）手下登记的点作为它的子项，
-# 插件侧用 `register().get("core/tools")` 这样取 —— 名字是子项 key，
-# 不是"某个空间"的字符串路径，语法上也就不存在"往任意空间写"这个口子。
 _OWNER_POINTS = {}     # owner → 它自己的 BPoint
 
 
@@ -770,9 +763,6 @@ def unload(owner):
                 other.remove(owner, owner=owner)
             _OWNER_POINTS.pop(owner, None)
 
-    # 别处的点（尤其是宿主的 core/setting 这类）上也可能有他登记的条目：
-    # 插件把设置项挂进宿主的分组子点，卸载时同样得摘掉，不然界面上留着一个
-    # 连着已卸载实例的开关。
     for host_point in list(_OWNER_POINTS.values()):
         _unload_deep(host_point, owner, removed)
     return removed
@@ -787,17 +777,9 @@ def _unload_deep(point, owner, removed):
             _unload_deep(child, owner, removed)
 
 
-# ─────────────────────────── registrar(path)：装饰器语法 ───────────────────────────
-#
-# 装饰器专用：
-#     @registrar("settings$launcher$java$select_java.value_changed").connect()
-#     def aaa(value=None): ...
-#
-# 路径分隔：`$` / `&` / `#` 都当链分隔；最后一段可以是「条目.属性」，
-# 属性指向条目的成员（比如 BValue.value_changed → BSignal）。
-# 不带 @ 时也能当普通取用：registrar("core/log").info("…")。
 
-_CHAIN_SPLIT = re.compile(r"[$&#]")
+# 只有 `&` 是链分隔（往下走一层）；`#` 是「到条目/成员」，在每段内部解析
+_CHAIN_SPLIT = re.compile(r"[&]")
 
 
 def _resolve_dsl(path):
@@ -810,10 +792,17 @@ def _resolve_dsl(path):
         raise ValueError(f"registrar({path!r}) 解析不出来")
     node = register()
     for seg in segs:
-        name, _, attr = seg.rpartition(".") if "." in seg else (seg, "", "")
-        if attr:
-            target = node.get(name)
-            return getattr(target, attr), name
+        # 语法：`#` 之后是条目（`core/p&pi` 等价写法）；条目之后再 `#` 是它的成员
+        if "#" in seg:
+            head, _, tail = seg.partition("#")
+            entry = node.get(head) if head else node
+            if "#" in tail:
+                name, _, attr = tail.partition("#")
+                return getattr(entry.get(name), attr), name
+            if tail:
+                return getattr(entry, tail), head
+            node = entry
+            continue
         node = node.get(seg)
     return node, None
 
@@ -841,7 +830,7 @@ class _Dsl:
         return None
 
     def __getattr__(self, item):
-        # 其余能力直接落到「解析出来的那个对象」上（info / get / set …）
+        # 装饰器入口优先：点用 @decor 声明的实现（元数据、被装饰对象由点决策）
         target, _name = _resolve_dsl(self.path)
         return getattr(target, item)
 

@@ -89,8 +89,6 @@ FILE_GENERIC = "src/assets/files/file.png"
 BRAND_GITHUB = "src/assets/brands/github.png"
 BACKG_MAIN   = "src/assets/backg/1.png"
 
-# ─────────────────────────── 应用图标 src/assets/icons/ ───────────────────────────
-# 标题栏 logo 与托盘图标：浅色主题配深色图，深色主题配浅色图（见 app_icon()）
 ICON_APP_DARK  = "src/assets/icons/dark.png"
 ICON_APP_LIGHT = "src/assets/icons/light.png"
 

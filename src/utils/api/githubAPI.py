@@ -21,9 +21,6 @@ from PySide6.QtCore import Signal, QObject, QTimer
 
 from . import githubAuth
 
-# ---------------------------------------------------------------
-# CA bundle：certifi + Windows 系统证书库（加速器/抓包工具根证书）
-# ---------------------------------------------------------------
 _bundle_path = None
 
 
@@ -90,12 +87,7 @@ class GithubAPI(QObject):
     # rate 余量变了（沿用原名：托盘 tooltip 与设置面板都靠它重画余量）
     refreshed = Signal()
     timesreset = Signal(str)
-    # 授权包变了：刷新拿到了新的 access / 到期时间，或者整块被清空。
-    # 刷新发生在后台线程（网络请求），靠信号回主线程改控件。
     authChanged = Signal()
-    # 凭据被判死（refresh 被 GitHub 拒、或刷新之后重试仍然是 401）。
-    # 面板接这个信号切回未登录页 —— 8 小时过后用户不会还盯着面板看，
-    # 「什么时候掉线」必须由这里主动通知，而不是等他下次打开面板才发现。
     authExpired = Signal()
 
     def __init__(self, auth=None):
@@ -104,8 +96,6 @@ class GithubAPI(QObject):
         self._encrypted_auth = None
         self._key = None
         self._checking = False
-        # 落盘用：刷新出来的新授权包必须写回 settings。refresh_token 是单次
-        # 使用的，只留在内存里的话，一次重启就等于把它弄丢了。
         self._settings = None
         # 刷新互斥：同一时刻只能有一次 refresh 在飞（refresh_token 单次使用）
         self._refresh_lock = threading.Lock()
@@ -113,8 +103,6 @@ class GithubAPI(QObject):
         self._auth_cancel = None
         self._session = requests.Session()
         self._session.trust_env = True  # honor system proxy (VPN/accelerator)
-        # verify 不能用 SSLContext（requests 内部会 os.path.exists 崩溃），
-        # 改用合并 bundle：certifi + Windows 系统证书库（加速器根证书）。
         self._session.verify = _get_ca_bundle()
         self.setAuth(auth)
         self.default_rate = {
@@ -186,11 +174,6 @@ class GithubAPI(QObject):
         plain = bytes([b ^ key[i % len(key)] for i, b in enumerate(encrypted)])
         return plain.decode('utf-8')
 
-    # ---------- 授权包（内存） ----------
-    # 存的是整块授权包（access + refresh + 两个到期时间 + scope），不再是一个
-    # 裸 token：GitHub App 勾了「Expire user authorization tokens」之后，只留
-    # access 等于把这份登录当成一次性的 —— 8 小时一到就没有凭据可续，只能让
-    # 用户重登一遍。
 
     def _get_auth(self):
         """即用即解密，返回授权包字典后及时释放。"""
@@ -249,9 +232,6 @@ class GithubAPI(QObject):
         blob = self._get_auth() or {}
         return blob.get("expires_at")
 
-    # ---------- GitHub App 登录 / 退出 ----------
-    # 授权流程本身在 api/githubAuth.py（PKCE + 回环监听 + 换 token）；
-    # 这里只做两件属于本类的事：跑完把授权包留住、成功后落盘。
 
     def authorize(self, settings=None, scope=None, timeout=None):
         """跑一次 GitHub App 授权，返回 (ok, 中文原因, blob)。
@@ -283,8 +263,6 @@ class GithubAPI(QObject):
             store_auth(settings, blob)
             gh = settings.get("github")
             if gh is not None:
-                # useful 留空：等下一次 checkToken 拿真实结果来填，
-                # 现在写 True 等于替 GitHub 提前打保票。
                 gh["useful"] = None
         self.authChanged.emit()
         return True, "", blob
@@ -322,10 +300,6 @@ class GithubAPI(QObject):
         当场作废。所以这里的顺序不能反 —— 先落盘再发信号（UI 那边可能马上
         重发请求），而且绝不能出现「只更新内存没更新磁盘」的中间态。
         """
-        # 加锁是必需的，不是保守：两个后台任务（比如搜索 + 校验）同时发现
-        # access 过期，会各自拿着**同一份** refresh 去换。先到的成功、后到的
-        # 拿到 bad_refresh_token，而那条路会清空授权包 —— 于是刚换到的好凭据
-        # 被一次本可以避免的并发撞掉了。锁内重新读一遍就能让第二次直接收手。
         with self._refresh_lock:
             return self._refresh_locked(blob)
 
@@ -340,8 +314,6 @@ class GithubAPI(QObject):
         blob = current
         refresh = blob.get("refresh") or ""
         if not refresh:
-            # 没有 refresh：App 没勾「Expire user authorization tokens」，或者
-            # 这是只存过裸 token 的老格式。access 一旦过期就真的无解。
             self._drop_auth()
             return False, "登录已过期，请重新登录"
         refresh_expires_at = blob.get("refresh_expires_at")
@@ -358,8 +330,6 @@ class GithubAPI(QObject):
             session=self._session)
         if not ok:
             if githubAuth.NETWORK_ERROR_HINT in (message or ""):
-                # 连不上 GitHub 不代表凭据失效 —— 保留授权包，下次再试。
-                # 断网时把人登出，是最让人火大的那种「贴心」。
                 return False, message
             self._drop_auth()
             return False, message or "登录已过期，请重新登录"
@@ -449,12 +419,8 @@ class GithubAPI(QObject):
                 return resp, None
         # 走到这里说明 401 还是 401。三种可能，处置完全不同：
         if not self.hasToken():
-            # 刷新被 GitHub 拒了 / 没有 refresh 可刷：_refresh_now 已经清空并
-            # 发过 authExpired，这里只需要一句话
             return None, "登录已过期，请重新登录"
         if not ok:
-            # 想续但没续成，而且不是凭据问题（没网 / 没配 App）：授权包留着，
-            # 原因原样交回去。断网时把人登出是最让人火大的那种「贴心」。
             return None, reason or "登录失败"
         # 刷过、也重试过，还是 401：这时才算凭据真的没了
         self._drop_auth()
@@ -472,9 +438,6 @@ class GithubAPI(QObject):
             settings = self._settings
         if settings is None:
             return
-        # 一次清干净：授权包（auth_enc/auth_key）连同老格式的 token_enc/token_key
-        # 一起抹掉。老键留着没用 —— 读路径已经不看了，但半个旧 token 躺在
-        # settings.json 里既没意义又容易让人以为「还没退干净」。
         clear_auth(settings)
         gh = settings.get("github")
         if gh is None:
@@ -525,9 +488,6 @@ class GithubAPI(QObject):
             url = "https://api.github.com/rate_limit"
             rest, reason = self._request(url)
             if rest is None:
-                # 授权包还在 = 这次失败不是凭据问题（没网 / 没配 App），
-                # 要按 network 报，别让调用方把一份好凭据清掉；
-                # 授权包没了 = _request 已经把它判死，按 auth 归类。
                 return False, ("auth" if not self.hasToken() else "network"), reason
             if rest.status_code == 200:
                 self._refresh(rest)
@@ -556,8 +516,6 @@ class GithubAPI(QObject):
             else:
                 return False, "http", rest.status_code
         except requests.exceptions.SSLError as e:
-            # SSLError 是 ConnectionError 的子类，必须先于它捕获，
-            # 否则会被当成"网络不通"误报（加速器 MITM 证书场景）。
             return False, "network", "SSL certificate verify failed: " + str(e)
         except requests.ConnectionError as e:
             return False, "network", str(e)
@@ -641,15 +599,6 @@ class GithubAPI(QObject):
             return False, None
     
 
-# ─────────────────── 授权包存盘 / 读回 ───────────────────
-# 授权包（access + refresh + 到期时间 + scope）落盘前要过两层：先用随机密钥
-# 加密（GithubAPI._encrypt，见上），得到的密文与密钥再抹一层固定 XOR，最后
-# base64 进 settings。两层都是混淆而不是加密 —— 防的是「顺手 copy 一份
-# settings.json 就把凭据带走」，不防有心的本机攻击者（这一点面板上的提示条
-# 也照实写了）。真正让这份凭据不致命的是 scope 只有 read:user。
-# 原先这一对方法长在 Main 上（_encrypt_settings_token / _obf_store…），
-# 于是「谁要用就得攥着宿主」—— 用到它的是 GitHub 设置页与启动流程，
-# 都不是宿主该管的事，收到这里跟加密本身待在一起。
 
 _OBF_BYTE = 0x5A
 

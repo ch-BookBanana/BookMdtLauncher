@@ -51,8 +51,6 @@ class Section(QWidget):
         self.wids = []
         self.init_wid()
         for e in items:
-            # 条目自带控件工厂（core/setting 的 add(…, build=…)）：控件怎么建、
-            # 怎么和条目接上，都是条目自己的事，容器只管摆。
             wid = e.build(Box(parent=page, entry=e))
             # 条目可以声明 attr=（挂到页面上给手写的接线代码用）、spacing=（上边距）
             attr = getattr(e, "attr", None)

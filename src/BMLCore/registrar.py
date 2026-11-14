@@ -7,26 +7,26 @@
         id = "example_hello"
 
         # ① 方法上挂（装饰器）：先记标记，加载器 apply(plugin) 时真正登记
-        @registrar("core/pages").new(title="hello.page")
+        @registrar("core/pages").add(title="hello.page")
         def page(self, ctx):
             return MyPage(ctx.parent)
 
         # ② 类属性里挂（不带函数）：标记对象，同样在 apply 时落地
-        css = registrar("core/qss").new("helloCss", qss="QLabel#x{color:red}", theme=None)
-        hello = registrar("signals#hello").new()      # 自己的信号（<id>.hello）
+        css = registrar("core/qss").add("helloCss", qss="QLabel#x{color:red}", theme=None)
+        hello = registrar("signals&hello").add()      # 自己的信号（<id>.hello）
 
         # ③ 类体里声明设置（apply 时落到插件自己名下）
-        volume = registrar("settings").new("volume", 50)
+        volume = registrar("settings").add("volume", 50)
 
 运行期（已经拿到插件实例）写在方法里，走 self.register(...)：
 
     def on_ready(self):
-        self.register("settings").new("runs", 0)       # 声明
+        self.register("settings").add("runs", 0)       # 声明
         self.register("settings").set("runs", 1)       # 写（= set_config，会触发回调）
         self.register("settings").get("runs")          # 读
         self.register("core/settings&theme").get()     # 跨桶读（显式路径）
-        self.register("signals#progress").emit(0.5)    # 发自己的信号
-        self.register("signals#progress").connect(self._on_progress)   # 订
+        self.register("signals&progress").emit(0.5)    # 发自己的信号
+        self.register("signals&progress").connect(self._on_progress)   # 订
         self.register("core/signals&on_game_start").emit()             # 发宿主信号
         self.register("core/tools&mdtManager").get()   # 取宿主工具（活对象）
 
@@ -47,7 +47,7 @@
 条目即子注册点：条目链也可以是一段**已声明的子接口**
     register("core/tools&mdtManager").contract(fields=("obj",), built=("obj",))
         → 把 core/tools/mdtManager 声明成接口；之后
-    register("core/tools&mdtManager").new("x", …) / .list() / .contract()
+    register("core/tools&mdtManager").add("x", …) / .list() / .contract()
         都作用在子接口上（键不再加 owner 前缀）
 
 九个动词，每个命名空间都认同一套：
@@ -86,10 +86,8 @@ from ..utils.events import events
 from ..utils.registry import registry
 
 # 动词表：所有命名空间共用同一套名字（signals 另有 emit / connect）
-VERBS = ("new", "set", "update", "remove", "get", "list", "owned", "contract", "watch")
+VERBS = ("add", "set", "update", "remove", "get", "list", "owned", "contract", "watch")
 
-# 标记挂在函数上（列表，允许一个方法挂多条）：
-#   [ (Scope, verb, name, fields), ... ]
 _MARK = "__bml_registrar__"
 
 # 条目链的切分：& / # 是链符号（同时是归属符），/ 只属于 owner/ns 的第一段
@@ -128,8 +126,6 @@ def _split(path):
         if not seg:
             raise ValueError(f"命名空间 {path!r} 的 {mode!r} 后面要跟一段名字")
         chain.append((mode, seg))
-    # 2) base 段：owner/ns（ns 可以有层级：宿主既有的 core/setting/items 就这么写；
-    #    「/ 不是目录」说的是条目链用 & / #，ns 内部的层级仍原样保留）
     if "/" in base:
         owner, _, ns = base.partition("/")
         if not owner or not ns:
@@ -150,7 +146,44 @@ class _Mark:
         self.fields = dict(fields)
 
     def __call__(self, fn):
-        """装饰器：标记记在函数上，方法名作为条目名（name 为空时）。"""
+        """装饰器。
+
+        - 被装饰的是**类**：说明这是宿主期的声明式条目（页面/下载源），当场交给点，
+          元数据从类属性读，`init` 就是类本身（收到 Box）；
+        - 被装饰的是普通函数/方法：老语义 —— 标记记在函数上，等 `apply()` 落地。
+        """
+        # 宿主期、且这个作用域指向的是一个**已声明的扩展点接口**（registry.declared）
+        # 就当场落地；signals / settings 这类由点自己覆写 add 的「纯条目入口」
+        # 不是 registry 接口，它们照旧走标记 —— 不需要维护任何名字清单。
+        # 只有「宿主自己在装配」（actor == core）时才当场落地；插件模块 import
+        # 期间 actor 是插件 id，那里的装饰器仍是标记，由 apply(inst) 统一落地。
+        # 判据只看「被装饰的是什么」：类或模块级函数 = 声明式条目，当场交给点；
+        # 方法（首参是 self） = 给某个条目挂实现，照旧走标记等 apply()。
+        host_point = getattr(self.scope, "path", "")
+        is_method = False
+        if not isinstance(fn, type) and callable(fn):
+            try:
+                params = list(__import__("inspect").signature(fn).parameters)
+                is_method = bool(params) and params[0] in ("self", "cls")
+            except (TypeError, ValueError):
+                is_method = False
+        if (self.scope.plugin is None and registry.declared(host_point)
+                and not is_method and self.scope._actor() == "core"):
+            # 宿主期没有 apply() 这一步：装饰器当场落到点上。
+            # 类 → 元数据从类属性取、init 就是类本身（收 Box）；
+            # 函数 → 元数据只能随装饰器传（title=/icon=），init 就是这个函数。
+            fields = dict(self.fields)
+            fields.setdefault("init", fn)
+            if isinstance(fn, type):
+                for attr, field in (("name", "title"), ("title_key", "title"),
+                                    ("icon", "icon"), ("iconPath", "icon"),
+                                    ("default", "default")):
+                    value = getattr(fn, attr, None)
+                    if value is not None:
+                        fields.setdefault(field, value)
+            self.scope._exec(self.verb, self.name or fn.__name__, fields, fn)
+            return fn
+
         target = _unwrap(fn)
         if target is None or not callable(target):
             raise TypeError(
@@ -179,7 +212,7 @@ class Scope:
 
     # ── 九个动词 ──
 
-    def new(self, name=None, *args, **fields):
+    def add(self, name=None, *args, **fields):
         """登记一项。
 
         - 给函数（装饰器用法）：立刻把标记挂上去，apply() 时落地；
@@ -187,19 +220,20 @@ class Scope:
         - 绑了实例（self.register(...)）：当场执行（运行期声明）。
         `new("音量", 50)` 这种第二个位置参数是默认值 / 值。
         """
+        # 装饰器形态（`@registrar(point).add("名字")`）不带任何字段；
+        # 带字段的 `add("key", qss=…)` 仍是「挂标记、等 apply」的老语义
+
         if callable(name) and not isinstance(name, str):
-            return _Mark(self, "new", name.__name__, fields)(name)
+            return _Mark(self, "add", name.__name__, fields)(name)
         if args:
             fields.setdefault("default", args[0])
         if self.plugin is not None:
-            return self._exec("new", name, fields, None)
-        return _Mark(self, "new", name, fields)
+            return self._exec("add", name, fields, None)
+        return _Mark(self, "add", name, fields)
 
     def set(self, name=None, *args, **fields):
         if callable(name) and not isinstance(name, str):
             return _Mark(self, "set", name.__name__, fields)(name)
-        # 带条目链的命名空间（core/settings&launcher&java&probeaaa）：
-        # set(值) 的第一个位置参数是值，不是条目名
         if self.entries and name is not None and not isinstance(name, str):
             args = (name,) + args
             name = None
@@ -233,8 +267,6 @@ class Scope:
         return self._run_mark("owned", None, kw)
 
     def contract(self, **fields):
-        # contract 是「声明点」：宿主在启动时直接执行（没有插件实例、也没有会话）；
-        # 插件在类体里写的话先记标记、apply 时落地。
         if self.plugin is not None or registry._session_owner is None:
             return self._exec("contract", None, fields, None)
         return _Mark(self, "contract", None, fields)
@@ -306,16 +338,11 @@ class Scope:
             return self._tools(verb, name, fields, actor, fn)
         return self._registry(verb, name, fields, fn, actor)
 
-    # 设置：自己那一桶（self.plugin.settings）；core/settings 走 other()；
-    # 链式条目 core/settings&launcher&java 读的是桶里的嵌套键。
-    # 装饰器 new(name=…) 同时把「设置项控件」登记进设置页，section 按路径自动分配。
     def _settings(self, verb, name, fields, actor, fn=None):
         chain = self._chain(actor)
         owner = chain[0][0] if chain else (self.owner or actor)
         paths = [seg for _o, seg in chain]
         if verb == "contract":
-            # 逐层注册设置点：先 core/settings&launcher，再 &launcher&java，
-            # 之后 &launcher&java&probeaaa 这种注册项才开放
             if not paths:
                 raise ValueError(
                     "settings 的 contract 要写在具体点上，如 core/settings&launcher")
@@ -361,7 +388,7 @@ class Scope:
             # 注册项/值的祖先点必须先注册
             need = paths if fn is not None else paths[:-1]
             _require_settings_points(owner, need, where=self.path)
-        if verb == "new":
+        if verb == "add":
             if fn is not None:
                 # 装饰器形态：声明设置键 + 登记设置页控件（section 自动分配）
                 return self._settings_item(name, fields, actor, key, nested, owner,
@@ -415,7 +442,7 @@ class Scope:
                        walk_get, walk_set, fn):
         """装饰器形态的 settings 项：声明设置键 + 登记设置页控件（section 自动分配）。
 
-            @registrar("core/settings&launcher&java").new(name="probeaaa", title="…")
+            @registrar("core/settings&launcher&java").add(name="probeaaa", title="…")
             def probe(self, ctx):
                 return Widgets.Bool(ctx.parent, ctx.title)
 
@@ -447,14 +474,14 @@ class Scope:
         if group:
             norm = f"core/setting/{group}"
             dotted = f"core.setting.{group}"
-            for e in registry.entries("core/setting/sections"):
+            for e in registry.entries("core/setting.sections"):
                 if e.key in (norm, dotted):
                     section = dotted
                     break
 
         init = _builder(self.plugin, fn, dict(fields))
 
-        return registry.add("core/setting/items", f"{actor}/{name}",
+        return registry.add("core/setting.items", f"{actor}/{name}",
                             init=init, section=section,
                             title=title)
 
@@ -470,7 +497,7 @@ class Scope:
         else:
             bus = ""
 
-        if verb == "new":
+        if verb == "add":
             events.register(bus)
             return bus
         if verb in ("emit", "set"):
@@ -519,7 +546,7 @@ class Scope:
             if self.entries:
                 return registry.declare(sub, registrant=actor, **fields)
             return registry.declare(point, registrant=actor, **fields)
-        if verb == "new":
+        if verb == "add":
             return registry.add(point, key, **fields)
         if verb == "set":
             return registry.set(point, key, by=actor, **fields)
@@ -542,10 +569,10 @@ class Scope:
             return registry.declare(point, registrant=actor, **fields)
         if key is None and name:
             key = f"{actor}/{name}"
-        if verb == "new" and fn is not None:
+        if verb == "add" and fn is not None and self.plugin is not None:
             fields = dict(fields)
             fields["init"] = _builder(self.plugin, fn, fields)
-        if verb == "new":
+        if verb == "add":
             return registry.add(point, key, **fields)
         if verb == "set":
             return registry.set(point, key, by=actor, **fields)
@@ -639,10 +666,6 @@ def apply(plugin):
 _READY = {}
 
 
-# ─────────────────────────── 设置点（逐层注册）───────────────────────────
-# settings 命名空间是树：core/settings&launcher 注册之后，&launcher&java 才开放；
-# &launcher&java 注册之后，&launcher&java&probeaaa 这种「注册项」才开放。
-# 根（core/settings）是宿主自带的，不用注册。
 _SETTINGS_POINTS = set()
 
 

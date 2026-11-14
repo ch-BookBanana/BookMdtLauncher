@@ -37,10 +37,15 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractSpinBox, QLineEdit, QPlainTextEdit,
                                QTextEdit, QWidget)
+from shiboken6 import isValid
 
 # 能导入的后缀。拖进来一个 .txt 时不该亮「松开以导入」，所以先按后缀筛一道；
 # 后缀对但内容不对的（改名的压缩包、半截文件）由验包那一关拒收。
 DROP_SUFFIXES = (".jar", ".zip")
+
+# 本次拖动里被 disable_child_drops 关掉拖放的控件；拖动结束由
+# restore_child_drops 还原（否则一次拖 jar 会把输入框的拖文本能力永久关掉）。
+_DROPS_OFF = []
 
 # 提示卡片尺寸：一行标题 + 一行说明，两行都居中
 CARD_W = 300
@@ -81,11 +86,27 @@ def disable_child_drops(root):
     插进去」。控制台铺满右栏，文件落上去就被它当成待插入的文本吃掉，窗口
     永远收不到 drop —— 表现是「拖到右边没反应，拖到左边才行」。
     这些都是输入控件，拖一个 jar 进去没有任何合理语义。
+
+    关掉的控件记在 _DROPS_OFF 里，拖动一结束就由 restore_child_drops 还原：
+    拖文本进输入框是这些控件本来就该有的能力，不能因为用户拖过一次 jar 就
+    永久失效。
     """
     for cls in (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox):
         for wid in root.findChildren(cls):
             if wid.acceptDrops():
                 wid.setAcceptDrops(False)
+                _DROPS_OFF.append(wid)
+
+
+def restore_child_drops():
+    """把 disable_child_drops 关掉的子控件还原（拖动结束/取消时调）。"""
+    while _DROPS_OFF:
+        wid = _DROPS_OFF.pop()
+        try:
+            if isValid(wid):        # 拖动期间页面可能已被销毁
+                wid.setAcceptDrops(True)
+        except Exception:
+            pass
 
 
 def open_import(parent, path):

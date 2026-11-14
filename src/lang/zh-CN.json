@@ -125,6 +125,8 @@
     "core.wid.pages.importJar.err.unsafeArchive": "包里有指向目录外的路径，已拒绝解压",
     "core.wid.pages.importJar.err.badManifest": "这个包的 bml-export.json 读不懂，或者来自更新版本的 BML",
     "core.wid.pages.importJar.err.noClient": "实例包里没有 mdt.jar，可能打包时漏掉了客户端",
+    "core.wid.pages.importJar.err.invalidName": "实例名称不合法（不能含 \\ / : * ? \" < > | ，不能以点或空格结尾，也不能用 CON 之类保留名）",
+    "core.wid.pages.importJar.err.dot": "实例名称不能以点开头",
     "core.wid.pages.importJar.info.instance": "实例包 · $1 MB · 含 $2 个文件",
     "core.wid.pages.exportInstance.title": "导出实例",
     "core.wid.pages.exportInstance.desc": "把「$1」打包成一个 zip，里面是客户端本体、存档、模组与蓝图。",

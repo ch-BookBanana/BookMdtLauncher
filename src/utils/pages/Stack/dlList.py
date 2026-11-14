@@ -36,13 +36,13 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QVBoxLayout, QWidget)
 
 from ... import javaDownload
-from ...bus import bus
-from ...events import events
-from ...options.scrolls import Scroll
-from ...QDownloader import QDownloader
-from ...qthtimer import QThTimer
-from ...registry import Box, registry
-from ...utils import mdt_dir_of_dest, mdt_rmtree, t
+from src.utils.bus import bus
+from src.utils.events import events
+from src.utils.options.scrolls import Scroll
+from src.utils.QDownloader import QDownloader
+from src.utils.qthtimer import QThTimer
+from src.utils.registry import Box, registry
+from src.utils.utils import mdt_dir_of_dest, mdt_rmtree, t
 
 
 class DlListPage(QWidget):
@@ -166,10 +166,6 @@ class DlListPage(QWidget):
         if self._closed or isinstance(result, Exception):
             return
         actives, pendings = result
-        # Java 下载状态同步：检测循环轮询读取任务实时状态，驱动 Launch 页 label。
-        # 与 paused_changed 信号互补——信号丢失/时序错乱时，1 秒内轮询自动纠正，
-        # 避免暂停瞬间被 progress 覆盖成"正在下载"后卡住。
-        # 只更新 label 文本不切页，避免打断用户当前页面。
         try:
             for _t in actives.values():
                 _dest = _t.get("dest") or ""
@@ -179,8 +175,6 @@ class DlListPage(QWidget):
                     _pct = min(100, int(_done * 100.0 / _total)) if _total > 0 else 0
                     _paused = bool(_t.get("paused"))
                     events.emit("java_status", "paused" if _paused else "downloading", _pct)
-                    # 检测循环日志：记录读取到的 Java 任务状态（含暂停/恢复切换），
-                    # 用于排查信号竞争导致的"暂停后被覆盖成正在下载"
                     if _paused != self._last_java_paused:
                         events.logger.info(t(events.lang.get("core.log.info.dlJavaState"),
                                                 "paused" if _paused else "downloading",
@@ -258,8 +252,6 @@ class DlListPage(QWidget):
 
         if task_dir and os.path.isdir(task_dir):
             shutil.rmtree(task_dir, ignore_errors=True)
-        # 若是 mdt 游戏下载：同时删除目标文件夹（含 downloading.json），
-        # 避免残留记录导致下次启动又被续传
         try:
             mdir = mdt_dir_of_dest(dest)
             if mdir and mdt_rmtree(mdir):
@@ -470,8 +462,6 @@ class DlListPage(QWidget):
                 events.logger.warning(t(events.lang.get("core.log.warning.dlMdtPausedError"), repr(e)))
 
         def _on_secondary_clicked(self):
-            # 运行中：取消（子线程执行阻塞式取消，取消后删除 mdt 目标文件夹）；
-            # 待续传：请求页面删除
             if self.task_info.get("kind") == "active":
                 if self.task is not None and self.task_info.get("cancel_allowed", True):
                     if self._cancelling:

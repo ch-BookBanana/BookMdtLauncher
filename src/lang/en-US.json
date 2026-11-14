@@ -125,6 +125,8 @@
     "core.wid.pages.importJar.err.unsafeArchive": "The pack contains paths outside the target folder; extraction refused",
     "core.wid.pages.importJar.err.badManifest": "Cannot read this pack's bml-export.json, or it was made by a newer BML",
     "core.wid.pages.importJar.err.noClient": "This instance pack has no mdt.jar (the client was probably left out when packing)",
+    "core.wid.pages.importJar.err.invalidName": "That instance name won't work (no \\ / : * ? \" < > |, no trailing dot or space, no reserved names like CON)",
+    "core.wid.pages.importJar.err.dot": "An instance name can't start with a dot",
     "core.wid.pages.importJar.info.instance": "Instance pack · $1 MB · $2 files",
     "core.wid.pages.exportInstance.title": "Export Instance",
     "core.wid.pages.exportInstance.desc": "Pack “$1” into a single zip with the client, saves, mods and blueprints.",

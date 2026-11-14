@@ -54,6 +54,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
 import os
+import shutil
 import time
 import zipfile
 
@@ -513,6 +514,9 @@ def extract_package(path, target, progress=None):
        半途而废地留下一半文件。
     3. **mtime 还原**：存档的修改时间按日期排序时有用，解出来全变成「现在」
        会让用户分不清哪个是新档。
+    4. **体积上限**：zip 头部声明的解压后体积是可以随便写的 —— 一个几十 KB
+       的包能铺满磁盘。所以开解之前先比对剩余空间，写的过程中再按实际写出量
+       复查一次（声明值也可能是假的）。
 
     解压本身不校验包内结构：验客户端交给调用方（解出来的 mdt.jar 还要过一遍
     inspect_jar），这里只负责「把字节安全地放到位」。
@@ -523,6 +527,13 @@ def extract_package(path, target, progress=None):
         with zipfile.ZipFile(path, "r") as zf:
             files = [i for i in zf.infolist() if not i.is_dir()]
             total = sum(i.file_size for i in files) or 1
+            try:
+                free = shutil.disk_usage(root).free
+            except OSError:
+                free = None
+            if free is not None and total > free:
+                # 磁盘满也走 ioError（与「写入实例目录失败」同一句文案）
+                return False, ERR_IO
             done = 0
             for info in files:
                 name = info.filename.replace("\\", "/")
@@ -539,6 +550,9 @@ def extract_package(path, target, progress=None):
                             break
                         wf.write(buf)
                         done += len(buf)
+                        if free is not None and done > free:
+                            # 头部声明的体积在撒谎：真实写出量已超过剩余空间
+                            return False, ERR_IO
                         if progress is not None:
                             # 留 1% 给调用方的收尾（搬运、写元数据），
                             # 进度条走到 100% 却还在转是最难受的

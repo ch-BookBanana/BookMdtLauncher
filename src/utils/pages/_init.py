@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..bus import bus
 from ..events import events
+from src.BMLCore import registrar
 from ..registry import Box, registry
 
 
@@ -102,7 +103,7 @@ class Page():
     子类只做两件事：
       1. 用类属性声明自己是谁（name 语言键 / icon 图标 / order 顺序 / default 默认页）；
       2. 实现 init_wid() 建自己的三栏内容。
-    注册交给 @page("core.xxx") 装饰器（写在页面类上，见 pages/start.py），
+    注册交给 @registrar("core/pages").add("xxx") 装饰器（写在页面类上，见 pages/start.py），
     装配方按注册表构建，不认识任何一个页面类。
 
     构造只需要一个 btn（导航按钮，装配方建好注入）；页容器从注册表取
@@ -115,18 +116,11 @@ class Page():
     order = 100          # 左栏顺序
     default = False      # 是否是启动默认页（只有 core.pages 认这个）
 
-    def __init__(self, btn=None):
+    def __init__(self, box=None):
         super().__init__()
-        # 导航按钮由装配方（core.pages 的构建循环）建好后注入，点击也在那边接。
-        # 这里原先是 self.root.window.left.pagebtns.add_btn(...) —— 一条从页面
-        # 反向摸到主窗口、再摸进左栏按钮组的链，页面因此知道主窗口长什么样。
-        self.btn = btn
+        # 装配方传的是 Box（点给的构建上下文）；老的直接传按钮也认
+        self.btn = getattr(box, "btn", box)
         shell = _shell()
-        # 只在这里取序号，**不**往 shell.pages / shell.btns 里塞：那两张表由
-        # 装配方（core.pages 的构建循环）维护。原因很实在 —— 插件页面不走这个
-        # 基类，靠页面自己追加的话表里就永远缺插件页，而「没有页面标 default
-        # 时挑第一页」那个兜底读的正是它。
-        # 序号在这儿取仍然对得上：装配方紧接着就会把自己追加进去。
         self.id = len(shell.pages)
         self.init_wid()
 

@@ -192,8 +192,12 @@ def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
     dest_abs = os.path.abspath(dest)
     # 保存位置不能落在实例目录里：边写边扫会把正在生成的 zip 也算成一个
     # 待打包文件，轻则包内多一个莫名其妙的大文件，重则写到一半去读自己。
+    # 比较用 normcase：Windows 路径大小写不敏感，用户手输的目录大小写稍一不同，
+    # commonpath 就判不出「在里面」了。
     try:
-        if os.path.commonpath([root, dest_abs]) == root:
+        root_cmp = os.path.normcase(root)
+        dest_cmp = os.path.normcase(dest_abs)
+        if os.path.commonpath([root_cmp, dest_cmp]) == root_cmp:
             return False, ERR_DEST_INSIDE, None
     except ValueError:
         pass   # 不同盘符，commonpath 抛错；那必然不在内部
@@ -264,8 +268,14 @@ def export_instance(instance_dir, dest, meta=None, progress=None, cancel=None,
         _remove(part)
         raise
 
+    try:
+        zip_bytes = os.path.getsize(dest_abs)
+    except OSError:
+        # zip 已经改名成功了，只是紧接着被别的程序挪走 —— 报失败会让人以为
+        # 白导了一遍。大小当 0（界面只拿它显示一行统计）。
+        zip_bytes = 0
     stats = {"files": written, "skipped": skipped, "bytes": total,
-             "zip_bytes": os.path.getsize(dest_abs), "sanitized": bool(sanitize),
+             "zip_bytes": zip_bytes, "sanitized": bool(sanitize),
              "dropped": dropped}
     if plan is not None:
         stats.update(plan.summary())

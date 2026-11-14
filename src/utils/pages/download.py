@@ -17,21 +17,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QButtonGroup, QHBoxLayout, QLabel, QPushButton, QStackedWidget, QVBoxLayout
+QButtonGroup, QHBoxLayout, QStackedWidget, QVBoxLayout
 )
 from ..events import events
 from ..options.navBtn import NavBtn
 from ..options.scrolls import Scroll
-from ..utils import change_color
 from ..resources import (BTN_DOWNLOAD, NAV_MENU)
-from ..registry import page, Box, registry
+from src.BMLCore import registrar
+from ..registry import Box, registry
 
 from ._init import *
-from .downloads.game import Game
 
-@page("core.download")
+@registrar("core/pages").add("download")
 class Download(Page):
     name = "core.wid.pages.download"
     icon = BTN_DOWNLOAD
@@ -106,12 +104,3 @@ class Download(Page):
 
 
 
-def register():
-    """左栏页签的登记。由 pages/builtin.py 调用一次。
-
-    init 从 Box.parent（承载它的下载页 Main 实例）取宿主；title/icon 走条目字段。
-    """
-
-    registry.add("core.download.tabs", "core.download.game",
-                 init=lambda b: Game(b.parent, b.title, b.icon),
-                 title="core.wid.pages.download.game", icon=NAV_MENU)
