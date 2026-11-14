@@ -30,7 +30,8 @@ from ..options.scrolls import Scroll
 from ..utils import change_color, t
 from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING,
                           BTN_START)
-from ..registry import page, Box, registry
+from src.BMLCore import registrar
+from ..registry import Box, registry
 
 from ._init import *
 from .Stack.gameManager import GameManager
@@ -131,7 +132,7 @@ def _parse_log_line(text, fallback="info"):
     return fallback, ("error" if fallback == "error" else "info"), ""
 
 
-@page("core.start")
+@registrar("core/pages").add("start")
 class Start(Page):
     name = "core.wid.pages.start"
     icon = BTN_START

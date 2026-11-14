@@ -88,7 +88,7 @@ BUILTIN_CLIENT_ID = "Iv23lihqub0l2I1s17LI"
 BUILTIN_CLIENT_SECRET = ""
 
 try:
-    from ...env import CLIENT_SECRET as _LOCAL_CLIENT_SECRET
+    from src.utils.env import CLIENT_SECRET as _LOCAL_CLIENT_SECRET
 except Exception:            # 文件不存在 / 字段没写，都走「没有本机凭据」这条路
     _LOCAL_CLIENT_SECRET = ""
 

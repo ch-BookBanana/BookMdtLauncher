@@ -43,14 +43,14 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton,
 
 from shiboken6 import isValid
 
-from ...bus import bus
-from ...events import events
-from ...options.scrolls import Scroll
-from ...path_utils import getPath
-from ...qthtimer import QThTimer
-from ...registry import Box, registry
-from ...resources import ACT_TIPS, TBT_CLOSE
-from ...utils import change_color
+from src.utils.bus import bus
+from src.utils.events import events
+from src.utils.options.scrolls import Scroll
+from src.utils.path_utils import getPath
+from src.utils.qthtimer import QThTimer
+from src.utils.registry import Box, registry
+from src.utils.resources import ACT_TIPS, TBT_CLOSE
+from src.utils.utils import change_color
 
 
 def sync_rate_from_api():

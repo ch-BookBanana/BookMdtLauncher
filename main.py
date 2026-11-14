@@ -1373,7 +1373,7 @@ try:
                         self.right = self.Right_(self,self.root)
                         self.layout.addWidget(self.right,0)
 
-                        registry.declare("core.shell", registrant="core",
+                        registry.declare("core/shell", registrant="core",
                                          fields=("init",),
                                          required=("init",),
                                          built=("obj",),

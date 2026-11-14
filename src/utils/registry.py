@@ -884,25 +884,3 @@ def _path(owner, name):
 registry = Registry()
 
 
-def page(key, *, point="core/pages", **meta):
-    """把一个 Page 子类登记进接口（装饰器）。
-
-        @page("core/start")
-        class Start(Page):
-            name    = "core.wid.pages.start"
-            icon    = BTN_START
-            order   = 10
-            default = True
-    """
-    def deco(cls):
-        fields = registry.meta(point).get("fields", ())
-        kw = dict(meta)
-        kw.setdefault("init", lambda b: cls(btn=getattr(b, "btn", None)))
-        kw.setdefault("title", cls.name)
-        if "icon" in fields:
-            kw.setdefault("icon", cls.icon)
-        if "default" in fields:
-            kw.setdefault("default", getattr(cls, "default", False))
-        registry.add(point, key, **kw)
-        return cls
-    return deco

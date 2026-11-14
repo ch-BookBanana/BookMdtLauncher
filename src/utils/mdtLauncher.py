@@ -1,4 +1,5 @@
 import os
+import warnings
 import logging
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, Signal
 
@@ -132,6 +133,16 @@ class mdtLauncher(QProcess):
         self.started.connect(self._on_started)
         self.finished.connect(self._on_finished)
         self.errorOccurred.connect(self._on_error)
+        # 记下「确实连过」，后面只断自己连过的那几条
+        self._wired = {name for name, _sig, _slot in self._signal_pairs()}
+
+    @staticmethod
+    def _signal_pairs():
+        return (("stdout", "readyReadStandardOutput", "on_stdout"),
+                ("stderr", "readyReadStandardError", "read_stderr"),
+                ("started", "started", "_on_started"),
+                ("finished", "finished", "_on_finished"),
+                ("error", "errorOccurred", "_on_error"))
 
         locked, failed = self._locker.lock(self.data["mdtPath"],
                                            exclude=[self.data["mdtDataRoot"]])
@@ -393,16 +404,23 @@ class mdtLauncher(QProcess):
         （Failed to disconnect (None) from signal ...），而警告不走异常，
         try/except 拦不住。
         """
-        pairs = ((self.readyReadStandardOutput, self.on_stdout),
-                 (self.readyReadStandardError, self.read_stderr),
-                 (self.started, self._on_started),
-                 (self.finished, self._on_finished),
-                 (self.errorOccurred, self._on_error))
-        for sig, slot in pairs:
-            try:
-                sig.disconnect(slot)
-            except (TypeError, RuntimeError):
-                pass
+        wired = getattr(self, "_wired", None) or set()
+        with warnings.catch_warnings():
+            # libpyside 找不到那条连接时只写 RuntimeWarning、不抛异常，
+            # 局部压掉比到处 try/except 干净
+            warnings.simplefilter("ignore", RuntimeWarning)
+            for name, sig_name, slot_name in self._signal_pairs():
+                if name not in wired:
+                    continue          # 从没连过，就别去断
+                sig = getattr(self, sig_name, None)
+                slot = getattr(self, slot_name, None)
+                if sig is None or slot is None:
+                    continue
+                try:
+                    sig.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+        self._wired = set()
 
     def _emit_finished(self, code: int):
         """内部统一发出 lifecycle_finished 信号（只发一次），并做清理。"""

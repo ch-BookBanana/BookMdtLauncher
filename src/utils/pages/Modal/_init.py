@@ -18,7 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QGridLayout
 
-from ...events import events
+from src.utils.events import events
 
 
 class FloatingOverlay(QWidget):

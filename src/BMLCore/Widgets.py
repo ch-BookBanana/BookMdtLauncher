@@ -39,7 +39,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
     Title / Line 是装饰（分组标题、分隔线），不参与取值，也没有这套接口。
 
     Section(page, title, items, fields=None)
-        设置页里的一个分组容器（`registrar("core/setting/sections").new` 的构建函数用它，
+        设置页里的一个分组容器（`registrar("core/setting.sections").new` 的构建函数用它，
         `ctx.items` 是这一组容纳的条目）。
 
     Scroll(parent, horizontal=False, …)

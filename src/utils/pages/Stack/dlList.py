@@ -36,13 +36,13 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QVBoxLayout, QWidget)
 
 from ... import javaDownload
-from ...bus import bus
-from ...events import events
-from ...options.scrolls import Scroll
-from ...QDownloader import QDownloader
-from ...qthtimer import QThTimer
-from ...registry import Box, registry
-from ...utils import _is_mdt_download, t
+from src.utils.bus import bus
+from src.utils.events import events
+from src.utils.options.scrolls import Scroll
+from src.utils.QDownloader import QDownloader
+from src.utils.qthtimer import QThTimer
+from src.utils.registry import Box, registry
+from src.utils.utils import _is_mdt_download, t
 
 
 class DlListPage(QWidget):

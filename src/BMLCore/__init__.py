@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
         id = "you_hello"              # 标识符，建议带作者名；同时是注册表命名空间
         name = "Hello"
 
-        @registrar("core/pages").new(title="you_hello.page")
+        @registrar("core/pages").add("page", title="you_hello.page")
         def page(self, ctx):
             return MyPage(ctx.parent)
 
@@ -83,9 +83,9 @@ from . import btypes as _btypes  # noqa: E402
 class _DualScope:
     """registrar(path) 的作用域：先试 v3（装饰器语法），解析不到回退旧 v2。
 
-    v3：`@registrar("settings$a$b$c.value_changed").connect()`、
+    v3：`@registrar("settings&a&b&c&value_changed").connect()`、
         `registrar("core/log").info(…)`
-    v2（过渡）：`@registrar("core/pages").new(title=…)` 这类旧动词原样可用。
+    v2（过渡）：`@registrar("core/pages").add(名字, title=…)` 是唯一动词；`new` 已删。
     """
 
     def __init__(self, path):

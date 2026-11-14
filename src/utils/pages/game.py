@@ -18,13 +18,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QVBoxLayout
 
-from ..registry import page, registry
+from src.BMLCore import registrar
+from ..registry import registry
 from ..resources import BTN_GAME
 
 from ._init import *
 
 
-@page("core.game")
+@registrar("core/pages").add("game")
 class Game(Page):
     name = "core.wid.pages.game"
     icon = BTN_GAME

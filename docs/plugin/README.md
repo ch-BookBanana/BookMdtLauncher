@@ -72,4 +72,4 @@ class Hello(BMLPlugin):
 
 - 插件 API 正在从 v2 迁到 v3（万物皆 BType + 点体系）
 - 新写的插件请用 v3 写法（`register()` / `add()` / `generator(...)`）
-- v2 旧写法（`@registrar(...).new(...)`）仍能跑，属过渡期，文档里会标明
+- v2 旧写法（`@registrar(...).add(...)`）仍能跑，属过渡期，文档里会标明

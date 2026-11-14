@@ -33,12 +33,13 @@ from ..options.sections import Section
 from ..path_utils import getPath
 from ..utils import change_color, t
 from ..resources import (ACT_UNITS, BTN_SETTING, FILE_FOLDER, TBT_CLOSE)
-from ...BMLCore.btypes import BPoint, register as register_point
-from ..registry import page, Box, registry
+from src.BMLCore.btypes import BPoint, register as register_point
+from src.BMLCore import registrar
+from ..registry import Box, registry
 
 from ._init import *
 
-@page("core.setting")
+@registrar("core/pages").add("setting")
 class Setting(Page):
     name = "core.wid.pages.setting"
     icon = BTN_SETTING

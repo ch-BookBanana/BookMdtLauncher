@@ -49,19 +49,19 @@ from ..registry import registry
 
 # ─────────────────────────── 契约声明 ───────────────────────────
 
-registry.declare("core.pages", registrant="core",
+registry.declare("core/pages", registrant="core",
                  fields=("init", "title", "icon", "default"),
                  required=("init", "title"),
                  built=("main", "btn"),
                  doc="主窗口左栏导航页（顺序由各条目的 order 决定）。"
                      "default=True 的那条是启动默认页（没有就取第一页）。")
 
-registry.declare("core.setting.pages", registrant="core.setting",
+registry.declare("core/setting.pages", registrant="core.setting",
                  fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  doc="设置页左栏的子页")
 
-registry.declare("core.qss", registrant="core",
+registry.declare("core/qss", registrant="core",
                  fields=("qss", "theme"),
                  required=("qss",),
                  doc="追加到全局样式表末尾的 css 片段。theme: None = 两套主题都加，"
@@ -69,47 +69,47 @@ registry.declare("core.qss", registrant="core",
                      "同名选择器以它为准 —— 扩展能盖内置样式，不必改主题文件；"
                      "换主题时会重新收一遍，不用自己监听。")
 
-registry.declare("core.tray.menu", registrant="core",
+registry.declare("core/tray.menu", registrant="core",
                  fields=("init", "title"),
                  required=("init", "title"),
                  doc="系统托盘右键菜单里的一项：init 收到构建上下文，返回 QAction。"
                      "title 是语言键，语言切换时托盘照它重设文案。")
 
-registry.declare("core.setting.sections", registrant="core.setting",
+registry.declare("core/setting.sections", registrant="core.setting",
                  fields=("init", "title"),
                  required=("init", "title"),
                  doc="设置子页里的分组容器（标题 + 它容纳的条目）。"
                      "init 收到构建上下文，其中 items 是这一组容纳的条目表。")
 
-registry.declare("core.setting.items", registrant="core.setting",
+registry.declare("core/setting.items", registrant="core.setting",
                  fields=("init", "section", "title"),
                  required=("init", "section", "title"),
                  doc="设置子页里的条目（Bool / Combo / 插件自绘的控件…）。"
                      "section 指向所属的分组容器 key（core.setting.sections 里的条目）。")
 
-registry.declare("core.start.bottom", registrant="core.start",
+registry.declare("core/start.bottom", registrant="core.start",
                  fields=("init",),
                  required=("init",),
                  doc="启动页左栏底部的按钮页（选择游戏 / 挂起…）")
 
-registry.declare("core.download.tabs", registrant="core.download",
+registry.declare("core/download.tabs", registrant="core.download",
                  fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  built=("main", "btn"),
                  doc="下载页左栏的页签")
 
-registry.declare("core.download.sources", registrant="core.download",
+registry.declare("core/download.sources", registrant="core.download",
                  fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  built=("main", "btn"),
                  doc="下载页顶部页签的游戏来源")
 
-registry.declare("core.download.item.actions", registrant="core.download",
+registry.declare("core/download.item.actions", registrant="core.download",
                  fields=("init", "title", "icon"),
                  required=("init", "title", "icon"),
                  doc="下载列表项右侧的操作按钮（下载 / 仓库信息 / 链接）")
 
-registry.declare("core.overlays", registrant="core",
+registry.declare("core/overlays", registrant="core",
                  fields=("init", "title"),
                  required=("init", "title"),
                  doc="叠加层页面：盖在窗口上、带遮罩、内容居中（见 pages/Modal/）。"
@@ -117,18 +117,18 @@ registry.declare("core.overlays", registrant="core",
                      "open_overlay 两个点都找，按 key 决定发哪个请求 —— "
                      "发错请求的表现是「点了没反应」，所以别让调用方自己记着。")
 
-registry.declare("core.stacks", registrant="core",
+registry.declare("core/stacks", registrant="core",
                  fields=("init", "title"),
                  required=("init", "title"),
                  doc="整页浮层栈：一页压一页、可逐级返回（见 pages/Stack/）。")
 
-registry.declare("core.gameManager.pages", registrant="core.gameManager",
+registry.declare("core/gameManager.pages", registrant="core.gameManager",
                  fields=("init", "title", "icon"),
                  required=("init", "title"),
                  built=("main", "btn"),
                  doc="游戏管理浮层左栏的功能页（设置 / Mods / …）。icon 可省")
 
-registry.declare("core.gameSettings.sections", registrant="core.gameSettings",
+registry.declare("core/gameSettings.sections", registrant="core.gameSettings",
                  fields=("init", "spacing"),
                  required=("init",),
                  doc="游戏管理页的区块（文件夹 / Java …）")
@@ -145,11 +145,11 @@ from .Stack import gameManager    # noqa: E402,F401
 from ..settings import register as _register_close_ask    # noqa: E402,F401
 
 start.register()                   # core.start.bottom（底部按钮页）
-download.register()                # core.download.tabs（左栏页签）
+# 下载页签由 downloads/game.py 的 Game 类自带登记
 setting.register()                 # core.setting.pages + core.setting.items
 githubSetting.register()           # core.overlays：GitHub 设置页（叠加层）
 dlList.register()                  # core.overlays：下载列表（浮层栈）
-_download_sources.register()       # core.download.sources（三个下载源）
+# 三个下载源与列表项按钮由 game.py 里的装饰器自带登记，这里不再有 register()
 gameManager.register()             # core.stacks + 管理浮层的功能页与区块
 _register_close_ask()              # core.overlays：关闭询问（叠加层）
 

@@ -204,7 +204,7 @@ class EventBus(QObject):
         参数个数与声明的签名不符时**不让异常打进广播方**（那可能是宿主的一次
         点击、一个工作线程的收尾）。例外是「没声明就自动补的无参信号」：
         它本来就没有签名，带参广播时按参数个数换成真签名再发一次
-        （订阅者原样接过去）—— registrar("signals").new("x") 之后
+        （订阅者原样接过去）—— registrar("signals").add("x") 之后
         .set("x", 值) 的写法因此不用先声明签名。
         """
         holder = self._holders.get(name)

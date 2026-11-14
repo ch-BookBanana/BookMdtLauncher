@@ -265,6 +265,7 @@ class BPoint(BType):
         接受表  point —— 这个点允许收的条目类型（子类可覆盖）
     """
 
+
     point = ("core/value", "core/signal", "core/point",        # 接受的条目类型
              "core/log", "core/lang", "core/settings", "core/setting")
     _entry_type = "core/value"                            # 默认条目类型
@@ -777,7 +778,8 @@ def _unload_deep(point, owner, removed):
 
 
 
-_CHAIN_SPLIT = re.compile(r"[$&#]")
+# 只有 `&` 是链分隔（往下走一层）；`#` 是「到条目/成员」，在每段内部解析
+_CHAIN_SPLIT = re.compile(r"[&]")
 
 
 def _resolve_dsl(path):
@@ -790,10 +792,17 @@ def _resolve_dsl(path):
         raise ValueError(f"registrar({path!r}) 解析不出来")
     node = register()
     for seg in segs:
-        name, _, attr = seg.rpartition(".") if "." in seg else (seg, "", "")
-        if attr:
-            target = node.get(name)
-            return getattr(target, attr), name
+        # 语法：`#` 之后是条目（`core/p&pi` 等价写法）；条目之后再 `#` 是它的成员
+        if "#" in seg:
+            head, _, tail = seg.partition("#")
+            entry = node.get(head) if head else node
+            if "#" in tail:
+                name, _, attr = tail.partition("#")
+                return getattr(entry.get(name), attr), name
+            if tail:
+                return getattr(entry, tail), head
+            node = entry
+            continue
         node = node.get(seg)
     return node, None
 
@@ -821,7 +830,7 @@ class _Dsl:
         return None
 
     def __getattr__(self, item):
-        # 其余能力直接落到「解析出来的那个对象」上（info / get / set …）
+        # 装饰器入口优先：点用 @decor 声明的实现（元数据、被装饰对象由点决策）
         target, _name = _resolve_dsl(self.path)
         return getattr(target, item)
 

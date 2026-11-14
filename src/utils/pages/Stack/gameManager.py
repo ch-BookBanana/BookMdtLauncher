@@ -36,17 +36,17 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
-from ...bus import bus
-from ...events import events
-from ...javaManager import javaManager
-from ...mdtManager import mdtManager
-from ...options.items import Bool, Combo
-from ...options.navBtn import NavBtn
-from ...options.scrolls import Scroll
-from ...path_utils import getPath
-from ...registry import Box, registry
-from ...resources import FILE_FOLDER, TBT_CLOSE
-from ...utils import change_color, openFolder, t
+from src.utils.bus import bus
+from src.utils.events import events
+from src.utils.javaManager import javaManager
+from src.utils.mdtManager import mdtManager
+from src.utils.options.items import Bool, Combo
+from src.utils.options.navBtn import NavBtn
+from src.utils.options.scrolls import Scroll
+from src.utils.path_utils import getPath
+from src.utils.registry import Box, registry
+from src.utils.resources import FILE_FOLDER, TBT_CLOSE
+from src.utils.utils import change_color, openFolder, t
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
 _FIELDS = {

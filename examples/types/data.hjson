@@ -1,0 +1,7 @@
+{
+  id: example_types
+  name: 类型示例
+  version: 1.0.0
+  api: 2.x
+  entry: main.TypesDemo
+}
