@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QHBoxLayout, QLabel,
                                QPushButton, QStackedWidget, QVBoxLayout)
 
 from ..events import events
+from .. import palette
 from ..javaManager import javaManager
 
 from ..options.navBtn import NavBtn
@@ -31,7 +32,7 @@ from ..options.scrolls import Scroll
 from ..options.sections import Section
 
 from ..path_utils import getPath
-from ..utils import change_color, t
+from ..utils import change_color, primary_btn_style, t, theme_icon
 from ..resources import (ACT_UNITS, BTN_SETTING, FILE_FOLDER, TBT_CLOSE)
 from src.BMLCore.btypes import BPoint, register as register_point
 from src.BMLCore import registrar
@@ -53,7 +54,6 @@ class Setting(Page):
             super().__init__(parent)
             self.resize_(120)
             self.init_wid()
-            bus.bind(self)
 
 
         def init_wid(self):
@@ -120,7 +120,7 @@ class Setting(Page):
                 self.icon=icon
 
                 self._init_wid()
-                bus.bind(self)
+                events.lang.changed.connect(self.langing)
 
             def _init_wid(self):
                 self.layout = QVBoxLayout(self)
@@ -392,13 +392,15 @@ class Setting(Page):
                     self.error = error     # 非空则是错误态：只显示原因
                     self.folder = folder   # 外面选好的目录（绝对路径）
                     self.java = javaManager.resolve(os.path.join(folder, "bin", "java.exe"))
+                    self._light = bool(events.settings.get("theme"))
                     # 遮罩与居中由叠加浮层统一提供，本页自身即弹窗面板
                     self.setAttribute(Qt.WA_StyledBackground, True)
-                    self.setProperty("wid", "color2")
+                    self.setProperty("wid", "panel-alt")
                     self.init_wid()
                     self.langing()
                     self.lighting(bool(events.settings.get("theme")))
-                    bus.bind(self)
+                    events.theme.changed.connect(self.lighting)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.setFixedSize(360, 160)
@@ -423,7 +425,7 @@ class Setting(Page):
 
                     self.btn_close = QPushButton()
                     self.btn_close.setFixedSize(24, 24)
-                    self.btn_close.setProperty("wid", "tbtn")
+                    self.btn_close.setProperty("wid", "btn-tool")
                     self.btn_close.clicked.connect(lambda: self._close())
                     self.top_layout.addWidget(self.btn_close, 0)
 
@@ -452,7 +454,8 @@ class Setting(Page):
                     # 提示行：识别出来的版本
                     self.msg = QLabel()
                     self.msg.setProperty("wid", "text")
-                    self.msg.setStyleSheet("font-size: 13px; color: #f0b731;")
+                    self.msg.setStyleSheet("font-size: 13px; color: %s;"
+                                           % palette.get("brand", self._light))
                     self.msg.setWordWrap(True)
                     self.msg.setAlignment(Qt.AlignTop | Qt.AlignLeft)
                     self.body_layout.addWidget(self.msg, 0)
@@ -465,7 +468,7 @@ class Setting(Page):
                     self.btn_ok = QPushButton()
                     self.btn_ok.setProperty("wid", "btn")
                     self.btn_ok.setFixedSize(80, 30)
-                    self.btn_ok.setStyleSheet("background-color: #f0b731; border: none;")
+                    self.btn_ok.setStyleSheet(primary_btn_style(self._light, True))
                     self.btn_ok.clicked.connect(lambda: self._close() if self.error else self._on_ok())
                     self.bottom.addWidget(self.btn_ok, 0)
                     self.body_layout.addLayout(self.bottom)
@@ -478,15 +481,18 @@ class Setting(Page):
                     self.btn_close.setToolTip(events.lang.get("core.wid.top.close"))
                     if self.error is not None:
                         # 错误态：目录不可用，提示行只说原因
-                        self.msg.setStyleSheet("font-size: 13px; color: #e06c6c;")
+                        self.msg.setStyleSheet("font-size: 13px; color: %s;"
+                                               % palette.get("danger", self._light))
                         self.msg.setText(self.error)
                         return
-                    self.msg.setStyleSheet("font-size: 13px; color: #f0b731;")
+                    self.msg.setStyleSheet("font-size: 13px; color: %s;"
+                                           % palette.get("brand", self._light))
                     self.msg.setText(t(events.lang.get("core.wid.pages.setting.launcher.java.add.ok"),
                                        javaManager.getJavaVersion(self.java)))
 
                 def lighting(self, light: bool):
-                    color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                    self._light = bool(light)
+                    color = theme_icon(light)
                     self.btn_close.setIcon(QIcon(change_color(getPath(TBT_CLOSE), color).pixmap(24, 24)))
 
                 # ---------- 确定：把认出的 java.exe 交给外面记进候选表 ----------
@@ -519,7 +525,7 @@ class Setting(Page):
                     return
                 self._t3_add_light = light
                 self._t3_add.setIcon(change_color(getPath(FILE_FOLDER),
-                                                  QColor(22,22,22) if light else QColor(255,255,255)))
+                                                  theme_icon(light, strong=True)))
 
             def langing(self):
                 super().langing()

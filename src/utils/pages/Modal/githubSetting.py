@@ -43,14 +43,13 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton,
 
 from shiboken6 import isValid
 
-from src.utils.bus import bus
 from src.utils.events import events
 from src.utils.options.scrolls import Scroll
 from src.utils.path_utils import getPath
 from src.utils.qthtimer import QThTimer
 from src.utils.registry import Box, registry
 from src.utils.resources import ACT_TIPS, TBT_CLOSE
-from src.utils.utils import change_color
+from src.utils.utils import change_color, theme_icon
 
 
 def sync_rate_from_api():
@@ -108,7 +107,7 @@ class GithubSetting(QWidget):
     def init_ui(self):
         # 遮罩与居中由所属叠加浮层（FloatingOverlay）统一提供，本页仅承载 Panel
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid_", "_window.github")
+        self.setProperty("wid_", "dialog-github")
 
     def init_wid(self):
         self.l = QHBoxLayout(self)
@@ -212,14 +211,14 @@ class GithubSetting(QWidget):
                     super().__init__()
                     self.parent = parent
                     self.init_ui()
-                    bus.bind(self)
+                    events.theme.changed.connect(self.lighting)
 
                 def init_ui(self):
                     self.setFixedSize(30, 30)
-                    self.setProperty("wid", "tbtn")
+                    self.setProperty("wid", "btn-tool")
 
                 def lighting(self, light: bool):
-                    color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                    color = theme_icon(light)
                     logo = change_color(getPath(TBT_CLOSE),color)
                     icon = QIcon(logo.pixmap(30,30))
 
@@ -246,21 +245,13 @@ class GithubSetting(QWidget):
                     self._authing = False
                     self.init_wid()
                     self.langing()
-                    bus.bind(self)
-
-                def init_wid(self):
-                    self.layout = self.scroll_layout
-
-                    self.l1w = QWidget()
-                    self.l1w.setFixedHeight(84)
-                    self.layout.addWidget(self.l1w,0)
-
+                    events.lang.changed.connect(self.langing)
                     self.l1 =QHBoxLayout(self.l1w)
                     self.l1.setContentsMargins(0, 0, 0, 0)
                     self.l1.setSpacing(0)
 
                     self.headIcon = QLabel()
-                    self.headIcon.setProperty("wid","png")
+                    self.headIcon.setProperty("wid","image")
                     self.headIcon.setFixedSize(84,84)
                     self.headIcon.setStyleSheet("border-radius:42px;")
                     self.l1.addWidget(self.headIcon,0)

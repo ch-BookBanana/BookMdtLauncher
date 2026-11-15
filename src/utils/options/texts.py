@@ -25,7 +25,7 @@ class Title(QWidget):
         self.parent = parent
         self.text_ = text
         self.init_wid()
-        bus.bind(self)
+        events.lang.changed.connect(self.langing)
 
     def init_wid(self):
         self.setFixedHeight(40)

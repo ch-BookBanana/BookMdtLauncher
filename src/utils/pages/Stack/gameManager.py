@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizePolicy, QStackedWidget,
                                QVBoxLayout, QWidget)
 
-from src.utils.bus import bus
 from src.utils.events import events
 from src.utils.flowLayout import FlowLayout
 from src.utils.jarImport import upstream_version, version_text
@@ -48,7 +47,7 @@ from src.utils.options.scrolls import Scroll
 from src.utils.path_utils import getPath
 from src.utils.registry import Box, registry
 from src.utils.resources import FILE_FOLDER, TBT_CLOSE
-from src.utils.utils import change_color, openFolder, primary_btn_style, t
+from src.utils.utils import change_color, openFolder, primary_btn_style, t, theme_icon
 from ..Modal.exportInstance import ExportInstance
 
 # 条目 key → 那一项的界面参数（原先写在登记里，现在归本文件自己拿）
@@ -290,7 +289,8 @@ class GameSettings(Scroll):
             self.init_wid()
             self.langing()      # 总线只在切换时广播，首次文案得自己填
             self.lighting(bool(events.settings["theme"]))
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
+            events.lang.changed.connect(self.langing)
 
         def init_wid(self):
             self.row = QHBoxLayout(self)
@@ -326,7 +326,7 @@ class GameSettings(Scroll):
                 return
             self.light = light
             self.icon = change_color(getPath(FILE_FOLDER),
-                                     QColor(22, 22, 22) if light else QColor(255, 255, 255))
+                                     theme_icon(light, strong=True))
             for button in self.buttons:
                 button.setIcon(self.icon)
 
@@ -344,7 +344,8 @@ class GameSettings(Scroll):
             self.init_ui()
             self.init_wid()
             self.langing()      # 初次文案：总线只在切语言时回调，不会补这一次
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
+            events.lang.changed.connect(self.langing)
 
         @property
         def game(self):
@@ -376,7 +377,7 @@ class GameSettings(Scroll):
             self.layout.addLayout(self.l1)
 
             self.icon = QLabel()
-            self.icon.setProperty("wid", "png")
+            self.icon.setProperty("wid", "image")
             self.icon.setFixedSize(80, 80)
             self.icon.setScaledContents(True)
             self.l1.addWidget(self.icon, 0)
@@ -545,7 +546,8 @@ class GameSettings(Scroll):
                 self.init_wid()
                 self.langing()
                 self.lighting(bool(events.settings.get("theme")))
-                bus.bind(self)
+                events.theme.changed.connect(self.lighting)
+                events.lang.changed.connect(self.langing)
 
             def init_wid(self):
                 self.setFixedSize(self.WIDTH, self.HEIGHT)
@@ -569,7 +571,7 @@ class GameSettings(Scroll):
 
                 self.btn_close = QPushButton()
                 self.btn_close.setFixedSize(24, 24)
-                self.btn_close.setProperty("wid", "tbtn")
+                self.btn_close.setProperty("wid", "btn-tool")
                 self.btn_close.clicked.connect(self._close)
                 self.top_l.addWidget(self.btn_close, 0)
 
@@ -610,7 +612,7 @@ class GameSettings(Scroll):
 
             def lighting(self, light):
                 # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
-                color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                color = theme_icon(light)
                 icon = change_color(TBT_CLOSE, color)
                 self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
                 # 禁用灰是按主题取的；切主题时按钮已存在就按当前可用态重刷一遍
@@ -763,7 +765,7 @@ class GameSettings(Scroll):
                 layout.addSpacing(10)
 
                 self.box = QWidget()
-                self.box.setProperty("wid", "color2")
+                self.box.setProperty("wid", "panel-alt")
                 self.box.setAttribute(Qt.WA_StyledBackground, True)
                 self.scroll = Scroll(self, content=self.box,
                                      margins=(10, 5, 10, 5))

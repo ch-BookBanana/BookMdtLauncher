@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QVBoxLayout, QWidget)
 
 from ... import javaDownload
-from src.utils.bus import bus
 from src.utils.events import events
 from src.utils.options.scrolls import Scroll
 from src.utils.QDownloader import QDownloader
@@ -57,7 +56,7 @@ class DlListPage(QWidget):
         self._last_java_paused = None   # 检测循环上次看到的 Java 暂停状态（变化时记日志）
         self.init_ui()
         self.langing()
-        bus.bind(self)
+        events.lang.changed.connect(self.langing)
         # 初始化时立即扫描一次，随后周期刷新
         self._timer = QThTimer.taskP(1000, self._snapshot_tasks, result_callback=self._render_items)
         QThTimer.task(0, self._snapshot_tasks, result_callback=self._render_items)
@@ -75,7 +74,7 @@ class DlListPage(QWidget):
 
     def init_ui(self):
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid", "color2")
+        self.setProperty("wid", "panel-alt")
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
@@ -278,7 +277,7 @@ class DlListPage(QWidget):
 
         def init_ui(self):
             self.setAttribute(Qt.WA_StyledBackground, True)
-            self.setProperty("wid", "color2")
+            self.setProperty("wid", "panel-alt")
             self.setStyleSheet("border-radius: 8px;")
             layout = QVBoxLayout(self)
             layout.setContentsMargins(12, 8, 12, 8)

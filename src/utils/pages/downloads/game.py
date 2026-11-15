@@ -34,7 +34,6 @@ from ...qthtimer import QThTimer
 from ...options.scrolls import Scroll
 from ...path_utils import getPath
 from ...utils import _apply_md_image, change_color, md_to_html, t
-from ...bus import bus
 from ...resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                           FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                           NAV_LINK, NAV_MENU, TBT_CLOSE)
@@ -141,13 +140,15 @@ class Game(QWidget):
                 self.colorable = color
                 self.init_ui()
                 self.init_wid()
-                bus.bind(self)
+                events.theme.changed.connect(self.lighting)
+                self.lighting(events.theme.light)
+                events.lang.changed.connect(self.langing)
 
             def init_ui(self):
                 self.setFixedHeight(30)
                 self.setMinimumWidth(100)
                 self.setAttribute(Qt.WA_StyledBackground, False)
-                self.setProperty("wid", "lbtn")
+                self.setProperty("wid", "btn-text")
                 self.setCheckable(True)
 
             def init_wid(self):
@@ -164,7 +165,7 @@ class Game(QWidget):
 
                 self.text = QLabel()
                 self.text.setAttribute(Qt.WA_StyledBackground, False)
-                self.text.setProperty("wid", "lbtn")
+                self.text.setProperty("wid", "btn-text")
                 self.langing()
                 self.layout.addWidget(self.text)
 

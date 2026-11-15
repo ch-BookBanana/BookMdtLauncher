@@ -1,8 +1,25 @@
+/* 调色板：Python 侧取色用（图标 / 自绘 / 状态文字）。规则里的颜色仍是字面量，
+   改色时两边一起看；规范见 src/utils/palette.py。 */
+/*<colors>
+brand:      #f0b731
+panel:      rgb(55, 55, 55)
+panel_alt:  rgb(43, 43, 43)
+text:       rgb(255, 255, 255)
+text_dim:   rgb(175, 175, 175)
+line:       rgb(134, 134, 134)
+danger:     #e06c6c
+warn:       #d8b64a
+ok:         #4a9a4a
+icon:       #c8c8c8
+icon_strong:#ffffff
+scrim:      #78000000
+</colors>*/
+
 * {outline: none;}
 QWidget {
     background: rgb(43, 43, 43);
 }
-QWidget[wid="color2"] {
+QWidget[wid="panel-alt"] {
     background: rgb(55, 55, 55);
 }
 /* 纯布局容器：不画自己的底，露出宿主面板。
@@ -32,12 +49,12 @@ QLabel[wid="title"] {
     border: none;
     color: rgb(175, 175, 175);
 }
-QLabel[wid="lbtn"] {
+QLabel[wid="btn-text"] {
     background: transparent;
     border: none;
     color: rgb(175, 175, 175);
 }
-QLabel[wid="png"] {
+QLabel[wid="image"] {
     background: rgb(43, 43, 43);
     border: 3px solid #525252;;
 }
@@ -71,27 +88,27 @@ QPushButton[wid="btn"]:disabled{
     color:#888;
     background:rgba(0, 0, 0, 0.171);
 }
-QPushButton[wid="lbtn"] {
+QPushButton[wid="btn-text"] {
     background: transparent;
     border: none;
 }
-QPushButton[wid="lbtn"]:hover {
+QPushButton[wid="btn-text"]:hover {
     background: rgba(124, 124, 124, 0.2);
     border: none;
 }
-QPushButton[wid="lbtn"]:checked {
+QPushButton[wid="btn-text"]:checked {
     background: rgba(124, 124, 124, 0.5);
     border: none;
 }
-QPushButton[wid="tbtn"] {
+QPushButton[wid="btn-tool"] {
     background: transparent;
     border: none;
 }
-QPushButton[wid="tbtn"]:hover {
+QPushButton[wid="btn-tool"]:hover {
     background: rgba(124, 124, 124, 0.2);
     border: none;
 }
-QPushButton[wid="tbtn"]:checked {
+QPushButton[wid="btn-tool"]:checked {
     background: rgba(124, 124, 124, 0.5);
     border: none;
 }
@@ -126,7 +143,7 @@ QLabel[wid="badge"] {
     font-size: 11px;
     padding: 2px 8px;
 }
-QPushButton[wid="check"] {
+QPushButton[wid="btn-check"] {
     background: transparent;
     border: none;
 }
@@ -140,7 +157,7 @@ QMenu::item {
 QMenu::item:selected {
     background: rgba(255, 255, 255, 0.275);
 }
-QStackedWidget[wid="widget"] {
+QStackedWidget[wid="stack"] {
     background: rgb(43, 43, 43);
 }
 QToolTip { 
@@ -149,11 +166,11 @@ QToolTip {
     border: 1px solid rgb(142, 142, 142);
     border-radius: 1px;
 }
-QSlider::groove:horizontal[wid="mdt"] {
+QSlider::groove:horizontal[wid="slider"] {
     background: transparent;
     border: 3px solid gray;
 }
-QSlider::handle:horizontal[wid="mdt"] {
+QSlider::handle:horizontal[wid="slider"] {
     background: gray;
     width: 20px;
 }

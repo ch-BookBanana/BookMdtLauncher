@@ -20,7 +20,6 @@ from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 
 from src.utils.events import events
-from src.utils.bus import bus
 from src.utils.utils import change_color
 from src.utils.resources import (NAV_BACK, TBT_CLOSE)
 
@@ -151,10 +150,11 @@ class FloatingStack(QWidget):
                 self.tip_key_ = tip_key
                 self.setFixedSize(30,30)
                 self.setAttribute(Qt.WA_StyledBackground, False)
-                self.setProperty("wid","tbtn")
+                self.setProperty("wid","btn-tool")
                 self.langing()
                 self.lighting(events.settings["theme"])
-                bus.bind(self)
+                events.theme.changed.connect(self.lighting)
+                events.lang.changed.connect(self.langing)
                 if callback is not None:
                     self.clicked.connect(lambda: callback())
 

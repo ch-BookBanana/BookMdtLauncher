@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""注册 DSL —— 所有登记只有一个出口：`registrar("命名空间")` / `register("命名空间")`。
+"""注册 DSL —— 声明/装饰器用 `registrar(...)`；运行期读写用 `register(...)`。
 
     from BMLCore import BMLPlugin, registrar, register
 
@@ -280,8 +280,9 @@ class Scope:
     def emit(self, *args):
         return self._run_mark("emit", None, {"args": args})
 
-    def connect(self, callback=None):
-        return self._run_mark("connect", None, {"callback": callback})
+    def connect(self, callback=None, silent=False):
+        return self._run_mark("connect", None,
+                              {"callback": callback, "silent": silent})
 
     # ── 运行期 / 标记 ──
 
@@ -331,6 +332,9 @@ class Scope:
 
     def _exec(self, verb, name, fields, fn):
         actor = self._actor()
+        # 「条目.成员」：core/lang.changed / settings&…&sel.value_changed
+        if verb == "connect" and "." in self.path:
+            return self._member_signal(fields, fn, actor)
         if self.name == "settings":
             return self._settings(verb, name, fields, actor, fn)
         if self.name == "signals":
@@ -338,6 +342,21 @@ class Scope:
         if self.name == "tools":
             return self._tools(verb, name, fields, actor, fn)
         return self._registry(verb, name, fields, fn, actor)
+
+    def _member_signal(self, fields, fn, actor):
+        """连一个条目成员上的信号：`core/lang.changed`、`settings&…&sel.value_changed`。"""
+        from .btypes import _connect_silent, _resolve_dsl
+
+        base, _, member = self.path.rpartition(".")
+        entry, _name = _resolve_dsl(base)
+        target = getattr(entry, member)
+        cb = fields.get("callback")
+        if cb is None and fn is not None:
+            cb = getattr(self.plugin, fn.__name__) if self.plugin is not None \
+                else getattr(fn, "__func__", fn)
+        if cb is None:
+            raise ValueError("connect 需要一个回调")
+        return _connect_silent(target, cb, bool(fields.get("silent")), actor)
 
     def _settings(self, verb, name, fields, actor, fn=None):
         chain = self._chain(actor)
@@ -511,6 +530,20 @@ class Scope:
                     else getattr(fn, "__func__", fn)
             if cb is None:
                 raise ValueError("connect 需要一个回调")
+            if fields.get("silent"):
+                from .btypes import _connect_silent
+
+                class _Target:
+                    def connect(self, callback):
+                        events.on(bus, callback, owner=actor)
+
+                    def disconnect(self, callback):
+                        try:
+                            events.off(bus, callback)
+                        except Exception:
+                            pass
+
+                return _connect_silent(_Target(), cb, True)
             events.on(bus, cb, owner=actor)
             return cb
         if verb == "update":

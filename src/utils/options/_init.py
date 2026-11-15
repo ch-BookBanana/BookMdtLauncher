@@ -25,5 +25,4 @@ from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QPushButto
 
 from ..path_utils import getPath
 
-from ..bus import bus
-from ..utils import change_color
+from ..utils import change_color, theme_icon

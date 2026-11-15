@@ -31,15 +31,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import json
 import os
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 
-from .bus import bus
 from .path_utils import getPath
 
 
-class Langer:
+class Langer(QObject):
+    # 语言表换过一份之后发一次（排进事件循环，等界面/样式都就位）。
+    # 参数是新的语言代码（zh-CN / en-US …）；订阅方：register("core/lang").changed
+    changed = Signal(str)
+
     def __init__(self, *, settings=None, logger=None, winreg=None,
                  overrides=None, revision=None, default_lang="en-US"):
+        super().__init__()
         self._settings = settings
         self._logger = logger
         self._winreg = winreg
@@ -153,8 +157,15 @@ class Langer:
             self._log("warning", f"Failed to load default language file {default_lang_path}: {e}")
             self.default_langs = {}
 
-        QTimer.singleShot(0, bus.set_lang)
+        QTimer.singleShot(0, self._broadcast)
         self._log("info", self.get("core.init.load"))
+
+    def _broadcast(self):
+        """新语言表就位之后广播一次（订阅者这时读到的已经是新表）。"""
+        try:
+            self.changed.emit(str(self.current_lang))
+        except Exception:
+            pass
 
     def get(self, key):
         """

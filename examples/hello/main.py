@@ -32,8 +32,8 @@ class Hello(BMLPlugin):
         parts = me.add("parts", type="core/point", entry="core/value")
         parts.add("greeting").set("你好")
 
-        bus = me.add("signals", type="core/point", entry="core/signal")
-        bus.add("welcome").connect(self._on_welcome)
+        signals = me.add("signals", type="core/point", entry="core/signal")
+        signals.add("welcome").connect(self._on_welcome)
 
         self.host_log.info("greeting = %s" % me.get("parts").get("greeting").get())
         self.host_log.info("宿主主题 = %s" % self.host_conf.get("theme"))

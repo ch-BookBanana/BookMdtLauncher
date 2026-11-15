@@ -19,14 +19,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 为什么建议直接用它们
 --------------------
 插件当然可以自己写 QWidget，但主题切换（lighting）与语言热切换（langing）
-是靠这两个钩子挂在总线上的，自己写就得手动补；用这里的控件就自动有了，
-而且外观、间距、配色跟内置页面保持一致。
+是靠主题 / 语言服务的 changed 信号接的，自己写就得手动订阅；用这里的控件
+就自动有了，而且外观、间距、配色跟内置页面保持一致。
 
 控件构造签名（各不一样，按类看）
 --------------------------------
     Bool / Combo / Slider / Title / Line   (parent, text=None)
         这几个是标准的「设置项」控件：`self.add_setting(name, cls, title=…)`
-        会把 (parent, 语言键) 拼好传进来，主题与语言由控件自己跟总线。
+        会把 (parent, 语言键) 拼好传进来，主题与语言由控件自己跟服务信号。
 
     值型控件（Bool / Combo / Slider）实现同一套接口：value() / set_value(v) /
     refresh()，外加 push 信号。所以「控件 ↔ 存储」这条线不认具体类：

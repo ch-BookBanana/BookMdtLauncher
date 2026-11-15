@@ -32,13 +32,13 @@ BML 原先只有「从 GitHub Releases 下载」一个入口：离线环境、�
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from shiboken6 import isValid
 
-from ...bus import bus
+from ... import palette
 from ...events import events
 from ...jarImport import (upstream_version, blank_info, inspect_package, suggest_name,
                           version_text)
@@ -46,7 +46,7 @@ from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
 from ...resources import TBT_CLOSE
-from ...utils import change_color, primary_btn_style, t
+from ...utils import change_color, primary_btn_style, t, theme_icon
 
 
 class ImportJar(QWidget):
@@ -62,17 +62,18 @@ class ImportJar(QWidget):
         self._busy = False
         self._closed = False
         # 浅色/深色：确定按钮的禁用灰度按主题取，先按当前设置落一个初值，
-        # 随后 lighting() 会把它校准（bus.bind 补主题时会立刻回调一次）
+        # 随后 lighting() 会把它校准（下面显式接主题信号时会立刻回调一次）
         self._light = bool(events.settings.get("theme"))
         # 遮罩与居中由叠加浮层统一提供，本页自身即弹窗面板
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid", "color2")
+        self.setProperty("wid", "panel-alt")
         self.init_wid()
         self.langing()
         self.lighting(bool(events.settings.get("theme")))
         self._refresh()
         # 总线补主题会立刻回调一次 lighting，所以必须放在控件建好之后
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     # ---------- 界面 ----------
 
@@ -102,7 +103,7 @@ class ImportJar(QWidget):
 
         self.btn_close = QPushButton()
         self.btn_close.setFixedSize(24, 24)
-        self.btn_close.setProperty("wid", "tbtn")
+        self.btn_close.setProperty("wid", "btn-tool")
         self.btn_close.clicked.connect(self._close)
         self.top_l.addWidget(self.btn_close, 0)
 
@@ -112,7 +113,7 @@ class ImportJar(QWidget):
         self.layout.addWidget(self.line, 0)
 
         self.body = QWidget()
-        self.body.setProperty("wid", "color2")
+        self.body.setProperty("wid", "panel-alt")
         self.layout.addWidget(self.body, 1)
         self.body_l = QVBoxLayout(self.body)
         self.body_l.setContentsMargins(15, 12, 15, 15)
@@ -189,7 +190,7 @@ class ImportJar(QWidget):
 
     def lighting(self, light):
         # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
-        color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+        color = theme_icon(light)
         icon = change_color(TBT_CLOSE, color)
         self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
         # 禁用态的中性灰按主题取不同的值，切主题后必须重算一遍；_refresh 顺带
@@ -284,7 +285,7 @@ class ImportJar(QWidget):
             msg = lang.get("core.wid.pages.importJar.reading")
         elif not info["ok"]:
             msg = lang.get("core.wid.pages.importJar.err." + str(info.get("error") or "notZip"))
-            style = "color: red;"
+            style = "color: %s;" % palette.get("danger", self._light)
         else:
             if info.get("kind") == "instance":
                 # 实例包报体积与条目数，不报版本号：用户此刻想知道的是「这个包
@@ -310,10 +311,16 @@ class ImportJar(QWidget):
                 error = mdtManager.check_name(text)
                 if error == "dot":
                     msg = lang.get("core.wid.pages.download.item.name.dot")
-                    style, border, name_bad = "color: red;", "border: 1px solid red;", True
+                    style, border, name_bad = (
+                        "color: %s;" % palette.get("danger", self._light),
+                        "border: 1px solid %s;" % palette.get("danger", self._light),
+                        True)
                 elif error:
                     msg = lang.get("core.wid.pages.download.item.name.illegal")
-                    style, border, name_bad = "color: red;", "border: 1px solid red;", True
+                    style, border, name_bad = (
+                        "color: %s;" % palette.get("danger", self._light),
+                        "border: 1px solid %s;" % palette.get("danger", self._light),
+                        True)
                 elif events.mdtManager.name_conflict(text):
                     # 撞名不拦：加后缀照样能导 —— 与下载页、改名页同一处理。
                     # 「将用某个名字」接在包信息后面，而不是整行替换掉：用户
@@ -322,7 +329,7 @@ class ImportJar(QWidget):
                     self._final_name = events.mdtManager.unique_name(text)
                     msg = msg + "  " + t(lang.get("core.wid.pages.download.item.name.willBe"),
                                          self._final_name)
-                    style = "color: #d8b64a;"
+                    style = "color: %s;" % palette.get("warn", self._light)
                     enabled = True
                 else:
                     self._final_name = text
@@ -382,7 +389,8 @@ class ImportJar(QWidget):
         if isinstance(result, Exception) or not result or not result[0]:
             code = "ioError" if isinstance(result, Exception) else (
                 result[1] if result else "ioError")
-            self.tip.setStyleSheet("font-size: 13px; color: red;")
+            self.tip.setStyleSheet("font-size: 13px; color: %s;"
+                                   % palette.get("danger", self._light))
             self.tip.setText(events.lang.get("core.wid.pages.importJar.failed") + "  "
                              + events.lang.get("core.wid.pages.importJar.err." + str(code)))
             # 名字仍然是合法的：留着确定可点，用户换块盘/腾出空间后能直接重试

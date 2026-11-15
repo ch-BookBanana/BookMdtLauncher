@@ -267,7 +267,7 @@ class BPoint(BType):
 
 
     point = ("core/value", "core/signal", "core/point",        # 接受的条目类型
-             "core/log", "core/lang", "core/settings", "core/setting")
+             "core/log", "core/lang", "core/theme", "core/settings", "core/setting")
     _entry_type = "core/value"                            # 默认条目类型
 
     def __init__(self, name=""):
@@ -501,26 +501,46 @@ class _SigHolder(QObject):
     changed = Signal(object)
 
 
+class _HolderTarget:
+    """BSignal 的底层连接口（给 _connect_silent 用，不暴露 holder）。"""
+
+    __slots__ = ("_holder",)
+
+    def __init__(self, holder):
+        self._holder = holder
+
+    def connect(self, callback):
+        self._holder.changed.connect(callback)
+
+    def disconnect(self, callback):
+        self._holder.changed.disconnect(callback)
+
+
 class BSignal(BType):
     """包一层 Qt Signal：emit / connect / disconnect。"""
 
     def __init__(self, name=""):
         super().__init__(name)
         self._holder = _SigHolder()
+        self._target = _HolderTarget(self._holder)
 
     def emit(self, *args):
         payload = args[0] if len(args) == 1 else (args if args else None)
         self._holder.changed.emit(payload)
 
-    def connect(self, callback):
-        self._holder.changed.connect(callback)
-        return callback
+    def connect(self, callback=None, silent=False):
+        if callback is None:
+            def deco(fn):
+                self.connect(fn, silent=silent)
+                return fn
+            return deco
+        return _connect_silent(self._target, callback, silent, _current_owner())
 
     def disconnect(self, callback=None):
         if callback is None:
             self._holder.changed.disconnect()
         else:
-            self._holder.changed.disconnect(callback)
+            _silent_disconnect(self._target, callback)
 
 
 class BEventSignal(BSignal):
@@ -620,11 +640,41 @@ class BLog(BType):
 
 
 class BLang(BType):
-    """包宿主翻译器：register().get("core/lang").get("main").get(键)。"""
+    """包宿主翻译器：register("core/lang").get(键) / .changed.connect(cb)。"""
 
-    def __init__(self, name="", tr=None):
+    init = {"changed": "core/signal"}
+
+    def __init__(self, name="", tr=None, source=None):
         super().__init__(name)
         self.tr = tr
+        self._source = None
+        self._linked = False
+        if source is not None:
+            self.source = source
+
+    @property
+    def source(self):
+        """宿主语言服务（带 changed 信号的那个）；绑上之后自动转发。"""
+        return self._source
+
+    @source.setter
+    def source(self, value):
+        self._source = value
+
+    @property
+    def changed(self):
+        self._link()
+        return self.init["changed"]
+
+    def _link(self):
+        """首次读 changed 才接线：条目字段是构造完才 setattr 上来的。"""
+        if self._linked or self._source is None:
+            return
+        try:
+            self._source.changed.connect(self.init["changed"].emit)
+            self._linked = True
+        except Exception:
+            pass
 
     def get(self, key, *args):
         if self.tr is None:
@@ -633,6 +683,60 @@ class BLang(BType):
             return self.tr(key, *args)
         except Exception:
             return key
+
+
+class BTheme(BType):
+    """包宿主主题服务：register("core/theme").get("brand") / .light / .changed。"""
+
+    init = {"changed": "core/signal"}
+
+    def __init__(self, name="", service=None):
+        super().__init__(name)
+        self._service = None
+        self._linked = False
+        if service is not None:
+            self.service = service
+
+    @property
+    def service(self):
+        return self._service
+
+    @service.setter
+    def service(self, value):
+        self._service = value
+
+    @property
+    def changed(self):
+        self._link()
+        return self.init["changed"]
+
+    def _link(self):
+        """首次读 changed 才接线：条目字段是构造完才 setattr 上来的。"""
+        if self._linked or self._service is None:
+            return
+        try:
+            self._service.name_changed.connect(self.init["changed"].emit)
+            self._linked = True
+        except Exception:
+            pass
+
+    @property
+    def theme_name(self):
+        return str(self._service.name) if self._service is not None else "dark"
+
+    @property
+    def light(self):
+        return bool(self._service.light) if self._service is not None else False
+
+    def get(self, name, light=None):
+        if self._service is None:
+            raise RuntimeError("core/theme 还没有绑定主题服务")
+        return self._service.get(name, light)
+
+    def names(self, light=None):
+        if self._service is None:
+            return ()
+        return self._service.names(light)
 
 
 class BSettings(BType):
@@ -704,6 +808,7 @@ BTypes._types.update({
     "core/value": BValue,
     "core/log": BLog,
     "core/lang": BLang,
+    "core/theme": BTheme,
     "core/settings": BSettings,
     "core/setting": BSettingPoint,
 })
@@ -740,6 +845,10 @@ def register(path=None):
     host = _OWNER_POINTS.get("core")
     if host is not None and host is not point and host.has(key):
         return host.get(key)
+    # `条目.成员`：core/lang.changed、core/theme.light
+    if "." in key:
+        base, _, member = key.rpartition(".")
+        return getattr(register(base), member)
     node = point
     for seg in key.split("/"):
         node = node.get(seg)
@@ -752,6 +861,9 @@ def unload(owner):
     自己点上的条目、以及自己作为子点被挂到别处的那一份，全部摘掉；
     core 的点永远留着。
     """
+    # 服务信号上的订阅（core/lang.changed 这类）：按 owner 静默摘掉
+    for _o, _target, _cb in [x for x in _SUBS if x[0] == owner]:
+        _silent_disconnect(_target, _cb)
     removed = []
     point = _OWNER_POINTS.get(owner)
     if point is not None:
@@ -782,8 +894,85 @@ def _unload_deep(point, owner, removed):
 _CHAIN_SPLIT = re.compile(r"[&]")
 
 
+def _silent_disconnect(target, callback):
+    """断开一个连接；目标或信号已经没了也不抛（卸载/销毁时常用）。"""
+    try:
+        target.disconnect(callback)
+    except Exception:
+        pass
+    _untrack(target, callback)
+
+
+_SUBS = []      # [(owner, target, callback)]：插件卸载时按 owner 静默摘掉
+
+
+def _track(owner, target, callback):
+    if owner:
+        _SUBS.append((owner, target, callback))
+
+
+def _untrack(target, callback):
+    for i, (_owner, t, cb) in enumerate(_SUBS):
+        if t is target and cb is callback:
+            del _SUBS[i]
+            return
+
+
+def _still_alive(obj):
+    """QObject 还能用吗（C++ 对象被删就 False）。"""
+    try:
+        from shiboken6 import isValid
+        return isValid(obj)
+    except Exception:
+        return True
+
+
+def _connect_silent(target, callback, silent=False, owner=None):
+    """连接信号，可选 silent / owner。
+
+    - silent=True：回调所属对象已被销毁 → 不连；连接后被销毁 → 自动摘掉、
+      不再回调、不抛；目标信号已经没了 → 连接失败也吞掉。
+    - owner：订阅记在这个名主下（插件 id / core），`unload(owner)` 时静默摘掉。
+
+    silent=False（默认）保持 Qt 的原行为，方便调试时看到真错误。
+    """
+    if not silent:
+        target.connect(callback)
+        _track(owner, target, callback)
+        return callback
+    obj = getattr(callback, "__self__", None)
+    if not isinstance(obj, QObject):
+        target.connect(callback)
+        _track(owner, target, callback)
+        return callback
+    if not _still_alive(obj):
+        return callback
+
+    def wrapped(*args, **kwargs):
+        if not _still_alive(obj):
+            _silent_disconnect(target, wrapped)
+            return None
+        return callback(*args, **kwargs)
+
+    def drop(*_args):
+        _silent_disconnect(target, wrapped)
+
+    try:
+        target.connect(wrapped)
+    except Exception:
+        return callback          # 目标已经没了：当作没连上
+    _track(owner, target, wrapped)
+    try:
+        obj.destroyed.connect(drop)
+    except Exception:
+        pass
+    return wrapped
+
+
 def _resolve_dsl(path):
-    """把 "a$b$c.x" 解析成 (条目实例, 属性名或 None)。"""
+    """把 "core/lang.changed" / "settings&java&sel.value_changed" 解析成
+    (条目成员, 名字)；`&` / `#` 是层级，最后一段里的 `.` 表示取成员（信号等）。
+    """
     text = str(path or "").strip().strip("/")
     if not text:
         raise ValueError("registrar(...) 需要一个路径")
@@ -803,6 +992,11 @@ def _resolve_dsl(path):
                 return getattr(entry, tail), head
             node = entry
             continue
+        # 最后一段的 `.成员`：core/lang.changed / settings&…&sel.value_changed
+        if "." in seg:
+            head, _, member = seg.rpartition(".")
+            base = node.get(head) if head else node
+            return getattr(base, member), head
         node = node.get(seg)
     return node, None
 
@@ -813,16 +1007,16 @@ class _Dsl:
     def __init__(self, path):
         self.path = str(path)
 
-    # 装饰器形态：不带回调返回装饰器；带回调直接订（仍返回回调）
-    def connect(self, callback=None):
+    # 装饰器形态：不带回调返回装饰器；带回调直接订
+    def connect(self, callback=None, silent=False):
         target, _name = _resolve_dsl(self.path)
+        owner = _current_owner()
         if callback is None:
             def deco(fn):
-                target.connect(fn)
+                _connect_silent(target, fn, silent, owner)
                 return fn
             return deco
-        target.connect(callback)
-        return callback
+        return _connect_silent(target, callback, silent, owner)
 
     def emit(self, *args):
         target, _name = _resolve_dsl(self.path)
@@ -836,7 +1030,7 @@ class _Dsl:
 
 
 def registrar(path):
-    """装饰器专用作用域；也支持 registrar("core/log").info(...) 这种直用。"""
+    """装饰器专用作用域；运行期读/写请走 register("路径")。"""
     return _Dsl(path)
 
 

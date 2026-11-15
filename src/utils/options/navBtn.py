@@ -27,12 +27,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton
 
-from ..bus import bus
 from ..events import events
-from ..utils import change_color
+from ..utils import change_color, theme_icon
 
 __all__ = ["NavBtn"]
 
@@ -56,12 +54,13 @@ class NavBtn(QPushButton):
         self.icon_ = icon
         self.init_ui()
         self.init_wid()
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     def init_ui(self):
         self.setFixedSize(self.WIDTH, self.HEIGHT)
         self.setAttribute(Qt.WA_StyledBackground, False)
-        self.setProperty("wid", "lbtn")
+        self.setProperty("wid", "btn-text")
         self.setCheckable(True)
 
     def init_wid(self):
@@ -79,7 +78,7 @@ class NavBtn(QPushButton):
         self.text = QLabel()
         self.text.setAttribute(Qt.WA_StyledBackground, False)
         self.text.setFixedSize(self.TEXT_BOX, self.HEIGHT)
-        self.text.setProperty("wid", "lbtn")
+        self.text.setProperty("wid", "btn-text")
         self.langing()
         self.layout.addWidget(self.text)
 
@@ -92,7 +91,7 @@ class NavBtn(QPushButton):
         """图标是白图，按主题改成深/浅色才看得见。"""
         if self.icon_ is None:
             return
-        color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+        color = theme_icon(light)
         pixmap = change_color(self.icon_, color).pixmap(self.ICON_BOX, self.ICON_BOX)
         if pixmap.isNull():
             events.logger.warning(f"Failed to load pixmap for {self.icon_}")

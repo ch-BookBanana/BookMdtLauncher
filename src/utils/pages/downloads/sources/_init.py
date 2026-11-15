@@ -22,7 +22,6 @@ from src.utils.path_utils import getPath
 from src.utils.utils import (_apply_md_image, change_color, md_to_html,
                              primary_btn_style, t)
 from src.utils.pages._init import open_overlay
-from src.utils.bus import bus
 from src.utils.resources import (ACT_EYE, ACT_EYE_OFF, ACT_TIPS, BTN_DOWNLOAD,
                                  FILE_GENERIC, ICON_MDT, ICON_MDTARC, ICON_MDTX,
                                  NAV_LINK, NAV_MENU, TBT_CLOSE)
@@ -79,7 +78,8 @@ class Template(QWidget):
         self._action_btns = []
         self.introReady.connect(self._on_intro_ready, Qt.QueuedConnection)
         self._init_wid()
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     def _init_wid(self):
         self.layout = QVBoxLayout(self)
@@ -110,7 +110,7 @@ class Template(QWidget):
         self.action_bar_layout.addStretch()
 
         self.main = QWidget()
-        self.main.setProperty("wid", "color2")
+        self.main.setProperty("wid", "panel-alt")
         self.main.setAttribute(Qt.WA_StyledBackground, True)
         self.scroll = Scroll(self, content=self.main, margins=(30, 20, 30, 20),
                              spacing=10, align=Qt.AlignTop | Qt.AlignHCenter)
@@ -391,11 +391,12 @@ class Template(QWidget):
             self.btnPix = [QPixmap(),QPixmap()]
             self.setAttribute(Qt.WA_StyledBackground, True)
 
-            self.setStyleSheet('QWidget[wid_="download.game.classs"]{border-radius:10px;}')
+            self.setStyleSheet('QWidget[wid_="game-card"]{border-radius:10px;}')
             self.setProperty("wid_","download.game.classs")
             self.setMaximumWidth(600)
             self.init_wid()
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
+            events.lang.changed.connect(self.langing)
 
         def sizeHint(self):
             h = super().sizeHint().height()
@@ -423,7 +424,7 @@ class Template(QWidget):
             self.topL.addWidget(self.label,0)
 
             self.label2 = QLabel()
-            self.label2.setProperty("wid","lbtn")
+            self.label2.setProperty("wid","btn-text")
             self.label2.setStyleSheet("font-size:14px;")
             self.topL.addWidget(self.label2,0)
 
@@ -431,7 +432,7 @@ class Template(QWidget):
 
             self.button = QPushButton()
             self.button.setFixedSize(40,40)
-            self.button.setProperty("wid","lbtn")
+            self.button.setProperty("wid","btn-text")
             self.button.setStyleSheet("border-radius:20px;")
             self.topL.addWidget(self.button)
 
@@ -655,7 +656,8 @@ class Template(QWidget):
                 self.setAttribute(Qt.WA_StyledBackground, True)
                 self.setObjectName("item")
                 self.init_wid()
-                bus.bind(self)
+                events.theme.changed.connect(self.lighting)
+                events.lang.changed.connect(self.langing)
 
             def set_data(self, data: dict, icon_pixmap=None):
                 self.data = data or {}
@@ -678,12 +680,13 @@ class Template(QWidget):
                     self._tooltip_key = tooltip_key
                     self._is_show = True   # 悬浮 Item 时是否显示该按钮
                     self.init_ui()
-                    bus.bind(self)
+                    events.theme.changed.connect(self.lighting)
+                    events.lang.changed.connect(self.langing)
 
                 def init_ui(self):
                     self.setFixedSize(20, 20)
-                    self.setProperty("wid", "lbtn")
-                    # 开启 QSS 背景，让 lbtn:hover 的悬停背景生效
+                    self.setProperty("wid", "btn-text")
+                    # 开启 QSS 背景，让 btn-text:hover 的悬停背景生效
                     self.setAttribute(Qt.WA_StyledBackground, True)
                     self.hide()
                     self.langing()
@@ -808,13 +811,14 @@ class Template(QWidget):
             self._dl_timer = None
             # 遮罩与居中由叠加浮层统一提供，本页自身即弹窗面板
             self.setAttribute(Qt.WA_StyledBackground, True)
-            self.setProperty("wid","color2")
+            self.setProperty("wid","panel-alt")
             self.init_wid()
             self.langing()
             self.lighting(bool(events.settings.get("theme")))
             self._init_name_input()
             self._start_validation()
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
+            events.lang.changed.connect(self.langing)
 
         def init_wid(self):
             self.setFixedSize(320, 190)
@@ -826,7 +830,7 @@ class Template(QWidget):
 
             # 关闭按钮行：release 标题 + ×（不再展示图标/发布时间）
             self.top = QWidget()
-            self.top.setProperty("wid", "color2")
+            self.top.setProperty("wid", "panel-alt")
             self.top.setFixedHeight(30)
             self.layout.addWidget(self.top, 0)
             self.top_layout = QHBoxLayout(self.top)
@@ -843,7 +847,7 @@ class Template(QWidget):
 
             self.btn_close = QPushButton()
             self.btn_close.setFixedSize(24, 24)
-            self.btn_close.setProperty("wid", "tbtn")
+            self.btn_close.setProperty("wid", "btn-tool")
             self.btn_close.clicked.connect(lambda: self._close())
             self.top_layout.addWidget(self.btn_close, 0)
 
@@ -855,7 +859,7 @@ class Template(QWidget):
 
             # 内容区：输入框 + 提示/确定行
             self.body = QWidget()
-            self.body.setProperty("wid", "color2")
+            self.body.setProperty("wid", "panel-alt")
             self.body.setStyleSheet("background: transparent")
             self.layout.addWidget(self.body, 1)
             self.body_layout = QVBoxLayout(self.body)
@@ -1123,7 +1127,8 @@ class Template(QWidget):
             self.init_wid()
             self.langing()
             self.lighting(bool(events.settings.get("theme")))
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
+            events.lang.changed.connect(self.langing)
 
         def init_wid(self):
             self.layout = QVBoxLayout(self)
@@ -1318,7 +1323,8 @@ class Template(QWidget):
                 self.init_wid()
                 self.langing()
                 self.lighting(bool(events.settings.get("theme")))
-                bus.bind(self)
+                events.theme.changed.connect(self.lighting)
+                events.lang.changed.connect(self.langing)
 
             def init_wid(self):
                 self.layout = QHBoxLayout(self)
@@ -1338,7 +1344,7 @@ class Template(QWidget):
 
                 self.btn_download = QPushButton(self)
                 self.btn_download.setFixedSize(18, 18)
-                self.btn_download.setProperty("wid", "lbtn")
+                self.btn_download.setProperty("wid", "btn-text")
                 self.btn_download.setAttribute(Qt.WA_StyledBackground, True)
                 # 目前不连接任何信号
                 self.layout.addWidget(self.btn_download, 0)

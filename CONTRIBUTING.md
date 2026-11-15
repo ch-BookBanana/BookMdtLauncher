@@ -25,7 +25,8 @@ BookMDTLauncher/
         ├── settings.py         # L0：设置 schema、读写、合并、变更通知
         ├── logger.py           # L0：日志（按时间戳留存，自动清理）
         ├── langer.py           # L0：语言服务（三级回退，支持插件语言包）
-        ├── bus.py              # L0：主题/语言变化广播，控件用 bus.bind(self) 接入
+        ├── theme.py            # L0：当前主题 + 调色板入口（core/theme）
+        ├── palette.py          # L0：从两份 qss 的 <colors> 块读色
         ├── resources.py        # L0：内置资源路径表
         ├── path_utils.py       # L0：多环境（开发 / PyInstaller / Nuitka）路径解析
         ├── utils.py            # L0：通用工具：翻译取用、图标改色、Markdown 渲染
@@ -141,6 +142,22 @@ python nuitka_bisect\scan_isa.py "<exe 路径>"
 - 首次编译较慢，后续构建复用缓存。构建产物 `main.build/`、`main.dist/`、`main.onefile-build/` 已加入 `.gitignore`。
 
 > `pyinstaller.cmd` 保留作备用。历史版本 `V10000.01` 曾因 Nuitka 打包故障临时切回 PyInstaller（产物约 51 MB，Nuitka 约 26 MB），自 `v10000.02` 起已恢复 Nuitka。
+
+## wid 命名
+
+qss 用动态属性 `wid` 选控件，取值统一为**小写 kebab-case 的语义角色**：
+
+`panel-alt` / `plain` / `line` / `shadow` / `title` / `text` / `btn` / `btn-text` /
+`btn-tool` / `btn-check` / `input` / `image` / `console` / `progress` / `badge` /
+`stack` / `slider`
+
+- 改一个值要同时改 qss 与 `setProperty("wid", …)`；值里只用小写字母、数字、连字符；
+- 按钮类走 `btn-*`（`btn-text` 是文字型/导航项，`btn-tool` 是标题栏图标钮），
+  容器类走 `panel*` / `plain`，别再写 `lbtn` / `tbtn` / `color2` 这种缩写；
+- `wid_` 是给内联 `setStyleSheet` 用的**作用域属性**：选择器写成
+  `QWidget[wid_="名字"]{…}`，这条样式只命中这个控件，不会顺着父级/自身的级联
+  染到子控件上（子控件没有这个属性）；主题 qss 只认 `wid`，所以它同时也不吃主题规则；
+- 新增角色前先找现成的变体；两份 qss 里的键集必须一致。
 
 ## 参与贡献
 

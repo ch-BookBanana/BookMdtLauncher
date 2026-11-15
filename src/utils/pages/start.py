@@ -28,7 +28,7 @@ from ..events import events
 from ..jarImport import version_text
 from ..mdtManager import mdtManager
 from ..options.scrolls import Scroll
-from ..utils import change_color, t
+from ..utils import change_color, t, theme_icon
 from ..resources import (ACT_EYE, ACT_EYE_OFF, BACKG_MAIN, BTN_SETTING,
                           BTN_START)
 from src.BMLCore import registrar
@@ -250,7 +250,7 @@ class Start(Page):
             self.icon = QLabel(self)
             self.icon.setFixedSize(120,120)
             self.icon.setScaledContents(True)
-            self.icon.setProperty("wid", "png")
+            self.icon.setProperty("wid", "image")
             self.layout.addWidget(self.icon, 0, Qt.AlignHCenter)
             self.layout.addSpacing(20)
 
@@ -366,7 +366,7 @@ class Start(Page):
                     self.have_game = True
                     self.init_wid()
                     self.langing()
-                    bus.bind(self)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -411,7 +411,7 @@ class Start(Page):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
-                    bus.bind(self)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -434,7 +434,7 @@ class Start(Page):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
-                    bus.bind(self)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -458,7 +458,7 @@ class Start(Page):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
-                    bus.bind(self)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -495,7 +495,7 @@ class Start(Page):
                     super().__init__(parent)
                     self.init_wid()
                     self.langing()
-                    bus.bind(self)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -532,7 +532,7 @@ class Start(Page):
             self.tags = _log_tag_colors(self.light)
             self.have_game = True     # 是否有可用实例：无实例时按钮层整层隐藏
             self.init_wid()
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
             # 切页时 QStackedWidget 会自己把目标页 show 出来，所以每次切页都要重压一次显隐
             self.stack.currentChanged.connect(self._sync_have_game)
 
@@ -603,7 +603,7 @@ class Start(Page):
             def __init__(self,parent=None):
                 super().__init__()
                 self.parent = parent
-                self.setProperty("wid","color2")
+                self.setProperty("wid","panel-alt")
                 self.index = self.parent.stack.addWidget(self)
 
             def showEvent(self,event):
@@ -617,7 +617,7 @@ class Start(Page):
                 self.init_wid()
                 self.langing()
                 self.setAttribute(Qt.WA_StyledBackground,False)
-                bus.bind(self)
+                events.lang.changed.connect(self.langing)
 
             def init_wid(self):
                 self.layout = QGridLayout(self)
@@ -711,7 +711,7 @@ class Start(Page):
                 self.layout.setSpacing(0)
 
                 self.box = QWidget()
-                self.box.setProperty("wid","color2")
+                self.box.setProperty("wid","panel-alt")
                 self.scroll = Scroll(self, content=self.box, margins=(10, 10, 10, 10),
                                      spacing=10, align=Qt.AlignTop | Qt.AlignHCenter)
                 self.box_l = self.scroll.scroll_layout
@@ -772,7 +772,8 @@ class Start(Page):
                     self.body.hide()
                     self.langing()
                     self.add_many(games)
-                    bus.bind(self)
+                    events.theme.changed.connect(self.lighting)
+                    events.lang.changed.connect(self.langing)
 
                 def init_wid(self):
                     self.layout = QVBoxLayout(self)
@@ -794,14 +795,14 @@ class Start(Page):
                     self.head_l.addWidget(self.title, 0)
 
                     self.count = QLabel()
-                    self.count.setProperty("wid","lbtn")
+                    self.count.setProperty("wid","btn-text")
                     self.count.setStyleSheet("font-size:14px;")
                     self.head_l.addWidget(self.count, 0)
                     self.head_l.addStretch(1)
 
                     self.fold_btn = QPushButton()
                     self.fold_btn.setFixedSize(40,40)
-                    self.fold_btn.setProperty("wid","lbtn")
+                    self.fold_btn.setProperty("wid","btn-text")
                     self.fold_btn.setStyleSheet("border-radius:20px;")
                     self.fold_btn.clicked.connect(self.toggle)
                     self.head_l.addWidget(self.fold_btn)
@@ -823,7 +824,7 @@ class Start(Page):
                 def lighting(self,light):
                     if self.light != light:
                         self.light = light
-                        color = QColor(25,25,25) if light else QColor(220,220,220)
+                        color = theme_icon(light, strong=True)
                         self.foldPix[1] = change_color(getPath(ACT_EYE), color)
                         self.foldPix[0] = change_color(getPath(ACT_EYE_OFF), color)
                     self._sync_fold_icon()
@@ -893,7 +894,7 @@ class Start(Page):
                         self._held = False
                         self.parent.body_l.addWidget(self)
                         self.setFixedHeight(40)
-                        self.setProperty("wid","lbtn")
+                        self.setProperty("wid","btn-text")
                         self.init_wid()
                         self.clicked.connect(lambda: _page().changeGame(self.game))
 
@@ -922,7 +923,7 @@ class Start(Page):
 
                         self.version = QLabel()
                         self.version.setStyleSheet("background:transparent;")
-                        self.version.setProperty("wid","lbtn")
+                        self.version.setProperty("wid","btn-text")
                         self.version.setFixedHeight(10)
                         self.textL.addWidget(self.version,0)
 
@@ -962,7 +963,7 @@ class Start(Page):
                 self.parent.consoles.append(self)
                 self.init_wid()
                 self.lighting(self.parent.light)
-                bus.bind(self)
+                events.theme.changed.connect(self.lighting)
 
             def init_wid(self):
                 self.layout = QVBoxLayout(self)

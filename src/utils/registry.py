@@ -875,12 +875,66 @@ class Registry:
         """深拷贝一份（改它不会影响注册表；__ 开头的内部键也一并给出）。"""
         return copy.deepcopy(self.data)
 
+    def __call__(self, point=None):
+        """调用形式：registry("core/pages") → 点视图；registry() 返回自身。"""
+        if point is None:
+            return self
+        return PointView(self, point)
+
+
+class PointView:
+    """点级调用形式：registry("core/pages").add(...)。
+
+    只做转发，不复制任何状态 —— 契约、覆盖栈、加载会话仍归 registry 本体。
+    """
+
+    __slots__ = ("_registry", "point")
+
+    def __init__(self, reg, point):
+        self._registry = reg
+        self.point = str(point)
+
+    def declare(self, **fields):
+        return self._registry.declare(self.point, **fields)
+
+    def add(self, key, **fields):
+        return self._registry.add(self.point, key, **fields)
+
+    def set(self, key, **fields):
+        return self._registry.set(self.point, key, **fields)
+
+    def update(self, key, **fields):
+        return self._registry.update(self.point, key, **fields)
+
+    def remove(self, key):
+        return self._registry.remove(self.point, key)
+
+    def get(self, key):
+        return self._registry.entry(self.point, key)
+
+    entry = get
+
+    def entries(self, **where):
+        return self._registry.entries(self.point, **where)
+
+    def contract(self):
+        return self._registry.contract(self.point)
+
+    def watch(self, callback):
+        return self._registry.watch(self.point, callback)
+
+    def provide(self, key, obj, **meta):
+        return self._registry.provide(self.point, key, obj, **meta)
+
+    def bind(self, key, **built):
+        return self._registry.bind(self.point, key, **built)
+
 
 def _path(owner, name):
     return f"{owner}/{name}"
 
 
-# 全局单例：与 src/utils/bus.py 的 bus、src/utils/events.py 的 events 同一风格
+# 全局单例：与 src/utils/events.py 的 events 同一风格
 registry = Registry()
 
 

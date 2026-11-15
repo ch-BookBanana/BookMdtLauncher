@@ -65,6 +65,7 @@ def _safe_fmt_exc(exc=None, limit=None):
 
 try:
     from src.utils.langer import Langer
+    from src.utils.theme import ThemeService
     from src.utils.logger import Logger
     from src.utils.path_utils import getPath
     from src.utils.pages._init import open_overlay
@@ -80,8 +81,7 @@ try:
     from src.utils.dropImport import (DropHint, disable_child_drops,
                                       drop_candidates, open_import,
                                       restore_child_drops)
-    from src.utils.utils import  change_color, t
-    from src.utils.bus import bus
+    from src.utils.utils import change_color, t, theme_icon
     from src.utils.events import events
     from src.utils.resources import (ACT_DL_LIST, BRAND_GITHUB, ICON_APP_DARK,
         ICON_APP_LIGHT, TBT_CLOSE, TBT_MAXIMIZE, TBT_MAXIMIZE2,TBT_MINIMIZE,
@@ -132,6 +132,8 @@ try:
                                  winreg=self.winreg, overrides=pluginLoader.plugin_langs,
                                  revision=pluginLoader.langs_revision)
             self.settings.set_tr(self.langer.get)
+            # 主题服务：当前深浅 + 调色板取值；登记到 core/theme 给插件用
+            self.theme = ThemeService(self.settings)
             self.settings.watch(self._on_settings_changed)
             javaManager.settings = self.settings
             javaDownload.set_tr_func(self.langer.get)
@@ -223,10 +225,12 @@ try:
             """
             from src.BMLCore import register
             root = register()          # 宿主自己的点（core）
-            # log / lang / settings：单实例，直接当条目登记
+            # log / lang / theme / settings：单实例，直接当条目登记
             try:
                 root.add("core/log", type="core/log", logger=self.logger)
-                root.add("core/lang", type="core/lang", tr=self.langer.get)
+                root.add("core/lang", type="core/lang", tr=self.langer.get,
+                         source=self.langer)
+                root.add("core/theme", type="core/theme", service=self.theme)
                 root.add("core/settings", type="core/settings", settings=self.settings)
             except Exception as e:
                 self.logger.warning(f"内置服务登记失败：{e}")
@@ -488,8 +492,9 @@ try:
                 font.setPointSize(8)
                 app.setFont(font)
 
-                # 广播主题变化：各控件的 lighting 已自行接在总线上
-                bus.set_theme(is_light)
+                # 广播主题变化：控件的 lighting 接在 ThemeService.changed 上；
+                # qss 已经刷完，此刻广播新主题（插件侧走 core/theme）
+                self.theme.set(is_light)
                 self.logger.info(t(self.langer.get("core.log.info.themeChange"), "light" if is_light else "dark"))
             finally:
                 # 完成：重新启用绘制（异常也保证恢复，避免窗口卡在不绘制状态）
@@ -882,7 +887,7 @@ try:
 
                         self.init_ui()
                         self.init_wid()
-                        bus.bind(self)
+                        events.theme.changed.connect(self.lighting)
 
                     def init_ui(self):
                         self.setFixedSize(180, 40)
@@ -1061,12 +1066,13 @@ try:
                             self.text_ = text
                             self.init_ui()
                             self.init_wid()
-                            bus.bind(self)
+                            events.theme.changed.connect(self.lighting)
+                            events.lang.changed.connect(self.langing)
 
                         def init_ui(self):
                             self.setFixedSize(180, 40)
                             self.setAttribute(Qt.WA_StyledBackground, False)
-                            self.setProperty("wid", "lbtn")
+                            self.setProperty("wid", "btn-text")
                             self.setCheckable(True)
 
                         def init_wid(self):
@@ -1077,20 +1083,20 @@ try:
                             self.logo = QLabel(self)
                             self.logo.setFixedSize(40, 40)
                             self.logo.setAttribute(Qt.WA_StyledBackground, False)
-                            self.logo.setProperty("wid", "lbtn")
+                            self.logo.setProperty("wid", "btn-text")
                             self.logo.setScaledContents(False)
                             self.layout.addWidget(self.logo)
 
                             self.text = QLabel(self)
                             self.text.setAttribute(Qt.WA_StyledBackground, False)
                             self.text.setFixedSize(140, 40)
-                            self.text.setProperty("wid", "lbtn")
+                            self.text.setProperty("wid", "btn-text")
                             self.langing()
                             self.layout.addWidget(self.text)
 
                         def lighting(self, light: bool):
                             if self.logo_ is not None:
-                                color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                                color = theme_icon(light)
                                 logo = change_color(self.logo_, color)
                                 pixmap = logo.pixmap(56,56)
 
@@ -1253,7 +1259,7 @@ try:
                             self.root = root
                             self._hover_pending = False
                             self.init_ui()
-                            bus.bind(self)
+                            events.theme.changed.connect(self.lighting)
                             self.clicked.connect(self.root.window.openGithubSetting)
                             self.root.githubAPI.refreshed.connect(self._update_tooltip)
                             self.root.githubAPI.authChanged.connect(self._update_tooltip)
@@ -1265,7 +1271,7 @@ try:
                             self.setStyleSheet("QPushButton {border-radius: 15px;}")
 
                         def lighting(self, light):
-                            self.setIcon(QIcon(change_color(getPath(BRAND_GITHUB),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
+                            self.setIcon(QIcon(change_color(getPath(BRAND_GITHUB),theme_icon(light, strong=True))))
                             self.setIconSize(QSize(28, 28))
 
                         def _update_tooltip(self):
@@ -1337,7 +1343,7 @@ try:
                             self.parent = parent
                             self.root = root
                             self.init_ui()
-                            bus.bind(self)
+                            events.theme.changed.connect(self.lighting)
                             self.shown = True
                             self.hide()
                             self._active_state = None
@@ -1399,7 +1405,7 @@ try:
                             self.setStyleSheet("QPushButton {border-radius: 15px;}")
 
                         def lighting(self, light):
-                            self.setIcon(QIcon(change_color(getPath(ACT_DL_LIST),QColor(255, 255, 255)if not light else QColor(0, 0, 0))))
+                            self.setIcon(QIcon(change_color(getPath(ACT_DL_LIST),theme_icon(light, strong=True))))
                             self.setIconSize(QSize(30,30))
 
                     class TriBtn(QPushButton):
@@ -1410,19 +1416,19 @@ try:
                             self.logo_ = logo
                             self.setLogo_ = 0
                             self.init_ui()
-                            bus.bind(self)
+                            events.theme.changed.connect(self.lighting)
 
                         def init_ui(self):
                             self.setFixedSize(30,30)
                             self.setAttribute(Qt.WA_StyledBackground, False)
-                            self.setProperty("wid", "tbtn")
+                            self.setProperty("wid", "btn-tool")
 
                         def setLogo(self, l):
                             self.setLogo_ = l
                             self.lighting(self.root.settings["theme"])
 
                         def lighting(self, light: bool):
-                            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+                            color = theme_icon(light)
                             logo = change_color(self.logo_[self.setLogo_], color)
                             pixmap = QIcon(logo.pixmap(48,48))
 
@@ -1630,7 +1636,6 @@ try:
                 self.theme = None
                 self.init_ui()
                 self.init_wid()
-                bus.bind(self)
                 self.activated.connect(self.on_tray_activated)
                 self.root.logger.info(self.root.langer.get("core.log.info.trayLoad"))
 

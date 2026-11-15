@@ -374,5 +374,5 @@ class EventBus(QObject):
             pass
 
 
-# 全局单例：与 src/utils/bus.py 的 bus、src/utils/registry.py 的 registry 同一风格
+# 全局单例：与 src/utils/registry.py 的 registry 同一风格
 events = EventBus()

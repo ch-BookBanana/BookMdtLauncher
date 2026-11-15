@@ -45,21 +45,21 @@ import os
 import threading
 
 from PySide6.QtCore import QStandardPaths, Qt
-from PySide6.QtGui import QColor, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
 from shiboken6 import isValid
 
-from ...bus import bus
+from ... import palette
 from ...events import events
 from ...instanceExport import export_instance
 from ...mdtManager import mdtManager
 from ...qthtimer import QThTimer
 from ...registry import registry
 from ...resources import TBT_CLOSE
-from ...utils import change_color, primary_btn_style, t
+from ...utils import change_color, primary_btn_style, t, theme_icon
 
 
 class ExportInstance(QWidget):
@@ -80,14 +80,15 @@ class ExportInstance(QWidget):
         self._cancel = threading.Event()
 
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid", "color2")
+        self.setProperty("wid", "panel-alt")
         self.init_wid()
         self.path.setText(self._default_dest())
         self.path.setToolTip(self.path.text())
         self.langing()
         self.lighting(bool(events.settings.get("theme")))
         self._refresh()
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     # ---------- 界面 ----------
 
@@ -116,7 +117,7 @@ class ExportInstance(QWidget):
 
         self.btn_close = QPushButton()
         self.btn_close.setFixedSize(24, 24)
-        self.btn_close.setProperty("wid", "tbtn")
+        self.btn_close.setProperty("wid", "btn-tool")
         self.btn_close.clicked.connect(self._close)
         self.top_l.addWidget(self.btn_close, 0)
 
@@ -126,7 +127,7 @@ class ExportInstance(QWidget):
         self.layout.addWidget(self.line, 0)
 
         self.body = QWidget()
-        self.body.setProperty("wid", "color2")
+        self.body.setProperty("wid", "panel-alt")
         self.layout.addWidget(self.body, 1)
         self.body_l = QVBoxLayout(self.body)
         self.body_l.setContentsMargins(15, 12, 15, 15)
@@ -215,7 +216,7 @@ class ExportInstance(QWidget):
         self._refresh()
 
     def lighting(self, light):
-        color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+        color = theme_icon(light)
         icon = change_color(TBT_CLOSE, color)
         self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
         # 禁用灰按主题取值，切主题后要重算；_refresh 在导出中/已完成时会自己早退
@@ -343,7 +344,8 @@ class ExportInstance(QWidget):
         if isinstance(result, Exception) or not result or not result[0]:
             code = "ioError" if isinstance(result, Exception) else (
                 result[1] if result else "ioError")
-            self.tip.setStyleSheet("font-size: 13px; color: red;")
+            self.tip.setStyleSheet("font-size: 13px; color: %s;"
+                                   % palette.get("danger", self._light))
             self.tip.setText(events.lang.get("core.wid.pages.exportInstance.failed") + "  "
                              + events.lang.get("core.wid.pages.exportInstance.err." + str(code)))
             # 路径还在：用户换块盘/腾出空间后可以直接重试
@@ -360,7 +362,8 @@ class ExportInstance(QWidget):
         self.btn_ok.setText(events.lang.get("core.text.done"))
         self.btn_ok.setEnabled(True)
         self.btn_ok.setStyleSheet(primary_btn_style(self._light, True))
-        self.tip.setStyleSheet("font-size: 13px; color: #4a9a4a;")
+        self.tip.setStyleSheet("font-size: 13px; color: %s;"
+                               % palette.get("ok", self._light))
         msg = t(events.lang.get("core.wid.pages.exportInstance.done"),
                 str(stats.get("files", 0)),
                 "%.1f" % (float(stats.get("zip_bytes", 0)) / 1048576.0))

@@ -1,8 +1,25 @@
+/* 调色板：Python 侧取色用（图标 / 自绘 / 状态文字）。规则里的颜色仍是字面量，
+   改色时两边一起看；规范见 src/utils/palette.py。 */
+/*<colors>
+brand:      #f0b731
+panel:      rgb(229, 228, 228)
+panel_alt:  rgb(245, 245, 245)
+text:       rgb(0, 0, 0)
+text_dim:   rgb(59, 59, 59)
+line:       rgb(189, 189, 189)
+danger:     #e06c6c
+warn:       #d8b64a
+ok:         #4a9a4a
+icon:       #787878
+icon_strong:#161616
+scrim:      #78000000
+</colors>*/
+
 * {outline: none;}
 QWidget {
     background: rgb(245, 245, 245);
 }
-QWidget[wid="color2"] {
+QWidget[wid="panel-alt"] {
     background: rgb(229, 228, 228);
 }
 /* 纯布局容器：不画自己的底，露出宿主面板（深色主题同一处理） */
@@ -29,12 +46,12 @@ QLabel[wid="title"] {
     border: none;
     color: rgb(59, 59, 59);
 }
-QLabel[wid="lbtn"] {
+QLabel[wid="btn-text"] {
     background: transparent;
     border: none;
     color: rgb(59, 59, 59);
 }
-QLabel[wid="png"] {
+QLabel[wid="image"] {
     background: rgb(245, 245, 245);;
     border: 3px solid #8f8f8f;
 }
@@ -68,27 +85,27 @@ QPushButton[wid="btn"]:disabled{
     color:#888;
     background:rgba(0, 0, 0, 0.171);
 }
-QPushButton[wid="lbtn"] {
+QPushButton[wid="btn-text"] {
     background: transparent;
     border: none;
 }
-QPushButton[wid="lbtn"]:hover {
+QPushButton[wid="btn-text"]:hover {
     background: rgba(124, 124, 124, 0.2);
     border: none;
 }
-QPushButton[wid="lbtn"]:checked {
+QPushButton[wid="btn-text"]:checked {
     background: rgba(124, 124, 124, 0.5);
     border: none;
 }
-QPushButton[wid="tbtn"] {
+QPushButton[wid="btn-tool"] {
     background: transparent;
     border: none;
 }
-QPushButton[wid="tbtn"]:hover {
+QPushButton[wid="btn-tool"]:hover {
     background: rgba(124, 124, 124, 0.2);
     border: none;
 }
-QPushButton[wid="tbtn"]:checked {
+QPushButton[wid="btn-tool"]:checked {
     background: rgba(124, 124, 124, 0.5);
     border: none;
 }
@@ -123,7 +140,7 @@ QLabel[wid="badge"] {
     font-size: 11px;
     padding: 2px 8px;
 }
-QPushButton[wid="check"] {
+QPushButton[wid="btn-check"] {
     background: transparent;
     border: none;
 }
@@ -137,7 +154,7 @@ QMenu::item {
 QMenu::item:selected {
     background: #d3d3d3;
 }
-QStackedWidget[wid="widget"] {
+QStackedWidget[wid="stack"] {
     background: rgb(245, 245, 245);
 }
 QToolTip { 
@@ -146,11 +163,11 @@ QToolTip {
     border: 1px solid rgb(117, 117, 117);
     border-radius: 1px;
 }
-QSlider::groove:horizontal[wid="mdt"] {
+QSlider::groove:horizontal[wid="slider"] {
     background: transparent;
     border: 3px solid gray;
 }
-QSlider::handle:horizontal[wid="mdt"] {
+QSlider::handle:horizontal[wid="slider"] {
     background: gray;
     width: 20px;
 }

@@ -73,3 +73,6 @@ class Hello(BMLPlugin):
 - 插件 API 正在从 v2 迁到 v3（万物皆 BType + 点体系）
 - 新写的插件请用 v3 写法（`register()` / `add()` / `generator(...)`）
 - v2 旧写法（`@registrar(...).add(...)`）仍能跑，属过渡期，文档里会标明
+- 主题 / 语言变化用 `@registrar("core/theme.changed").connect()` /
+  `@registrar("core/lang.changed").connect()` 订阅；取色用 `core/theme`
+  （角色名见[内置服务](一.插件基础/7.%20内置服务.md)）

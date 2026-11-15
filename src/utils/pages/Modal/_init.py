@@ -28,8 +28,10 @@ class FloatingOverlay(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid_", "_window.overlay")
-        self.setStyleSheet('QWidget[wid_="_window.overlay"]{background-color: rgba(0,0,0,0.5);}')
+        # wid_ 是内联样式的作用域标记：下面这条规则只命中这层遮罩，不会级联给
+        # 子控件；主题 qss 只认 wid，也不会套过来。
+        self.setProperty("wid_", "scrim")
+        self.setStyleSheet('QWidget[wid_="scrim"]{background-color: rgba(0,0,0,0.5);}')
         self._pages = []
         self.init_wid()
         self.hide()

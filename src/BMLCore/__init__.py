@@ -80,11 +80,23 @@ from ..utils.registry import registry, simple
 from . import btypes as _btypes  # noqa: E402
 
 
+import inspect
+
+
+def _is_method(fn):
+    """类体里的方法（首参 self/cls）——这类装饰器要等 apply(plugin) 再连。"""
+    try:
+        params = list(inspect.signature(fn).parameters)
+        return bool(params) and params[0] in ("self", "cls")
+    except (TypeError, ValueError):
+        return False
+
+
 class _DualScope:
     """registrar(path) 的作用域：先试 v3（装饰器语法），解析不到回退旧 v2。
 
-    v3：`@registrar("settings&a&b&c&value_changed").connect()`、
-        `registrar("core/log").info(…)`
+    v3：`@registrar("core/theme.changed").connect()`；
+        `register("core/log").info(…)`（运行期读/写走 register）
     v2（过渡）：`@registrar("core/pages").add(名字, title=…)` 是唯一动词；`new` 已删。
     """
 
@@ -94,18 +106,27 @@ class _DualScope:
     def _v3(self):
         return _btypes._resolve_dsl(self.path)
 
-    def connect(self, callback=None):
-        try:
-            target, _name = self._v3()
-        except Exception:
-            return _registrar_mod.registrar(self.path).connect(callback)
-        if callback is None:
-            def deco(fn):
-                target.connect(fn)
-                return fn
-            return deco
-        target.connect(callback)
-        return callback
+    def connect(self, callback=None, silent=False):
+        if callback is not None:
+            raise TypeError(
+                'registrar(...).connect() 只用于装饰器；运行期请用 '
+                'register("路径").connect(callback, silent=…)')
+        def deco(fn):
+            # 类体里的方法：类还没实例化，先挂标记，apply(plugin) 时再连
+            if _is_method(fn):
+                return _registrar_mod.Scope(self.path).connect(silent=silent)(fn)
+            try:
+                target, _name = self._v3()
+            except Exception:
+                return _registrar_mod.registrar(self.path).connect(
+                    fn, silent=silent)
+            _btypes._connect_silent(target, fn, silent, _btypes._current_owner())
+            return fn
+        return deco
+
+    def emit(self, *args):
+        raise TypeError(
+            'registrar(...).emit() 已收紧；运行期请用 register("路径").emit(...)')
 
     def emit(self, *args):
         try:
@@ -115,7 +136,13 @@ class _DualScope:
         target.emit(*args)
         return None
 
+    _RUNTIME_ONLY = {"get", "info", "debug", "warning", "error", "entry"}
+
     def __getattr__(self, item):
+        if item in self._RUNTIME_ONLY:
+            raise AttributeError(
+                'registrar(...) 只用于声明/装饰器；运行期请用 register("路径").'
+                + item + "()")
         try:
             target, _name = self._v3()
             return getattr(target, item)

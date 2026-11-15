@@ -33,7 +33,8 @@ class Bool(SettingItem, QWidget):
         self.introable = False
         self.tipsable = False
         self.init_wid()
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     def init_wid(self):
         self.setFixedHeight(40)
@@ -43,7 +44,7 @@ class Bool(SettingItem, QWidget):
         self.layout.setSpacing(5)
 
         self.btn = QPushButton()
-        self.btn.setProperty("wid","check")
+        self.btn.setProperty("wid","btn-check")
         self.btn.setFixedSize(20,20)
         self.btn.setCheckable(True)
         self.layout.addWidget(self.btn,0)
@@ -118,11 +119,11 @@ class Bool(SettingItem, QWidget):
         self.tips.setToolTip(events.lang.get(self.tips_))
 
     def lighting(self,light):
-        self.btnpix =[change_color(getPath(ACT_ON),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35)),change_color(getPath(ACT_OFF),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(35,35))]
+        self.btnpix =[change_color(getPath(ACT_ON),theme_icon(light, strong=True)).pixmap(QSize(35,35)),change_color(getPath(ACT_OFF),theme_icon(light, strong=True)).pixmap(QSize(35,35))]
         if self.introable:
-            self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.intro.setPixmap(change_color(getPath(ACT_INTRO),theme_icon(light, strong=True)).pixmap(QSize(20,20)))
         if self.tipsable:
-            self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.tips.setPixmap(change_color(getPath(ACT_TIPS),theme_icon(light, strong=True)).pixmap(QSize(20,20)))
 
 
 class Slider(SettingItem, QWidget):
@@ -137,7 +138,8 @@ class Slider(SettingItem, QWidget):
         self.introable = False
         self.tipsable = False
         self.init_wid()
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     def init_wid(self):
         class Slid(QSlider):
@@ -186,7 +188,7 @@ class Slider(SettingItem, QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(5)
         self.scroll = Slid(Qt.Horizontal)
-        self.scroll.setProperty("wid","mdt")
+        self.scroll.setProperty("wid","slider")
         self.scroll.setFixedHeight(30)
         self.layout.addWidget(self.scroll)
         self.scroll.valueChanged.connect(self.pushEvent)
@@ -236,9 +238,9 @@ class Slider(SettingItem, QWidget):
 
     def lighting(self,light):
         if self.introable:
-            self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.intro.setPixmap(change_color(getPath(ACT_INTRO),theme_icon(light, strong=True)).pixmap(QSize(20,20)))
         if self.tipsable:
-            self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.tips.setPixmap(change_color(getPath(ACT_TIPS),theme_icon(light, strong=True)).pixmap(QSize(20,20)))
 
     def langing(self):
         self.text.setText(events.lang.get(self.text_))
@@ -319,7 +321,8 @@ class Combo(SettingItem, QWidget):
         self.introable = False
         self.tipsable = False
         self.init_wid()
-        bus.bind(self)
+        events.theme.changed.connect(self.lighting)
+        events.lang.changed.connect(self.langing)
 
     def init_wid(self):
         self.setFixedHeight(40)
@@ -385,9 +388,9 @@ class Combo(SettingItem, QWidget):
 
     def lighting(self,light):
         if self.introable:
-            self.intro.setPixmap(change_color(getPath(ACT_INTRO),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.intro.setPixmap(change_color(getPath(ACT_INTRO),theme_icon(light, strong=True)).pixmap(QSize(20,20)))
         if self.tipsable:
-            self.tips.setPixmap(change_color(getPath(ACT_TIPS),QColor(0,0,0)if light else QColor(255,255,255)).pixmap(QSize(20,20)))
+            self.tips.setPixmap(change_color(getPath(ACT_TIPS),theme_icon(light, strong=True)).pixmap(QSize(20,20)))
 
     # ── 设置项接口（options/base.py）：值取 itemData，认不出再按文字找 ──
     def value(self):

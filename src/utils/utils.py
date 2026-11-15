@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import markdown
 import threading
 
+from . import palette
 from .mdtManager import mdtManager
 from .path_utils import getPath
 from .resources import (FILE_IMAGE)
@@ -45,6 +46,15 @@ def change_color(path, color: QColor):
     painter.fillRect(colored.rect(), color)
     painter.end()
     return QIcon(colored)
+
+
+def theme_icon(light, strong=False):
+    """图标随主题取色：次要图标是灰的（icon），主要图标近黑/白（icon_strong）。
+
+    值来自两份 qss 的 <colors> 块（见 palette）；控件里不再各写一份三元表达式。
+    """
+    return palette.qcolor("icon_strong" if strong else "icon", light)
+
 
 def pngSha(path):
     """计算png的sha256"""
@@ -77,7 +87,7 @@ def primary_btn_style(light, enabled):
     light 为该主题是否为浅色（与 lighting(light) 的入参同义）。
     """
     if enabled:
-        return "background-color: #f0b731; border: none;"
+        return "background-color: %s; border: none;" % palette.get("brand", light)
     return ("background-color: rgba(0, 0, 0, 24); border: none;"
             if light else "background-color: rgba(0, 0, 0, 60); border: none;")
 

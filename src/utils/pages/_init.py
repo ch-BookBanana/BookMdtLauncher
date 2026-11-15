@@ -17,7 +17,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from PySide6.QtWidgets import QWidget
 
-from ..bus import bus
 from ..events import events
 from src.BMLCore import registrar
 from ..registry import Box, registry

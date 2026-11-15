@@ -9,7 +9,7 @@
 |---|---|
 | [1. 目录与清单](1.%20目录与清单.md) | data.hjson 字段、`entry: main.类名`、依赖 |
 | [2. 类型系统](2.%20类型系统.md) | BType / BTypes / BPoint / BSignal / BValue、自定义类型 |
-| [3. 注册语法](3.%20注册语法.md) | `register()`、`add()`、`#&` 链、`registrar(...).connect()` |
+| [3. 注册语法](3.%20注册语法.md) | `register()`、`add()`、`#&` 链、`@registrar(...).connect()` |
 | [4. 生命周期](4.%20生命周期.md) | 构造、on_ready、on_close、加载会话 |
 | [5. 设置与存储](5.%20设置与存储.md) | settings 分桶、BSettings、默认值 |
 | [6. 信号与事件](6.%20信号与事件.md) | value_changed、BSignal、宿主信号 |

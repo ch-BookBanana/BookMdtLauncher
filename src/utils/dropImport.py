@@ -39,6 +39,8 @@ from PySide6.QtWidgets import (QAbstractSpinBox, QLineEdit, QPlainTextEdit,
                                QTextEdit, QWidget)
 from shiboken6 import isValid
 
+from . import palette
+
 # 能导入的后缀。拖进来一个 .txt 时不该亮「松开以导入」，所以先按后缀筛一道；
 # 后缀对但内容不对的（改名的压缩包、半截文件）由验包那一关拒收。
 DROP_SUFFIXES = (".jar", ".zip")
@@ -157,20 +159,20 @@ class DropHint(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 120))
+        p.fillRect(self.rect(), QColor(palette.get("scrim", self._light)))
 
         card = QRectF((self.width() - CARD_W) / 2.0,
                       (self.height() - CARD_H) / 2.0, CARD_W, CARD_H)
         # 虚线边框用品牌黄：和「确定」按钮同一个色，读起来就是「这里可以放」
-        p.setPen(QPen(QColor("#f0b731"), 1.5, Qt.DashLine))
-        p.setBrush(QColor("#373737" if not self._light else "#e5e4e4"))
+        p.setPen(QPen(QColor(palette.get("brand", self._light)), 1.5, Qt.DashLine))
+        p.setBrush(QColor(palette.get("panel", self._light)))
         p.drawRoundedRect(card, 12, 12)
 
         title_font = QFont(self.font())
         title_font.setPixelSize(16)
         title_font.setWeight(QFont.Weight.Medium)
         p.setFont(title_font)
-        p.setPen(QColor("#e8e8e8" if not self._light else "#2c2c2a"))
+        p.setPen(QColor(palette.get("text", self._light)))
         p.drawText(card.adjusted(0, 30, 0, 0), Qt.AlignHCenter | Qt.AlignTop,
                    self._title)
 
@@ -178,6 +180,6 @@ class DropHint(QWidget):
         desc_font.setPixelSize(12)
         desc_font.setWeight(QFont.Weight.Normal)
         p.setFont(desc_font)
-        p.setPen(QColor("#9a9a9a" if not self._light else "#5f5e5a"))
+        p.setPen(QColor(palette.get("text_dim", self._light)))
         p.drawText(card.adjusted(0, 62, 0, 0), Qt.AlignHCenter | Qt.AlignTop,
                    self._desc)

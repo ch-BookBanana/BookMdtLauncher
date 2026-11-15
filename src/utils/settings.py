@@ -566,17 +566,16 @@ class Settings(MutableMapping):
 
 
 from PySide6.QtCore import Qt                                     # noqa: E402
-from PySide6.QtGui import QColor, QIcon                            # noqa: E402
+from PySide6.QtGui import QIcon                                    # noqa: E402
 from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel,   # noqa: E402
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
-from .bus import bus                                               # noqa: E402
 from .events import events                                         # noqa: E402
 from .options.items import Bool                                    # noqa: E402
 from .options.scrolls import Scroll                                # noqa: E402
 from .registry import registry                                     # noqa: E402
 from .resources import TBT_CLOSE                                   # noqa: E402
-from .utils import change_color                                    # noqa: E402
+from .utils import change_color, theme_icon                        # noqa: E402
 
 CLOSE_CHOICES = (("tray", "core.wid.closeAsk.tray"),
                  ("quit", "core.wid.closeAsk.quit"))
@@ -598,7 +597,7 @@ class AskClose(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setProperty("wid_", "_window.closeAsk")
+        self.setProperty("wid_", "dialog-close-ask")
 
         self.l = QHBoxLayout(self)
         self.l.setContentsMargins(0, 0, 0, 0)
@@ -636,7 +635,8 @@ class AskClose(QWidget):
             self.init_wid()
             self.langing()
             self.lighting(bool(events.settings.get("theme")))
-            bus.bind(self)
+            events.theme.changed.connect(self.lighting)
+            events.lang.changed.connect(self.langing)
 
         def init_wid(self):
             self.setFixedSize(self.WIDTH, self.HEIGHT)
@@ -660,7 +660,7 @@ class AskClose(QWidget):
 
             self.btn_close = QPushButton()
             self.btn_close.setFixedSize(24, 24)
-            self.btn_close.setProperty("wid", "tbtn")
+            self.btn_close.setProperty("wid", "btn-tool")
             # × = 这次什么都不做（既没藏也没退），浮层自己收起来
             self.btn_close.clicked.connect(self.parent.close_)
             self.top_l.addWidget(self.btn_close, 0)
@@ -687,7 +687,7 @@ class AskClose(QWidget):
             self.body_l.addSpacing(10)
 
             self.box = QWidget()
-            self.box.setProperty("wid", "color2")
+            self.box.setProperty("wid", "panel-alt")
             self.box.setAttribute(Qt.WA_StyledBackground, True)
             self.scroll = Scroll(self, content=self.box, margins=(10, 5, 10, 5))
             self.body_l.addWidget(self.scroll, 1)
@@ -742,7 +742,7 @@ class AskClose(QWidget):
 
         def lighting(self, light):
             # 关闭按钮图标随主题取色（面板其余部分交给全局 qss）
-            color = QColor(120, 120, 120) if light else QColor(200, 200, 200)
+            color = theme_icon(light)
             icon = change_color(TBT_CLOSE, color)
             self.btn_close.setIcon(QIcon(icon.pixmap(24, 24)))
 
